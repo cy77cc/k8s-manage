@@ -17,7 +17,7 @@ log:
   format: json           # json | text
   output: file           # stdout | file
   file:
-    path: /var/log/gin/app.log
+    path: log/app.log
     max_size: 100        # MB
     max_backups: 10
     max_age: 7           # days

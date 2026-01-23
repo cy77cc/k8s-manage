@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/cy77cc/k8s-manage/internal/config"
@@ -13,10 +14,11 @@ type zapLogger struct {
 	l *zap.Logger
 }
 
-func NewZapLogger() Logger {
+func MustNewZapLogger() Logger {
 	level := zap.NewAtomicLevel()
 	levelStr := strings.ToLower(config.CFG.Log.Level)
 	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
+		log.Fatal(err)
 		return nil
 	}
 
@@ -25,20 +27,22 @@ func NewZapLogger() Logger {
 		Development: config.CFG.App.Debug,
 		Encoding:    config.CFG.Log.Format, // 生产推荐 json
 		EncoderConfig: zapcore.EncoderConfig{
-			TimeKey:     "ts",
-			LevelKey:    "level",
-			MessageKey:  "msg",
-			CallerKey:   "caller",
-			EncodeTime:  zapcore.ISO8601TimeEncoder,
-			EncodeLevel: zapcore.LowercaseLevelEncoder,
+			TimeKey:      "ts",
+			LevelKey:     "level",
+			MessageKey:   "msg",
+			CallerKey:    "caller",
+			EncodeTime:   zapcore.ISO8601TimeEncoder,
+			EncodeLevel:  zapcore.LowercaseLevelEncoder,
+			EncodeCaller: zapcore.ShortCallerEncoder,
 		},
 		OutputPaths:      []string{"stdout", config.CFG.Log.File.Path},
 		ErrorOutputPaths: []string{"stderr", config.CFG.Log.File.Path},
-		
 	}
 
-	logger, err := cfg.Build()
+	// AddCallerSkip(1) 跳过一层调用栈，使日志显示的调用者为业务代码而非封装层
+	logger, err := cfg.Build(zap.AddCallerSkip(1))
 	if err != nil {
+		log.Fatal(err)
 		return nil
 	}
 
@@ -58,25 +62,23 @@ func (z *zapLogger) Error(msg string, fields ...Field) {
 }
 
 func (z *zapLogger) Errorf(format string, a []any, fields ...Field) {
-	z.l.Info(fmt.Sprintf(format, a...), toZapFields(fields)...)
+	z.l.Error(fmt.Sprintf(format, a...), toZapFields(fields)...)
 }
 
-// Debug / Warn 同理
-
 func (z *zapLogger) Debug(msg string, fields ...Field) {
-	z.l.Error(msg, toZapFields(fields)...)
+	z.l.Debug(msg, toZapFields(fields)...)
 }
 
 func (z *zapLogger) Debugf(format string, a []any, fields ...Field) {
-	z.l.Info(fmt.Sprintf(format, a...), toZapFields(fields)...)
+	z.l.Debug(fmt.Sprintf(format, a...), toZapFields(fields)...)
 }
 
 func (z *zapLogger) Warn(msg string, fields ...Field) {
-	z.l.Error(msg, toZapFields(fields)...)
+	z.l.Warn(msg, toZapFields(fields)...)
 }
 
 func (z *zapLogger) Warnf(format string, a []any, fields ...Field) {
-	z.l.Info(fmt.Sprintf(format, a...), toZapFields(fields)...)
+	z.l.Warn(fmt.Sprintf(format, a...), toZapFields(fields)...)
 }
 
 func (z *zapLogger) With(fields ...Field) Logger {
