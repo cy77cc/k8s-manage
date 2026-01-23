@@ -3,24 +3,22 @@ package service
 import (
 	"net/http"
 
+	_ "github.com/cy77cc/k8s-manage/docs"
 	"github.com/cy77cc/k8s-manage/internal/logger"
 	"github.com/cy77cc/k8s-manage/internal/middleware"
+	"github.com/cy77cc/k8s-manage/internal/service/users"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	gs "github.com/swaggo/gin-swagger"
 )
 
-func Init(r *gin.Engine, svcCtx *svc.ServiceContext) {
+func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	r.Use(logger.GinLogger(), middleware.Cors())
-	r.GET("/", func(c *gin.Context) {
+	r.GET("/swagger/*any", gs.WrapHandler(swaggerFiles.Handler))
+	r.GET("/api/health", func (c *gin.Context)  {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-
-	r.GET("favicon.ico", func(c *gin.Context) {
-		c.Data(
-			http.StatusOK,
-			"image/x-icon",
-			[]byte("xxxx"),
-		)
-	})
-
+	v1 := r.Group("/api/v1")
+	users.RegisterHandlers(v1, serverCtx)
 }

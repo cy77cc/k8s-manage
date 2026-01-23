@@ -1,6 +1,9 @@
 package utils
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 func SlicesToString[T any](s []T, sep string) string {
 	res := ""
@@ -12,4 +15,8 @@ func SlicesToString[T any](s []T, sep string) string {
 		}
 	}
 	return res
+}
+
+func GetTimestamp() int64 {
+	return time.Now().Unix()
 }
