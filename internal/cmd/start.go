@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"github.com/cy77cc/k8s-manage/internal/config"
+	"github.com/cy77cc/k8s-manage/internal/logger"
 	"github.com/cy77cc/k8s-manage/internal/server"
 	"github.com/cy77cc/k8s-manage/version"
 	"github.com/spf13/cobra"
@@ -14,6 +15,7 @@ var (
 		Version: version.VERSION,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config.Init()
+			logger.Init(logger.NewZapLogger(config.CFG.Log.Level))
 			return server.Start()
 		},
 	}

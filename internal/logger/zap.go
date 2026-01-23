@@ -2,16 +2,45 @@ package logger
 
 import (
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type zapLogger struct {
 	l *zap.Logger
 }
 
-func NewZapLogger(l *zap.Logger) Logger {
-	return &zapLogger{l: l}
+func NewZapLogger(levelStr string) Logger {
+	level := zap.NewAtomicLevel()
+	levelStr = strings.ToLower(levelStr)
+	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
+		return nil
+	}
+
+	cfg := zap.Config{
+		Level:       level,
+		Development: true,
+		Encoding:    "json", // 生产推荐 json
+		EncoderConfig: zapcore.EncoderConfig{
+			TimeKey:     "ts",
+			LevelKey:    "level",
+			MessageKey:  "msg",
+			CallerKey:   "caller",
+			EncodeTime:  zapcore.ISO8601TimeEncoder,
+			EncodeLevel: zapcore.LowercaseLevelEncoder,
+		},
+		OutputPaths:      []string{"stdout"},
+		ErrorOutputPaths: []string{"stderr"},
+	}
+
+	logger, err := cfg.Build()
+	if err != nil {
+		return nil
+	}
+
+	return &zapLogger{l: logger}
 }
 
 func (z *zapLogger) Info(msg string, fields ...Field) {
