@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -12,17 +13,17 @@ type zapLogger struct {
 	l *zap.Logger
 }
 
-func NewZapLogger(levelStr string) Logger {
+func NewZapLogger() Logger {
 	level := zap.NewAtomicLevel()
-	levelStr = strings.ToLower(levelStr)
+	levelStr := strings.ToLower(config.CFG.Log.Level)
 	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
 		return nil
 	}
 
 	cfg := zap.Config{
 		Level:       level,
-		Development: true,
-		Encoding:    "json", // 生产推荐 json
+		Development: config.CFG.App.Debug,
+		Encoding:    config.CFG.Log.Format, // 生产推荐 json
 		EncoderConfig: zapcore.EncoderConfig{
 			TimeKey:     "ts",
 			LevelKey:    "level",
@@ -31,8 +32,9 @@ func NewZapLogger(levelStr string) Logger {
 			EncodeTime:  zapcore.ISO8601TimeEncoder,
 			EncodeLevel: zapcore.LowercaseLevelEncoder,
 		},
-		OutputPaths:      []string{"stdout"},
-		ErrorOutputPaths: []string{"stderr"},
+		OutputPaths:      []string{"stdout", config.CFG.Log.File.Path},
+		ErrorOutputPaths: []string{"stderr", config.CFG.Log.File.Path},
+		
 	}
 
 	logger, err := cfg.Build()

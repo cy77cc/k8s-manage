@@ -15,7 +15,7 @@ var (
 		Version: version.VERSION,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config.Init()
-			logger.Init(logger.NewZapLogger(config.CFG.Log.Level))
+			logger.Init(logger.NewZapLogger())
 			return server.Start()
 		},
 	}

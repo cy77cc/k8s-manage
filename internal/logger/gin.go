@@ -17,6 +17,10 @@ func GinLogger() gin.HandlerFunc {
 
 		c.Next()
 
+		l := L()
+
+		l.Info("xxxx")
+
 		L().Info(
 			"http request",
 			String("method", c.Request.Method),

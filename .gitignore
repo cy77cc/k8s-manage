@@ -29,6 +29,8 @@ go.work.sum
 
 bin/
 
+__debug__*
+
 # Editor/IDE
 # .idea/
 # .vscode/
