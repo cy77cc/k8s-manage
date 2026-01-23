@@ -11,6 +11,7 @@ server:
   write_timeout: 15s
   idle_timeout: 60s
   max_header_bytes: 1MB
+  salt: ${SERVER_SALT}
 
 log:
   level: info            # debug | info | warn | error
@@ -25,11 +26,11 @@ log:
 
 mysql:
   enable: true
-  host: 127.0.0.1
-  port: 3306
-  user: gin_user
-  password: strong_password
-  database: gin_db
+  host: ${MYSQL_HOST}
+  port: ${MYSQL_PORT}
+  user: ${MYSQL_USERNAME}
+  password: ${MYSQL_PASSWORD}
+  database: devops
   charset: utf8mb4
   parse_time: true
   loc: Local
@@ -37,10 +38,30 @@ mysql:
   max_idle_conns: 20
   conn_max_lifetime: 1h
 
+postgres:
+  enable: false
+  host: 127.0.0.1
+  port: 5432
+  user: gin_user
+  password: strong_password
+  database: gin_db
+  ssl_mode: disable
+  max_open_conns: 50
+  max_idle_conns: 20
+  conn_max_lifetime: 1h
+
+sqlite:
+  enable: false
+  file: data.db
+  max_open_conns: 1
+  max_idle_conns: 1
+  conn_max_lifetime: 1h
+
+
 redis:
   enable: true
-  addr: 127.0.0.1:6379
-  password: ""
+  addr: ${REDIS_HOST}:${REDIS_PORT}
+  password: ${REDIS_PASSWORD}
   db: 0
   pool_size: 50
   min_idle_conns: 10
@@ -49,15 +70,15 @@ redis:
   write_timeout: 3s
 
 jwt:
-  secret: "REPLACE_ME_IN_PROD"
-  issuer: gin-prod
+  secret: ${SERVER_SECRET}
+  issuer: cy77cc
   expire: 24h
   refresh_expire: 168h
 
 cors:
   enable: true
   allow_origins:
-    - https://example.com
+    - "*"
   allow_methods:
     - GET
     - POST
