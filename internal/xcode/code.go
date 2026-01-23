@@ -1,5 +1,13 @@
 package xcode
 
+import (
+	"fmt"
+	"net/http"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
 type Xcode uint32
 
 // Success codes (1000~1999)
@@ -218,13 +226,4 @@ func CodeFromGrpcError(err error) Xcode {
 		return Xcode(s.Code())
 	}
 	return ServerError
-}
-
-func Interceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	resp, err := handler(ctx, req)
-	if err != nil {
-		logx.Errorf("GRPC Error: %v", err)
-		return nil, ToGrpcError(err)
-	}
-	return resp, nil
 }
