@@ -2,6 +2,7 @@ package response
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/cy77cc/k8s-manage/internal/utils"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
@@ -11,12 +12,21 @@ import (
 type Resp struct {
 	Code      xcode.Xcode `json:"code"`
 	Msg       string      `json:"msg"`
-	Data      interface{} `json:"data,omitempty"`
+	Data      any         `json:"data,omitempty"`
 	Timestamp int64       `json:"timestamp"`
 }
 
+func NewResp(code xcode.Xcode, msg string, data any) *Resp {
+	return &Resp{
+		Code:      code,
+		Msg:       msg,
+		Data:      data,
+		Timestamp: time.Now().Unix(),
+	}
+}
+
 // Error returns an error response
-func Error(code xcode.Xcode, msg string) *Resp {
+func errorResp(code xcode.Xcode, msg string) *Resp {
 	return &Resp{
 		Code:      code,
 		Msg:       msg,
@@ -26,7 +36,7 @@ func Error(code xcode.Xcode, msg string) *Resp {
 }
 
 // Success returns a success response
-func Success(data interface{}) *Resp {
+func success(data interface{}) *Resp {
 	return &Resp{
 		Code:      xcode.Success,
 		Msg:       xcode.Success.Msg(),
@@ -58,8 +68,8 @@ func Response(c *gin.Context, resp interface{}, err error) {
 		// For now, I will return 200 OK with the JSON body containing the error code.
 		// This is consistent with many microservice frontends.
 
-		c.JSON(http.StatusOK, Error(codeErr.Code, codeErr.Msg))
+		c.JSON(http.StatusOK, errorResp(codeErr.Code, codeErr.Msg))
 	} else {
-		c.JSON(http.StatusOK, Success(resp))
+		c.JSON(http.StatusOK, success(resp))
 	}
 }

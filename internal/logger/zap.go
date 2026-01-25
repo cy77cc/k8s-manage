@@ -3,6 +3,7 @@ package logger
 import (
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/cy77cc/k8s-manage/internal/config"
@@ -15,6 +16,11 @@ type zapLogger struct {
 }
 
 func MustNewZapLogger() Logger {
+
+	if config.CFG.Log.File.Path != "" {
+		os.Mkdir("log", 0644)
+	}
+
 	level := zap.NewAtomicLevel()
 	levelStr := strings.ToLower(config.CFG.Log.Level)
 	if err := level.UnmarshalText([]byte(levelStr)); err != nil {

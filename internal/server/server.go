@@ -10,7 +10,7 @@ import (
 )
 
 func Start() error {
-	svcCtx := svc.NewServiceContext()
+	svcCtx := svc.MustNewServiceContext()
 	r := gin.Default()
 	service.Init(r, svcCtx)
 	return r.Run(fmt.Sprintf("%s:%d", config.CFG.Server.Host, config.CFG.Server.Port))
