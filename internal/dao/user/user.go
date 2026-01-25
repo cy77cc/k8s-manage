@@ -26,7 +26,7 @@ func (d *UserDAO) Delete(ctx context.Context, id int64) error {
 	return d.db.WithContext(ctx).Delete(&model.User{}, id).Error
 }
 
-func (d *UserDAO) GetByID(ctx context.Context, id int64) (*model.User, error) {
+func (d *UserDAO) FindOneById(ctx context.Context, id int64) (*model.User, error) {
 	var user model.User
 	err := d.db.WithContext(ctx).First(&user, id).Error
 	if err != nil {
@@ -35,7 +35,7 @@ func (d *UserDAO) GetByID(ctx context.Context, id int64) (*model.User, error) {
 	return &user, nil
 }
 
-func (d *UserDAO) GetByUsername(ctx context.Context, username string) (*model.User, error) {
+func (d *UserDAO) FindOneByUsername(ctx context.Context, username string) (*model.User, error) {
 	var user model.User
 	err := d.db.WithContext(ctx).Where("username = ?", username).First(&user).Error
 	if err != nil {

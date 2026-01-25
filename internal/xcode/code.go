@@ -48,7 +48,8 @@ const (
 	TokenExpired           Xcode = 4005 // Token Expired
 	TokenInvalid           Xcode = 4006 // Token Invalid
 	PermissionDenied       Xcode = 4007 // Permission Denied
-	PermissionAlreadyExist Xcode = 4008
+	PermissionAlreadyExist Xcode = 4008 // Permission Already Exists
+	LoginFailed            Xcode = 4009 // Login Failed
 )
 
 // Msg returns the message corresponding to the Xcode

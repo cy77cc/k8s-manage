@@ -17,7 +17,7 @@ type User struct {
 }
 
 func (User) TableName() string {
-	return "users"
+	return "user"
 }
 
 type UserRole struct {
@@ -88,4 +88,3 @@ type AuthRefreshToken struct {
 func (AuthRefreshToken) TableName() string {
 	return "auth_refresh_tokens"
 }
-
