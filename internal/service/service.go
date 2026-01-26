@@ -14,7 +14,7 @@ import (
 
 func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	r.Use(middleware.ContextMiddleware(), middleware.Logger(), middleware.Cors())
-	r.GET("/swagger/*any", gs.WrapHandler(swaggerFiles.Handler))
+	r.Any("/swagger/*any", gs.WrapHandler(swaggerFiles.Handler))
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
