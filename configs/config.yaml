@@ -60,7 +60,7 @@ sqlite:
 
 redis:
   enable: true
-  addr: ${REDIS_HOST}:${REDIS_PORT}
+  addr: ${REDIS_ADDR}
   password: ${REDIS_PASSWORD}
   db: 0
   pool_size: 50
