@@ -22,3 +22,60 @@
 |resource	| 静态资源| 	静态资源文件。这些文件往往可以通过资源打包/镜像编译的形式注入到发布文件中。|
 |go.mod	| 依赖管理	| 使用 Go Module 包管理的依赖描述文件。|
 |main.go|	入口文件|	程序入口文件。|
+
+## Go 驱动的 Paas 平台功能规划图
+
+### 1. 核心资源编排 (The Infrastructure)
+这是平台的“引擎”，负责与底层基础设施（通常是 K8s）交互。
+多租户隔离 (Multi-tenancy): 基于 Namespace 的资源物理隔离及基于 RBAC 的逻辑隔离。
+计算资源管理: 支持容器（Pod）的规格定义（CPU/Memory Limit）、扩缩容策略（HPA/VPA）。
+存储与网络: 自动化配置 Ingress/Gateway、动态关联 PV/PVC 存储卷。
+自定义资源 (CRD): 使用 Go 编写 Operator，将复杂的中间件（Redis, MySQL）抽象为 Paas 资源。
+
+### 2. 应用生命周期管理 (ALM)
+这是用户感知最明显的部分，即“应用是如何跑起来的”。
+代码到镜像 (Build Service): 集成 Cloud Native Buildpacks 或 Dockerfile 自动构建，支持代码仓库 Webhook。
+部署流水线 (CI/CD): 支持灰度发布（Canary）、蓝绿部署（Blue-Green）。
+环境管理: 一键克隆“开发、测试、生产”多套环境。
+配置中心: 类似 Apollo 或 ConfigMap 的管理，支持热更新及敏感信息（Secret）加密。
+
+### 3. 开发者体验 (Developer Experience)
+一个好的 Paas 平台必须让开发人员“用得爽”。
+服务目录 (Service Catalog): 预置常用的中间件（DB, Message Queue）模板，点击即部署。
+日志与链路追踪: 统一收集 stdout 日志，集成 OpenTelemetry 进行链路追踪（Tracing）。
+Web 终端: 允许开发者直接通过浏览器进入容器控制台（使用 Gorilla WebSocket 实现）。
+API 网关/服务网格: 自动注入 Sidecar（如 Istio），实现服务间流量加密和负载均衡。
+
+### 4. 运营与治理 (Governance)
+计量计费 (Metering): 统计各租户的资源消耗情况，生成账单。
+监控告警: 集成 Prometheus 抓取指标，支持邮件、钉钉、Slack 告警推送。
+配额管理 (Quota): 限制单个项目或团队的最大 CPU/内存使用量。
+
+## PaaS 平台功能模块架构规划
+
+### 1. 资源编排模块 (Resource Orchestration)
+这是平台的“大脑”，负责管理底层的计算资源。
+集群管理：支持多 K8s 集群接入，监控节点（Node）健康状态。
+多租户隔离：通过 K8s Namespace 实现物理隔离，通过 RBAC 维护不同团队的权限。
+配额管理 (Resource Quota)：限制每个项目能使用的 CPU、内存和磁盘配额。
+
+### 2. 应用交付模块 (Application Delivery / CD)
+解决“代码如何变成运行中的服务”的问题。
+应用定义：支持通过 Web 界面配置环境变量、端口映射、启动脚本。
+发布策略：集成蓝绿发布、滚动更新（Rolling Update）和金丝雀发布（Canary）。
+弹性伸缩 (Auto-scaling)：根据 CPU 利用率或自定义指标自动增减 Pod 数量（HPA）。
+
+### 3. 构建与镜像模块 (CI/Image Management)
+自动化构建：集成 Git Webhook，代码提交后触发 Docker 镜像构建。
+内置镜像仓库：私有镜像托管（可集成 Harbor 接口）。
+制品管理：记录每次构建的版本、作者、Commit ID，支持一键回滚。
+
+### 4. 运维治理模块 (Observability & Ops)
+日志中心：集成 EFK (Elasticsearch + Fluentd + Kibana) 或 Loki，实现在线查看实时日志。
+监控告警：基于 Prometheus 和 Grafana，提供 CPU/内存/网络 IO 的可视化看板。
+Web Shell：通过 WebSocket 实现浏览器终端，直接进入容器排查问题。
+
+### 5. 开发者门户 (Developer Portal)
+服务目录 (Marketplace)：预置 MySQL、Redis、Kafka 等中间件，用户一键申请。
+域名/网关管理：自动配置 Ingress，管理 SSL 证书。
+API 开放平台：允许外部系统通过 API 调用平台功能。
