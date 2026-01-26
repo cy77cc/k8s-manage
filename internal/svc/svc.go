@@ -14,21 +14,8 @@ type ServiceContext struct {
 }
 
 func MustNewServiceContext() *ServiceContext {
-	// configK8s, err := rest.InClusterConfig()
-	// if err != nil {
-	// 	log.Fatal("init clientset err", err)
-	// }
-
-	// var clientset *kubernetes.Clientset
-	// if configK8s != nil {
-	// 	clientset, err = kubernetes.NewForConfig(configK8s)
-	// 	if err != nil {
-	// 		log.Fatal(err.Error())
-	// 	}
-	// }
 
 	return &ServiceContext{
-		// Clientset: clientset,
 		DB:    storage.MustNewDB(),
 		Redis: storage.MustNewRedisClient(),
 	}
