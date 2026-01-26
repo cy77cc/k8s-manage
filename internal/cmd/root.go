@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/cy77cc/k8s-manage/internal/config"
@@ -17,6 +18,7 @@ var (
 		Version: version.VERSION,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config.MustNewConfig()
+			fmt.Println(config.CFG)
 			logger.Init(logger.MustNewZapLogger())
 			return server.Start()
 		},

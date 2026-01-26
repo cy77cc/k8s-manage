@@ -8,14 +8,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 登录
-func (u *userHandler) Login(c *gin.Context) {
+// Login 登录
+// @Summary 用户登录
+// @Description 用户登录接口
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param req body v1.LoginReq true "登录请求参数"
+// @Success 200 {object} response.Resp "登录成功"
+// @Router /auth/login [post]
+func (u *UserHandler) Login(c *gin.Context) {
 	var req v1.LoginReq
 	err := c.ShouldBind(&req)
 	if err != nil {
 		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
 	}
-	resp, err := userLogic.NewuserLogic(u.svcCtx, u.ctx).Login(req)
+	resp, err := userLogic.NewUserLogic(u.svcCtx).Login(c.Request.Context(), req)
 	if err != nil {
 		response.Response(c, nil, xcode.FromError(err))
 		return
@@ -23,15 +31,23 @@ func (u *userHandler) Login(c *gin.Context) {
 	response.Response(c, resp, nil)
 }
 
-// 注册
-func (u *userHandler) Register(c *gin.Context) {
+// Register 注册
+// @Summary 用户注册
+// @Description 用户注册接口
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param req body v1.UserCreateReq true "注册请求参数"
+// @Success 200 {object} response.Resp "注册成功"
+// @Router /auth/register [post]
+func (u *UserHandler) Register(c *gin.Context) {
 	var req v1.UserCreateReq
 	err := c.ShouldBind(&req)
 	if err != nil {
 		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
 		return
 	}
-	resp, err := userLogic.NewuserLogic(u.svcCtx, u.ctx).Register(req)
+	resp, err := userLogic.NewUserLogic(u.svcCtx).Register(c.Request.Context(), req)
 	if err != nil {
 		response.Response(c, nil, xcode.FromError(err))
 		return
@@ -39,12 +55,50 @@ func (u *userHandler) Register(c *gin.Context) {
 	response.Response(c, resp, nil)
 }
 
-// 刷新token
-func (u *userHandler) Refresh(c *gin.Context) {
-
+// Refresh 刷新token
+// @Summary 刷新Token
+// @Description 刷新Token接口
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param req body v1.RefreshReq true "刷新Token请求参数"
+// @Success 200 {object} response.Resp "刷新成功"
+// @Router /auth/refresh [post]
+func (u *UserHandler) Refresh(c *gin.Context) {
+	var req v1.RefreshReq
+	err := c.ShouldBind(&req)
+	if err != nil {
+		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
+		return
+	}
+	resp, err := userLogic.NewUserLogic(u.svcCtx).Refresh(c.Request.Context(), req)
+	if err != nil {
+		response.Response(c, nil, xcode.FromError(err))
+		return
+	}
+	response.Response(c, resp, nil)
 }
 
-// 登出
-func (u *userHandler) Logout(c *gin.Context) {
-
+// Logout 登出
+// @Summary 用户登出
+// @Description 用户登出接口
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param req body v1.LogoutReq true "登出请求参数"
+// @Success 200 {object} response.Resp "登出成功"
+// @Router /auth/logout [post]
+func (u *UserHandler) Logout(c *gin.Context) {
+	var req v1.LogoutReq
+	err := c.ShouldBind(&req)
+	if err != nil {
+		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
+		return
+	}
+	err = userLogic.NewUserLogic(u.svcCtx).Logout(c.Request.Context(), req)
+	if err != nil {
+		response.Response(c, nil, xcode.FromError(err))
+		return
+	}
+	response.Response(c, nil, nil)
 }

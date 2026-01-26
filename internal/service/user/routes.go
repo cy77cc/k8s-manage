@@ -10,7 +10,7 @@ import (
 func RegisterHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
 	authGroup := r.Group("auth")
 
-	userHandler := userHandler.NewuserHandler(serverCtx)
+	userHandler := userHandler.NewUserHandler(serverCtx)
 
 	{
 		authGroup.POST("login", userHandler.Login)

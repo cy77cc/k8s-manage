@@ -1,13 +1,10 @@
 package svc
 
 import (
-	"log"
-
 	"github.com/cy77cc/k8s-manage/storage"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 type ServiceContext struct {
@@ -17,22 +14,22 @@ type ServiceContext struct {
 }
 
 func MustNewServiceContext() *ServiceContext {
-	configK8s, err := rest.InClusterConfig()
-	if err != nil {
-		log.Fatal("init clientset err", err)
-	}
+	// configK8s, err := rest.InClusterConfig()
+	// if err != nil {
+	// 	log.Fatal("init clientset err", err)
+	// }
 
-	var clientset *kubernetes.Clientset
-	if configK8s != nil {
-		clientset, err = kubernetes.NewForConfig(configK8s)
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-	}
+	// var clientset *kubernetes.Clientset
+	// if configK8s != nil {
+	// 	clientset, err = kubernetes.NewForConfig(configK8s)
+	// 	if err != nil {
+	// 		log.Fatal(err.Error())
+	// 	}
+	// }
 
 	return &ServiceContext{
-		Clientset: clientset,
-		DB:        storage.MustNewDB(),
-		Redis:     storage.MustNewRedisClient(),
+		// Clientset: clientset,
+		DB:    storage.MustNewDB(),
+		Redis: storage.MustNewRedisClient(),
 	}
 }

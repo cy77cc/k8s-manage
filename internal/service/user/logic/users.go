@@ -1,18 +1,18 @@
 package logic
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/context"
+	dao "github.com/cy77cc/k8s-manage/internal/dao/user"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 )
 
-type userLogic struct {
-	svcCtx *svc.ServiceContext
-	ctx    *context.Context
+type UserLogic struct {
+	svcCtx  *svc.ServiceContext
+	userDAO *dao.UserDAO
 }
 
-func NewuserLogic(svcCtx *svc.ServiceContext, ctx *context.Context) *userLogic {
-	return &userLogic{
-		svcCtx: svcCtx,
-		ctx:    ctx,
+func NewUserLogic(svcCtx *svc.ServiceContext) *UserLogic {
+	return &UserLogic{
+		svcCtx:  svcCtx,
+		userDAO: dao.NewUserDAO(svcCtx.DB),
 	}
 }

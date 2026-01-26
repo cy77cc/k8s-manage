@@ -28,7 +28,7 @@ mysql:
   enable: true
   host: ${MYSQL_HOST}
   port: ${MYSQL_PORT}
-  user: ${MYSQL_USERNAME}
+  user: ${MYSQL_USER}
   password: ${MYSQL_PASSWORD}
   database: devops
   charset: utf8mb4
