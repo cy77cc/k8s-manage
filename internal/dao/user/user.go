@@ -66,6 +66,7 @@ func (d *UserDAO) FindOneByUsername(ctx context.Context, username string) (*mode
 	buf, err := d.rdb.Get(ctx, key).Bytes()
 	if err == nil {
 		if err := json.Unmarshal(buf, &user); err == nil {
+			// 不处理error，可以容忍失败
 			utils.ExtendTTL(ctx, d.rdb, key)
 			return &user, nil
 		}
