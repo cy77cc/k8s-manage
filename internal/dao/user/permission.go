@@ -10,13 +10,13 @@ import (
 )
 
 type PermissionDAO struct {
-	db       *gorm.DB
-	cache    *expirable.LRU[string, any]
-	redisCli redis.UniversalClient
+	db    *gorm.DB
+	cache *expirable.LRU[string, any]
+	rdb   redis.UniversalClient
 }
 
-func NewPermissionDAO(db *gorm.DB, cache *expirable.LRU[string, any], redisCli redis.UniversalClient) *PermissionDAO {
-	return &PermissionDAO{db: db, cache: cache, redisCli: redisCli}
+func NewPermissionDAO(db *gorm.DB, cache *expirable.LRU[string, any], rdb redis.UniversalClient) *PermissionDAO {
+	return &PermissionDAO{db: db, cache: cache, rdb: rdb}
 }
 
 func (d *PermissionDAO) Create(ctx context.Context, permission *model.Permission) error {

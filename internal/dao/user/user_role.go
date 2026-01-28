@@ -10,13 +10,13 @@ import (
 )
 
 type UserRoleDAO struct {
-	db       *gorm.DB
-	cache    *expirable.LRU[string, any]
-	redisCli redis.UniversalClient
+	db    *gorm.DB
+	cache *expirable.LRU[string, any]
+	rdb   redis.UniversalClient
 }
 
-func NewUserRoleDAO(db *gorm.DB, cache *expirable.LRU[string, any], redisCli redis.UniversalClient) *UserRoleDAO {
-	return &UserRoleDAO{db: db, cache: cache, redisCli: redisCli}
+func NewUserRoleDAO(db *gorm.DB, cache *expirable.LRU[string, any], rdb redis.UniversalClient) *UserRoleDAO {
+	return &UserRoleDAO{db: db, cache: cache, rdb: rdb}
 }
 
 func (d *UserRoleDAO) Create(ctx context.Context, userRole *model.UserRole) error {

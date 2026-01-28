@@ -10,13 +10,13 @@ import (
 )
 
 type AuthRefreshTokenDAO struct {
-	db       *gorm.DB
-	cache    *expirable.LRU[string, any]
-	redisCli redis.UniversalClient
+	db    *gorm.DB
+	cache *expirable.LRU[string, any]
+	rdb   redis.UniversalClient
 }
 
-func NewAuthRefreshTokenDAO(db *gorm.DB, cache *expirable.LRU[string, any], redisCli redis.UniversalClient) *AuthRefreshTokenDAO {
-	return &AuthRefreshTokenDAO{db: db, cache: cache, redisCli: redisCli}
+func NewAuthRefreshTokenDAO(db *gorm.DB, cache *expirable.LRU[string, any], rdb redis.UniversalClient) *AuthRefreshTokenDAO {
+	return &AuthRefreshTokenDAO{db: db, cache: cache, rdb: rdb}
 }
 
 func (d *AuthRefreshTokenDAO) Create(ctx context.Context, token *model.AuthRefreshToken) error {

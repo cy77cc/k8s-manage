@@ -13,7 +13,7 @@ import (
 type ServiceContext struct {
 	Clientset *kubernetes.Clientset
 	DB        *gorm.DB
-	Redis     redis.UniversalClient
+	Rdb     redis.UniversalClient
 	Cache     *expirable.LRU[string, any]
 }
 
@@ -21,7 +21,7 @@ func MustNewServiceContext() *ServiceContext {
 
 	return &ServiceContext{
 		DB:    storage.MustNewDB(),
-		Redis: storage.MustNewRedisClient(),
+		Rdb: storage.MustNewRdb(),
 		Cache: expirable.NewLRU[string, any](5_000, nil, 24*time.Hour),
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func MustNewRedisClient() redis.UniversalClient {
+func MustNewRdb() redis.UniversalClient {
 	if !config.CFG.Redis.Enable {
 		return nil
 	}
