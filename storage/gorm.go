@@ -14,6 +14,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// TODO 这里还有可以优化的点，可以支持读写分离的模式
+
 func MustNewDB() *gorm.DB {
 	var dialector gorm.Dialector
 	var maxOpenConns, maxIdleConns int
@@ -64,6 +66,7 @@ func MustNewDB() *gorm.DB {
 	}
 
 	sqlDB, err := db.DB()
+
 	if err != nil {
 		log.Fatalf("failed to get sql db: %v", err)
 	}

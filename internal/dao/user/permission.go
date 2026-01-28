@@ -1,17 +1,22 @@
-package dao
+package user
 
 import (
 	"context"
+
 	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/k8s-manage/storage"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type PermissionDAO struct {
-	db *gorm.DB
+	db       *gorm.DB
+	cache    *storage.Cache[string, any]
+	redisCli redis.UniversalClient
 }
 
-func NewPermissionDAO(db *gorm.DB) *PermissionDAO {
-	return &PermissionDAO{db: db}
+func NewPermissionDAO(db *gorm.DB, cache *storage.Cache[string, any], redisCli redis.UniversalClient) *PermissionDAO {
+	return &PermissionDAO{db: db, cache: cache, redisCli: redisCli}
 }
 
 func (d *PermissionDAO) Create(ctx context.Context, permission *model.Permission) error {

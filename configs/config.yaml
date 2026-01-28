@@ -26,6 +26,7 @@ log:
 
 mysql:
   enable: true
+  instance:
   host: ${MYSQL_HOST}
   port: ${MYSQL_PORT}
   user: ${MYSQL_USER}
@@ -37,6 +38,7 @@ mysql:
   max_open_conns: 50
   max_idle_conns: 20
   conn_max_lifetime: 1h
+  
 
 postgres:
   enable: false

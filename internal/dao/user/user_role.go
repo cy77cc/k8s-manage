@@ -1,17 +1,22 @@
-package dao
+package user
 
 import (
 	"context"
+
 	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/k8s-manage/storage"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type UserRoleDAO struct {
-	db *gorm.DB
+	db       *gorm.DB
+	cache    *storage.Cache[string, any]
+	redisCli redis.UniversalClient
 }
 
-func NewUserRoleDAO(db *gorm.DB) *UserRoleDAO {
-	return &UserRoleDAO{db: db}
+func NewUserRoleDAO(db *gorm.DB, cache *storage.Cache[string, any], redisCli redis.UniversalClient) *UserRoleDAO {
+	return &UserRoleDAO{db: db, cache: cache, redisCli: redisCli}
 }
 
 func (d *UserRoleDAO) Create(ctx context.Context, userRole *model.UserRole) error {

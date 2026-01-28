@@ -71,9 +71,15 @@ func (l *UserLogic) Register(ctx context.Context, req v1.UserCreateReq) (v1.Toke
 
 	// 2. Create User
 	// In production, use bcrypt.GenerateFromPassword
+
+	encryptPwd, err := utils.EncryptPassword(req.Password)
+	if err != nil {
+		return v1.TokenResp{}, err
+	}
+
 	newUser := &model.User{
 		Username:     req.Username,
-		PasswordHash: req.Password, // Plaintext for demo, should be hashed
+		PasswordHash: encryptPwd, // Plaintext for demo, should be hashed
 		Email:        req.Email,
 		CreateTime:   time.Now().Unix(),
 		UpdateTime:   time.Now().Unix(),
@@ -135,5 +141,7 @@ func (l *UserLogic) Refresh(ctx context.Context, req v1.RefreshReq) (v1.TokenRes
 func (l *UserLogic) Logout(ctx context.Context, req v1.LogoutReq) error {
 	// In a stateless JWT system, logout usually means blacklisting the token.
 	// For now, we just return success as we haven't implemented blacklist.
+	// 退出登录后使用黑名单机制
+	
 	return nil
 }

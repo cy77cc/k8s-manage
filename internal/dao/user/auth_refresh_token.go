@@ -1,17 +1,22 @@
-package dao
+package user
 
 import (
 	"context"
+
 	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/k8s-manage/storage"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type AuthRefreshTokenDAO struct {
 	db *gorm.DB
+	cache *storage.Cache[string, any]
+	redisCli redis.UniversalClient
 }
 
-func NewAuthRefreshTokenDAO(db *gorm.DB) *AuthRefreshTokenDAO {
-	return &AuthRefreshTokenDAO{db: db}
+func NewAuthRefreshTokenDAO(db *gorm.DB, cache *storage.Cache[string, any], redisCli redis.UniversalClient) *AuthRefreshTokenDAO {
+	return &AuthRefreshTokenDAO{db: db, cache: cache, redisCli: redisCli}
 }
 
 func (d *AuthRefreshTokenDAO) Create(ctx context.Context, token *model.AuthRefreshToken) error {
