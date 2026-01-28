@@ -4,18 +4,18 @@ import (
 	"context"
 
 	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/storage"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type UserDAO struct {
 	db       *gorm.DB
-	cache    *storage.Cache[string, any]
+	cache    *expirable.LRU[string, any]
 	redisCli redis.UniversalClient
 }
 
-func NewUserDAO(db *gorm.DB, cache *storage.Cache[string, any], redisCli redis.UniversalClient) *UserDAO {
+func NewUserDAO(db *gorm.DB, cache *expirable.LRU[string, any], redisCli redis.UniversalClient) *UserDAO {
 	return &UserDAO{db: db, cache: cache, redisCli: redisCli}
 }
 

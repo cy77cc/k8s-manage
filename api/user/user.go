@@ -33,6 +33,8 @@ type Auth interface {
 	Refresh(v1.RefreshReq) (v1.TokenResp, error)
 	// 登出
 	Logout(v1.LogoutReq) error
+	// 生成验证码
+	GenerateCaptcha()
 }
 
 type Roles interface {
