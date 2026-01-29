@@ -90,6 +90,9 @@ func MustMigrate(db *gorm.DB) {
 		&model.Permission{},
 		&model.UserRole{},
 		&model.RolePermission{},
+		&model.Node{},
+		&model.NodeEvent{},
+		&model.SSHKey{},
 	)
 	if err != nil {
 		log.Fatal("数据库迁移失败，请重试！！！！！")

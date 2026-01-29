@@ -19,8 +19,8 @@ import (
 // @Router /auth/login [post]
 func (u *UserHandler) Login(c *gin.Context) {
 	var req v1.LoginReq
-	err := c.ShouldBind(&req)
-	if err != nil {
+
+	if err := c.ShouldBind(&req); err != nil {
 		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
 	}
 	resp, err := userLogic.NewUserLogic(u.svcCtx).Login(c.Request.Context(), req)
