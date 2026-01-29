@@ -42,6 +42,10 @@ func (l *UserLogic) Login(ctx context.Context, req v1.LoginReq) (v1.TokenResp, e
 		return v1.TokenResp{}, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
+	if err := l.whiteListDao.AddToWhitelist(ctx, refreshToken, time.Now().Add(config.CFG.JWT.RefreshExpire)); err != nil {
+		return v1.TokenResp{}, xcode.NewErrCode(xcode.CacheError)
+	}
+
 	// 4. Update last login time
 	user.LastLoginTime = time.Now().Unix()
 	if err := l.userDAO.Update(ctx, user); err != nil {
@@ -53,7 +57,7 @@ func (l *UserLogic) Login(ctx context.Context, req v1.LoginReq) (v1.TokenResp, e
 	return v1.TokenResp{
 		AccessToken:  token,
 		RefreshToken: refreshToken,
-		Expires:      time.Now().Add(time.Hour * 24).Unix(), // Should match config
+		Expires:      time.Now().Add(config.CFG.JWT.Expire).Unix(), // Should match config
 		Uid:          uint64(user.ID),
 		Roles:        []string{}, // TODO: Fetch roles
 	}, nil
@@ -99,6 +103,10 @@ func (l *UserLogic) Register(ctx context.Context, req v1.UserCreateReq) (v1.Toke
 	refreshToken, err := utils.GenToken(uint(newUser.ID), true)
 	if err != nil {
 		return v1.TokenResp{}, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	if err := l.whiteListDao.AddToWhitelist(ctx, refreshToken, time.Now().Add(config.CFG.JWT.RefreshExpire)); err != nil {
+		return v1.TokenResp{}, xcode.NewErrCode(xcode.CacheError)
 	}
 
 	return v1.TokenResp{
