@@ -25,6 +25,18 @@ func SlicesToString[T any](s []T, sep string) string {
 	return b.String()
 }
 
+func MapToString[K comparable, V any](m map[K]V, sep string) string {
+	if len(m) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for k, v := range m {
+		fmt.Fprintf(&b, "%v:%v%s", k, v, sep)
+	}
+	return b.String()
+}
+
 func GetTimestamp() int64 {
 	return time.Now().Unix()
 }
