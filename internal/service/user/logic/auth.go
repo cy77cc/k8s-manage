@@ -27,7 +27,10 @@ func (l *UserLogic) Login(ctx context.Context, req v1.LoginReq) (v1.TokenResp, e
 
 	// 2. Verify password (mock implementation)
 	// In production, use bcrypt.CompareHashAndPassword
-	if user.PasswordHash != req.Password {
+
+	encryptPassword, _ := utils.EncryptPassword(req.Password)
+
+	if user.PasswordHash != encryptPassword {
 		return v1.TokenResp{}, xcode.NewErrCode(xcode.PasswordError)
 	}
 

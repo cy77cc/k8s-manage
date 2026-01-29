@@ -7,7 +7,7 @@ type User struct {
 	gorm.Model
 	ID            int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`  // 主键ID
 	Username      string `gorm:"column:username;unique" json:"username"`        // 用户名
-	PasswordHash  string `gorm:"column:password_hash" json:"-"`                 // 密码哈希
+	PasswordHash  string `gorm:"column:password_hash" json:"password_hash"`     // 密码哈希
 	Email         string `gorm:"column:email" json:"email"`                     // 邮箱
 	Phone         string `gorm:"column:phone" json:"phone"`                     // 手机号
 	Avatar        string `gorm:"column:avatar" json:"avatar"`                   // 头像
