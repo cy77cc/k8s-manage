@@ -72,24 +72,3 @@ CREATE TABLE `role_permissions`
     KEY `idx_permission_id` (`permission_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4;
-
-CREATE TABLE `auth_refresh_tokens`
-(
-    `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '刷新令牌ID',
-    `user_id`     BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
-    `token`       VARCHAR(255)    NOT NULL DEFAULT '' COMMENT '刷新令牌值',
-    `expires`     BIGINT          NOT NULL DEFAULT 0 COMMENT '过期时间',
-    `revoked`     TINYINT         NOT NULL DEFAULT 0 COMMENT '是否已撤销（0：未撤销；1：已撤销）',
-    `create_time` BIGINT          NOT NULL DEFAULT 0 COMMENT '创建时间',
-    PRIMARY KEY (`id`),
-    KEY `idx_user_id` (`user_id`),
-    KEY `idx_token` (`token`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4;
-
-CREATE TABLE `jwt_blacklist`
-(
-    `jti`        VARCHAR(128) PRIMARY KEY COMMENT 'JWT ID',
-    `expired_at` TIMESTAMP COMMENT '过期时间'
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4;

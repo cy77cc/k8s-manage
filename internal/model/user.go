@@ -79,18 +79,3 @@ type Permission struct {
 func (Permission) TableName() string {
 	return "permissions"
 }
-
-// AuthRefreshToken 刷新令牌表
-type AuthRefreshToken struct {
-	gorm.Model
-	ID         int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
-	UserID     int64  `gorm:"column:user_id" json:"user_id"`                // 用户ID
-	Token      string `gorm:"column:token" json:"token"`                    // Refresh Token
-	Expires    int64  `gorm:"column:expires" json:"expires"`                // 过期时间
-	Revoked    int8   `gorm:"column:revoked" json:"revoked"`                // 是否撤销
-	CreateTime int64  `gorm:"column:create_time" json:"create_time"`        // 创建时间
-}
-
-func (AuthRefreshToken) TableName() string {
-	return "auth_refresh_tokens"
-}

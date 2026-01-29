@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/cy77cc/k8s-manage/internal/constants"
 	"github.com/cy77cc/k8s-manage/internal/model"
@@ -24,14 +25,35 @@ func NewUserDAO(db *gorm.DB, cache *expirable.LRU[string, any], rdb redis.Univer
 }
 
 func (d *UserDAO) Create(ctx context.Context, user *model.User) error {
-	return d.db.WithContext(ctx).Create(user).Error
+	if err := d.db.WithContext(ctx).Create(user).Error; err != nil {
+		return err
+	}
+	key := fmt.Sprintf("%s%d", constants.UserIdKey, user.ID)
+	if bs, err := json.Marshal(&user); err == nil {
+		d.rdb.SetEx(ctx, key, bs, constants.RdbTTL)
+	}
+	return nil
 }
 
 func (d *UserDAO) Update(ctx context.Context, user *model.User) error {
-	return d.db.WithContext(ctx).Save(user).Error
+	// 先删除redis，再写数据库
+
+	key := fmt.Sprintf("%s%d", constants.UserIdKey, user.ID)
+	d.rdb.Del(ctx, key)
+
+	if err := d.db.WithContext(ctx).Save(user).Error; err != nil {
+		return err
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	// 延迟双删
+	d.rdb.Del(ctx, key)
+	return nil
 }
 
 func (d *UserDAO) Delete(ctx context.Context, id int64) error {
+	key := fmt.Sprintf("%s%d", constants.UserIdKey, id)
+	d.rdb.Del(ctx, key)
 	return d.db.WithContext(ctx).Delete(&model.User{}, id).Error
 }
 
