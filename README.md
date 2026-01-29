@@ -25,6 +25,8 @@
 
 ## Go 驱动的 Paas 平台功能规划图
 
+### 节点管理
+
 ### 1. 核心资源编排 (The Infrastructure)
 这是平台的“引擎”，负责与底层基础设施（通常是 K8s）交互。
 多租户隔离 (Multi-tenancy): 基于 Namespace 的资源物理隔离及基于 RBAC 的逻辑隔离。

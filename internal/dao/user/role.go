@@ -27,11 +27,11 @@ func (d *RoleDAO) Update(ctx context.Context, role *model.Role) error {
 	return d.db.WithContext(ctx).Save(role).Error
 }
 
-func (d *RoleDAO) Delete(ctx context.Context, id int64) error {
+func (d *RoleDAO) Delete(ctx context.Context, id model.UserID) error {
 	return d.db.WithContext(ctx).Delete(&model.Role{}, id).Error
 }
 
-func (d *RoleDAO) GetByID(ctx context.Context, id int64) (*model.Role, error) {
+func (d *RoleDAO) GetByID(ctx context.Context, id model.UserID) (*model.Role, error) {
 	var role model.Role
 	err := d.db.WithContext(ctx).First(&role, id).Error
 	if err != nil {

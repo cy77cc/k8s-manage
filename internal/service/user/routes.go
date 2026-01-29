@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
+func RegisterUserHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
 	// 无需认证的组
 	authGroup := r.Group("auth")
 

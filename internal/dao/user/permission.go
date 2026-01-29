@@ -27,11 +27,11 @@ func (d *PermissionDAO) Update(ctx context.Context, permission *model.Permission
 	return d.db.WithContext(ctx).Save(permission).Error
 }
 
-func (d *PermissionDAO) Delete(ctx context.Context, id int64) error {
+func (d *PermissionDAO) Delete(ctx context.Context, id model.UserID) error {
 	return d.db.WithContext(ctx).Delete(&model.Permission{}, id).Error
 }
 
-func (d *PermissionDAO) GetByID(ctx context.Context, id int64) (*model.Permission, error) {
+func (d *PermissionDAO) GetByID(ctx context.Context, id model.UserID) (*model.Permission, error) {
 	var permission model.Permission
 	err := d.db.WithContext(ctx).First(&permission, id).Error
 	if err != nil {

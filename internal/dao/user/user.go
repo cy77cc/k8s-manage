@@ -39,7 +39,9 @@ func (d *UserDAO) Update(ctx context.Context, user *model.User) error {
 	// 先删除redis，再写数据库
 
 	key := fmt.Sprintf("%s%d", constants.UserIdKey, user.ID)
-	d.rdb.Del(ctx, key)
+	if err := d.rdb.Del(ctx, key).Err(); err != nil {
+		return err
+	}
 
 	if err := d.db.WithContext(ctx).Save(user).Error; err != nil {
 		return err
@@ -47,11 +49,13 @@ func (d *UserDAO) Update(ctx context.Context, user *model.User) error {
 
 	time.Sleep(50 * time.Millisecond)
 	// 延迟双删
-	d.rdb.Del(ctx, key)
+	if err := d.rdb.Del(ctx, key).Err(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (d *UserDAO) Delete(ctx context.Context, id int64) error {
+func (d *UserDAO) Delete(ctx context.Context, id model.UserID) error {
 	key := fmt.Sprintf("%s%d", constants.UserIdKey, id)
 	d.rdb.Del(ctx, key)
 	return d.db.WithContext(ctx).Delete(&model.User{}, id).Error

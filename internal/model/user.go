@@ -2,10 +2,12 @@ package model
 
 import "gorm.io/gorm"
 
+type UserID int64
+
 // User 用户表
 type User struct {
 	gorm.Model
-	ID            int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`  // 主键ID
+	ID            UserID  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`  // 主键ID
 	Username      string `gorm:"column:username;unique" json:"username"`        // 用户名
 	PasswordHash  string `gorm:"column:password_hash" json:"password_hash"`     // 密码哈希
 	Email         string `gorm:"column:email" json:"email"`                     // 邮箱
@@ -24,7 +26,7 @@ func (User) TableName() string {
 // UserRole 用户角色关联表
 type UserRole struct {
 	gorm.Model
-	ID     int64 `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
+	ID     UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
 	UserID int64 `gorm:"column:user_id" json:"user_id"`                // 用户ID
 	RoleID int64 `gorm:"column:role_id" json:"role_id"`                // 角色ID
 }
@@ -36,7 +38,7 @@ func (UserRole) TableName() string {
 // Role 角色表
 type Role struct {
 	gorm.Model
-	ID          int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
+	ID          UserID  `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
 	Name        string `gorm:"column:name" json:"name"`                      // 角色名称
 	Code        string `gorm:"column:code;unique" json:"code"`               // 角色唯一标识
 	Description string `gorm:"column:description" json:"description"`        // 描述
@@ -52,7 +54,7 @@ func (Role) TableName() string {
 // RolePermission 角色权限关联表
 type RolePermission struct {
 	gorm.Model
-	ID           int64 `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
+	ID           UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
 	RoleID       int64 `gorm:"column:role_id" json:"role_id"`                // 角色ID
 	PermissionID int64 `gorm:"column:permission_id" json:"permission_id"`    // 权限ID
 }
@@ -64,7 +66,7 @@ func (RolePermission) TableName() string {
 // Permission 权限表
 type Permission struct {
 	gorm.Model
-	ID          int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
+	ID          UserID  `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
 	Name        string `gorm:"column:name" json:"name"`                      // 权限名称
 	Code        string `gorm:"column:code;unique" json:"code"`               // 权限标识
 	Type        int8   `gorm:"column:type" json:"type"`                      // 类型 1:菜单 2:按钮 3:API

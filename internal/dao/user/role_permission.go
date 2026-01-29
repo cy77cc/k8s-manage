@@ -23,11 +23,11 @@ func (d *RolePermissionDAO) Create(ctx context.Context, rolePermission *model.Ro
 	return d.db.WithContext(ctx).Create(rolePermission).Error
 }
 
-func (d *RolePermissionDAO) Delete(ctx context.Context, id int64) error {
+func (d *RolePermissionDAO) Delete(ctx context.Context, id model.UserID) error {
 	return d.db.WithContext(ctx).Delete(&model.RolePermission{}, id).Error
 }
 
-func (d *RolePermissionDAO) GetByRoleID(ctx context.Context, roleID int64) ([]model.RolePermission, error) {
+func (d *RolePermissionDAO) GetByRoleID(ctx context.Context, roleID model.UserID) ([]model.RolePermission, error) {
 	var rolePermissions []model.RolePermission
 	err := d.db.WithContext(ctx).Where("role_id = ?", roleID).Find(&rolePermissions).Error
 	if err != nil {

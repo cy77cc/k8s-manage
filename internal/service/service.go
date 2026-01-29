@@ -19,5 +19,5 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	v1 := r.Group("/api/v1")
-	user.RegisterHandlers(v1, serverCtx)
+	user.RegisterUserHandlers(v1, serverCtx)
 }
