@@ -8,11 +8,13 @@ import (
 type UserLogic struct {
 	svcCtx  *svc.ServiceContext
 	userDAO *dao.UserDAO
+	whiteListDao *dao.WhiteListDao
 }
 
 func NewUserLogic(svcCtx *svc.ServiceContext) *UserLogic {
 	return &UserLogic{
 		svcCtx:  svcCtx,
 		userDAO: dao.NewUserDAO(svcCtx.DB, svcCtx.Cache, svcCtx.Rdb),
+		whiteListDao: dao.NewWhiteListDao(svcCtx.DB, svcCtx.Cache, svcCtx.Rdb),
 	}
 }

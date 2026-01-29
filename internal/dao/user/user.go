@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/cy77cc/k8s-manage/internal/consts"
+	"github.com/cy77cc/k8s-manage/internal/constants"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/utils"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -38,7 +38,7 @@ func (d *UserDAO) Delete(ctx context.Context, id int64) error {
 func (d *UserDAO) FindOneById(ctx context.Context, id int64) (*model.User, error) {
 	var user model.User
 	// 先从redis获取数据
-	key := fmt.Sprintf("%s%d", consts.UserIdKey, id)
+	key := fmt.Sprintf("%s%d", constants.UserIdKey, id)
 	buf, err := d.rdb.Get(ctx, key).Bytes()
 	if err == nil {
 		if err := json.Unmarshal(buf, &user); err == nil {
@@ -54,7 +54,7 @@ func (d *UserDAO) FindOneById(ctx context.Context, id int64) (*model.User, error
 
 	b, err := json.Marshal(&user)
 	if err == nil {
-		d.rdb.Set(ctx, key, b, consts.RdbTTL)
+		d.rdb.Set(ctx, key, b, constants.RdbTTL)
 	}
 
 	return &user, nil
@@ -62,7 +62,7 @@ func (d *UserDAO) FindOneById(ctx context.Context, id int64) (*model.User, error
 
 func (d *UserDAO) FindOneByUsername(ctx context.Context, username string) (*model.User, error) {
 	var user model.User
-	key := fmt.Sprintf("%s%s", consts.UserNameKey, username)
+	key := fmt.Sprintf("%s%s", constants.UserNameKey, username)
 	buf, err := d.rdb.Get(ctx, key).Bytes()
 	if err == nil {
 		if err := json.Unmarshal(buf, &user); err == nil {
@@ -78,7 +78,7 @@ func (d *UserDAO) FindOneByUsername(ctx context.Context, username string) (*mode
 
 	b, err := json.Marshal(&user)
 	if err == nil {
-		d.rdb.Set(ctx, key, b, consts.RdbTTL)
+		d.rdb.Set(ctx, key, b, constants.RdbTTL)
 	}
 
 	return &user, nil

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	v1 "github.com/cy77cc/k8s-manage/api/user/v1"
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/utils"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
@@ -112,12 +113,18 @@ func (l *UserLogic) Register(ctx context.Context, req v1.UserCreateReq) (v1.Toke
 // 刷新token
 func (l *UserLogic) Refresh(ctx context.Context, req v1.RefreshReq) (v1.TokenResp, error) {
 	// Verify refresh token (simplified)
-	claims, err := utils.ParseToken(req.RefreshToken)
-	if err != nil {
+	// 第一步判断rtoken在不在白名单
+	ok, err := l.whiteListDao.IsWhitelisted(ctx, req.RefreshToken)
+	if err != nil || !ok {
 		return v1.TokenResp{}, xcode.NewErrCode(xcode.TokenInvalid)
 	}
+	// 解析token，判断过期时间
+	claims, err := utils.ParseToken(req.RefreshToken)
+	if err != nil {
+		return v1.TokenResp{}, xcode.NewErrCode(xcode.TokenExpired)
+	}
 
-	// Generate new tokens
+	// 生成新的atoken和rtoken
 	newToken, err := utils.GenToken(claims.Uid, false)
 	if err != nil {
 		return v1.TokenResp{}, err
@@ -126,6 +133,15 @@ func (l *UserLogic) Refresh(ctx context.Context, req v1.RefreshReq) (v1.TokenRes
 	newRefreshToken, err := utils.GenToken(claims.Uid, true)
 	if err != nil {
 		return v1.TokenResp{}, err
+	}
+
+	// 从缓存中删除旧的rtoken，添加新的rtoken
+	if err := l.whiteListDao.DeleteToken(ctx, req.RefreshToken); err != nil {
+		return v1.TokenResp{}, xcode.NewErrCode(xcode.CacheError)
+	}
+
+	if err := l.whiteListDao.AddToWhitelist(ctx, newRefreshToken, time.Now().Add(config.CFG.JWT.RefreshExpire)); err != nil {
+		return v1.TokenResp{}, xcode.NewErrCode(xcode.CacheError)
 	}
 
 	return v1.TokenResp{
@@ -141,7 +157,6 @@ func (l *UserLogic) Refresh(ctx context.Context, req v1.RefreshReq) (v1.TokenRes
 func (l *UserLogic) Logout(ctx context.Context, req v1.LogoutReq) error {
 	// In a stateless JWT system, logout usually means blacklisting the token.
 	// For now, we just return success as we haven't implemented blacklist.
-	// 退出登录后使用黑名单机制
-	
-	return nil
+	// 用白名单机制
+	return xcode.FromError(l.whiteListDao.DeleteToken(ctx, req.RefreshToken))
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Start 启动 HTTP 服务器
 func Start(ctx context.Context) error {
 	go startServer(ctx)
 	<-ctx.Done()
@@ -21,6 +22,7 @@ func Start(ctx context.Context) error {
 	return nil
 }
 
+// startServer 启动 Gin 服务
 func startServer(ctx context.Context) {
 	svcCtx := svc.MustNewServiceContext()
 	storage.MustMigrate(svcCtx.DB)

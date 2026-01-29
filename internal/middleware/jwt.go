@@ -11,21 +11,21 @@ import (
 
 func JWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenH := c.Request.Header.Get("Authorization")
+		accessTokenH := c.Request.Header.Get("Authorization")
 		resp := response.NewResp(xcode.TokenInvalid, "请求未携带 token，无法访问", nil)
-		if tokenH == "" {
+		if accessTokenH == "" {
 			c.JSON(http.StatusUnauthorized, resp)
 			c.Abort()
 		}
 
-		token, err := utils.ParseToken(tokenH)
+		accessToken, err := utils.ParseToken(accessTokenH)
 
 		if err != nil {
 			resp.Msg = "token 无效请重新登录"
 			c.JSON(http.StatusUnauthorized, resp)
 		}
 
-		c.Set("uid", token.Uid)
+		c.Set("uid", accessToken.Uid)
 
 		c.Next()
 	}

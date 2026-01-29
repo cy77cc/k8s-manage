@@ -11,12 +11,13 @@ import (
 )
 
 type ServiceContext struct {
-	Clientset *kubernetes.Clientset
-	DB        *gorm.DB
-	Rdb     redis.UniversalClient
-	Cache     *expirable.LRU[string, any]
+	Clientset *kubernetes.Clientset       // K8s 客户端
+	DB        *gorm.DB                    // GORM 数据库实例
+	Rdb       redis.UniversalClient       // Redis 客户端
+	Cache     *expirable.LRU[string, any] // 本地缓存 (LRU)
 }
 
+// MustNewServiceContext 创建服务上下文，如果失败则 panic
 func MustNewServiceContext() *ServiceContext {
 
 	return &ServiceContext{

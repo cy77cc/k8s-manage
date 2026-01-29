@@ -1,9 +1,9 @@
-package consts
+package constants
 
 import "time"
 
 const (
-	JwtBlackListKey = "jwt:blacklist:"
+	JwtWhiteListKey = "jwt:blacklist:"
 	UserIdKey = "user:id:"
 	UserNameKey = "user:name:"
 	RdbTTL = time.Hour * 24 * 2

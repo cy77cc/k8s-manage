@@ -8,6 +8,7 @@ import (
 )
 
 func RegisterHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
+	// 无需认证的组
 	authGroup := r.Group("auth")
 
 	userHandler := userHandler.NewUserHandler(serverCtx)
@@ -18,6 +19,7 @@ func RegisterHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
 		authGroup.POST("refresh", userHandler.Refresh)
 		authGroup.POST("register", userHandler.Register)
 	}
+	
 	userGroup := r.Group("user", middleware.JWTAuth())
 	{
 		userGroup.POST("/")
