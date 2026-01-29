@@ -1,8 +1,10 @@
 package cmd
 
 import (
-	"fmt"
+	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/logger"
@@ -18,19 +20,21 @@ var (
 		Version: version.VERSION,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config.MustNewConfig()
-			fmt.Println(config.CFG)
 			logger.Init(logger.MustNewZapLogger())
-			return server.Start()
+			ctx := cmd.Context()
+			return server.Start(ctx)
 		},
 	}
 )
 
 func Execute() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTRAP)
+	defer stop()
 	var cfgFile string
 	rootCMD.PersistentFlags().StringVar(&cfgFile, "config", "configs/config.yaml", "config file path")
 	config.SetConfigFile(cfgFile)
 	rootCMD.Flags().BoolVar(&config.Debug, "debug", false, "enable debug mode")
-	if err := rootCMD.Execute(); err != nil {
+	if err := rootCMD.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
 }
