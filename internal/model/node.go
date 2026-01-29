@@ -1,11 +1,13 @@
 package model
 
-import "time"
+import (
+	"time"
+)
 
 type NodeID uint
 
 type Node struct {
-	ID          NodeID      `gorm:"primaryKey;column:id" json:"id"`
+	ID          NodeID    `gorm:"primaryKey;column:id" json:"id"`
 	Name        string    `gorm:"column:name" json:"name"`
 	Hostname    string    `gorm:"column:hostname" json:"hostname"`
 	Labels      string    `gorm:"column:labels" json:"labels"`
@@ -33,7 +35,7 @@ func (n *Node) TableName() string {
 }
 
 type SSHKey struct {
-	ID        NodeID      `gorm:"primaryKey;column:id" json:"id"`
+	ID        NodeID    `gorm:"primaryKey;column:id" json:"id"`
 	Name      string    `gorm:"column:name" json:"name"`
 	PublicKey string    `gorm:"column:public_key" json:"public_key"`
 	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
@@ -45,7 +47,7 @@ func (s *SSHKey) TableName() string {
 }
 
 type NodeEvent struct {
-	ID        NodeID      `gorm:"primaryKey;column:id" json:"id"`
+	ID        NodeID    `gorm:"primaryKey;column:id" json:"id"`
 	NodeID    uint      `gorm:"column:node_id" json:"node_id"`
 	Type      string    `gorm:"column:type" json:"type"`
 	Message   string    `gorm:"column:message" json:"message"`
