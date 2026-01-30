@@ -14,8 +14,9 @@ type Node struct {
 	Description string    `gorm:"column:description" json:"description"`
 	IP          string    `gorm:"column:ip" json:"ip"`
 	Port        int       `gorm:"column:port" json:"port"`
-	SshUser     string    `gorm:"column:ssh_user" json:"ssh_user"`
-	SshKeyID    uint      `gorm:"column:ssh_key_id" json:"ssh_key_id"`
+	SSHUser     string    `gorm:"column:ssh_user" json:"ssh_user"`
+	SSHPassword string    `gorm:"column:ssh_password" json:"ssh_password"`
+	SSHKeyID    uint      `gorm:"column:ssh_key_id" json:"ssh_key_id"`
 	OS          string    `gorm:"column:os" json:"os"`
 	Arch        string    `gorm:"column:arch" json:"arch"`
 	Kernel      string    `gorm:"column:kernel" json:"kernel"`
