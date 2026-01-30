@@ -28,9 +28,11 @@ func (n *NodeLogic) CreateNode(ctx context.Context, req v1.CreateNodeReq) (v1.No
 		Name:    req.Name,
 		IP:      req.IP,
 		Port:    req.Port,
-		SshUser: req.SSHUser,
+		SSHUser: req.SSHUser,
 		Labels:  utils.MapToString(req.Labels, ","),
 	}
+
+
 
 	if err := n.nodeDao.Create(ctx, node); err != nil {
 		return v1.NodeResp{}, err

@@ -6,12 +6,13 @@ import "time"
 
 // CreateNodeReq 创建节点请求
 type CreateNodeReq struct {
-	Name        string            `json:"name" binding:"required"`                 // 节点名称
-	Hostname    string            `json:"hostname"`                                // 主机名
-	Description string            `json:"description"`                             // 描述
-	IP          string            `json:"ip" binding:"required,ip"`                // 节点IP
-	Port        int               `json:"port" binding:"required,min=1"`           // SSH端口
-	SSHUser     string            `json:"ssh_user" binding:"required"`             // SSH用户名
+	Name        string            `json:"name" binding:"required"`       // 节点名称
+	Hostname    string            `json:"hostname"`                      // 主机名
+	Description string            `json:"description"`                   // 描述
+	IP          string            `json:"ip" binding:"required,ip"`      // 节点IP
+	Port        int               `json:"port" binding:"required,min=1"` // SSH端口
+	SSHUser     string            `json:"ssh_user" binding:"required"`   // SSH用户名
+	SSHPassword string            `json:"ssh_password"`
 	SSHKeyID    int64             `json:"ssh_key_id" binding:"required"`           // SSH密钥ID
 	ClusterID   int64             `json:"cluster_id"`                              // 所属集群ID (可选)
 	Labels      map[string]string `json:"labels"`                                  // 标签

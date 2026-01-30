@@ -11,5 +11,4 @@ func RegisterNodeHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
 	g := r.Group("node", middleware.JWTAuth())
 	handler := handler.NewNodeHandler(serverCtx)
 	g.POST("add", handler.Add)
-
 }
