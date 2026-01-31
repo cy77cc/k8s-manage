@@ -15,7 +15,13 @@ import (
 
 func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	r.Use(middleware.ContextMiddleware(), middleware.Cors(), middleware.Logger())
-	r.GET("/swagger/*any", gs.WrapHandler(swaggerFiles.Handler))
+	r.GET("/swagger/*any", func(c *gin.Context) {
+		if c.Param("any") == "" || c.Param("any") == "/" {
+			c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
+			return
+		}
+		gs.WrapHandler(swaggerFiles.Handler)(c)
+	})
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
