@@ -11,6 +11,7 @@ import (
 // Login 登录
 // @Summary 用户登录
 // @Description 用户登录接口
+// @BasePath /api/v1
 // @Tags Auth
 // @Accept json
 // @Produce json
@@ -34,6 +35,7 @@ func (u *UserHandler) Login(c *gin.Context) {
 // Register 注册
 // @Summary 用户注册
 // @Description 用户注册接口
+// @BasePath /api/v1
 // @Tags Auth
 // @Accept json
 // @Produce json
@@ -58,6 +60,7 @@ func (u *UserHandler) Register(c *gin.Context) {
 // Refresh 刷新token
 // @Summary 刷新Token
 // @Description 刷新Token接口
+// @BasePath /api/v1
 // @Tags Auth
 // @Accept json
 // @Produce json
@@ -82,6 +85,7 @@ func (u *UserHandler) Refresh(c *gin.Context) {
 // Logout 登出
 // @Summary 用户登出
 // @Description 用户登出接口
+// @BasePath /api/v1
 // @Tags Auth
 // @Accept json
 // @Produce json
