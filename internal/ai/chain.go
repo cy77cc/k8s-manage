@@ -13,7 +13,7 @@ type K8sCopilot struct {
 	Runnable *react.Agent
 }
 
-func NewK8sCopilot(ctx context.Context, cm model.ChatModel, clientset *kubernetes.Clientset) (*K8sCopilot, error) {
+func NewK8sCopilot(ctx context.Context, cm model.ToolCallingChatModel, clientset *kubernetes.Clientset) (*K8sCopilot, error) {
 	if cm == nil {
 		return nil, nil
 	}
@@ -27,7 +27,7 @@ func NewK8sCopilot(ctx context.Context, cm model.ChatModel, clientset *kubernete
 	// 2. Create ReAct Agent
 	// The ReAct agent will use the ChatModel and Tools to reason and act.
 	agent, err := react.NewAgent(ctx, &react.AgentConfig{
-		Model: cm,
+		ToolCallingModel: cm,
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: tools,
 		},

@@ -8,7 +8,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/config"
 )
 
-func NewChatModel(ctx context.Context) (model.ChatModel, error) {
+func NewChatModel(ctx context.Context) (model.ToolCallingChatModel, error) {
 	if !config.CFG.LLM.Enable {
 		return nil, nil
 	}
