@@ -22,6 +22,7 @@ type Config struct {
 	Pprof     Pprof     `mapstructure:"pprof"`
 	Metrics   Metrics   `mapstructure:"metrics"`
 	Security  Security  `mapstructure:"security"`
+	LLM       LLM       `mapstructure:"llm"`
 }
 
 type App struct {
@@ -119,6 +120,15 @@ type Metrics struct {
 type Security struct {
 	TrustedProxies []string `mapstructure:"trusted_proxies"`
 	HideBanner     bool     `mapstructure:"hide_banner"`
+}
+
+type LLM struct {
+	Enable      bool    `mapstructure:"enable"`
+	Provider    string  `mapstructure:"provider"`
+	BaseURL     string  `mapstructure:"base_url"`
+	APIKey      string  `mapstructure:"api_key"`
+	Model       string  `mapstructure:"model"`
+	Temperature float64 `mapstructure:"temperature"`
 }
 
 type Postgres struct {

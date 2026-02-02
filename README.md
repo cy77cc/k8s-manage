@@ -81,3 +81,16 @@ Web Shell：通过 WebSocket 实现浏览器终端，直接进入容器排查问
 服务目录 (Marketplace)：预置 MySQL、Redis、Kafka 等中间件，用户一键申请。
 域名/网关管理：自动配置 Ingress，管理 SSL 证书。
 API 开放平台：允许外部系统通过 API 调用平台功能。
+
+### 场景分析：AI 能为 K8s 管理平台做什么？
+在写代码之前，我们要明确 AI 在这个项目里的“角色”。基于 Eino 的能力，我们可以实现以下几个阶段的功能：
+
+- 阶段一：K8s 智能助手 (Copilot)
+  - 功能 : 回答 K8s 基础知识，生成 YAML 文件，解释错误日志。
+  - 实现 : 基础的 Prompt -> LLM -> Output 链路。
+- 阶段二：集群诊断 (RAG/Context)
+  - 功能 : 用户问 "为什么我的 Pod 挂了？"，AI 自动读取当前集群的 Event 和 Log 进行分析。
+  - 实现 : 将 K8s 查询结果作为 Context 注入 Prompt。
+- 阶段三：运维 Agent (Tool Use)
+  - 功能 : 用户说 "帮我扩容 nginx 到 3 个副本"，AI 调用 client-go 执行操作。
+  - 实现 : 使用 Eino 的 ToolsNode 封装 Service 层的方法。

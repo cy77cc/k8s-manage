@@ -5,6 +5,7 @@ import (
 
 	_ "github.com/cy77cc/k8s-manage/docs"
 	"github.com/cy77cc/k8s-manage/internal/middleware"
+	"github.com/cy77cc/k8s-manage/internal/service/ai"
 	"github.com/cy77cc/k8s-manage/internal/service/node"
 	"github.com/cy77cc/k8s-manage/internal/service/user"
 	"github.com/cy77cc/k8s-manage/internal/svc"
@@ -28,4 +29,7 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	v1 := r.Group("/api/v1")
 	user.RegisterUserHandlers(v1, serverCtx)
 	node.RegisterNodeHandlers(v1, serverCtx)
+
+	// AI routes
+	v1.POST("/ai/chat", ai.ChatHandler(serverCtx))
 }
