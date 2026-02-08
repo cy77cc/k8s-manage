@@ -250,4 +250,19 @@ paths:
       summary: 用户注册
       tags:
       - Auth
+  /user/:id:
+    get:
+      consumes:
+      - application/json
+      description: 获取用户信息
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 登录成功
+          schema:
+            $ref: '#/definitions/response.Resp'
+      summary: 获取用户信息
+      tags:
+      - User
 swagger: "2.0"

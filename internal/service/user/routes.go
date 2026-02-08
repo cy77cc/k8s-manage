@@ -26,5 +26,6 @@ func RegisterUserHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
 			// Placeholder for user logic
 			c.JSON(200, gin.H{"msg": "user info"})
 		})
+		userGroup.GET("/:id", userHandler.GetUserInfo)
 	}
 }

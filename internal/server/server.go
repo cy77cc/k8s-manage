@@ -10,9 +10,24 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/logger"
 	"github.com/cy77cc/k8s-manage/internal/service"
 	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/storage"
 	"github.com/gin-gonic/gin"
 )
+
+// @title           k8s Manager API
+// @version         1.0
+// @description     devops台后端接口
+// @termsOfService  https://blog.cy77cc.cn/
+
+// @contact.name   Your Name
+// @contact.url    https://github.com/cy77cc
+// @contact.email  zhangdp9527@163.com
+
+// @license.name  MIT
+// @license.url   https://opensource.org/licenses/MIT
+
+// @host      localhost:8080
+// @BasePath  /api/v1
+
 
 // Start 启动 HTTP 服务器
 func Start(ctx context.Context) error {
@@ -25,7 +40,7 @@ func Start(ctx context.Context) error {
 // startServer 启动 Gin 服务
 func startServer(ctx context.Context) {
 	svcCtx := svc.MustNewServiceContext()
-	storage.MustMigrate(svcCtx.DB)
+	// storage.MustMigrate(svcCtx.DB)
 	r := gin.Default()
 	r.Use(gin.Recovery())
 	service.Init(r, svcCtx)
@@ -50,6 +65,6 @@ func startServer(ctx context.Context) {
 
 	// 阻塞监听
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return 
+		return
 	}
 }

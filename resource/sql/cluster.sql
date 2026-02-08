@@ -6,6 +6,7 @@ CREATE TABLE `clusters` (
     status VARCHAR(32) NOT NULL COMMENT '集群状态',
     type VARCHAR(32) NOT NULL COMMENT '集群类型', -- kubernetes / openshift
     endpoint VARCHAR(256) NOT NULL COMMENT '集群API Endpoint',
+    kubeconfig MEDIUMTEXT COMMENT 'KubeConfig配置',
     ca_cert TEXT COMMENT '集群CA证书',
     token TEXT COMMENT '集群访问令牌',
     nodes JSON COMMENT '节点列表',

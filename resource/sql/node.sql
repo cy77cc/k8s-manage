@@ -9,7 +9,8 @@ CREATE TABLE nodes (
     port            INT DEFAULT 22 COMMENT 'SSH端口',
 
     ssh_user        VARCHAR(64) NOT NULL DEFAULT 'root' COMMENT 'SSH用户名',
-    ssh_key_id      BIGINT NOT NULL COMMENT 'SSH密钥ID',
+    ssh_password    VARCHAR(256) COMMENT 'SSH密码',
+    ssh_key_id      BIGINT COMMENT 'SSH密钥ID',
 
     os              VARCHAR(64) COMMENT '操作系统',
     arch            VARCHAR(32) COMMENT '架构',

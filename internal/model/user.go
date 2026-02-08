@@ -9,17 +9,16 @@ type UserID int64
 
 // User 用户表
 type User struct {
-	gorm.Model
-	ID            UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"`                        // 主键ID
-	Username      string `gorm:"column:username;unique" json:"username" validate:"required|minLen:7"` // 用户名
-	PasswordHash  string `gorm:"column:password_hash" json:"password_hash"`                           // 密码哈希
-	Email         string `gorm:"column:email" json:"email" validate:"email"`                          // 邮箱
-	Phone         string `gorm:"column:phone" json:"phone" validate:"phone"`                          // 手机号
-	Avatar        string `gorm:"column:avatar" json:"avatar"`                                         // 头像
-	Status        int8   `gorm:"column:status" json:"status"`                                         // 状态 1:正常 2:禁用
-	CreateTime    int64  `gorm:"column:create_time" json:"create_time"`                               // 创建时间
-	UpdateTime    int64  `gorm:"column:update_time" json:"update_time"`                               // 更新时间
-	LastLoginTime int64  `gorm:"column:last_login_time" json:"last_login_time"`                       // 最后登录时间
+	ID            UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Username      string `gorm:"column:username;type:varchar(64);not null;unique" json:"username" validate:"required|minLen:7"`
+	PasswordHash  string `gorm:"column:password_hash;type:varchar(255);not null" json:"password_hash"`
+	Email         string `gorm:"column:email;type:varchar(128);not null;default:''" json:"email" validate:"email"`
+	Phone         string `gorm:"column:phone;type:varchar(32);not null;default:''" json:"phone" validate:"phone"`
+	Avatar        string `gorm:"column:avatar;type:varchar(255);not null;default:''" json:"avatar"`
+	Status        int8   `gorm:"column:status;not null;default:1" json:"status"`
+	CreateTime    int64  `gorm:"column:create_time;not null;default:0;autoCreateTime" json:"create_time"`
+	UpdateTime    int64  `gorm:"column:update_time;not null;default:0;autoUpdateTime" json:"update_time"`
+	LastLoginTime int64  `gorm:"column:last_login_time;not null;default:0" json:"last_login_time"`
 }
 
 func (User) TableName() string {
@@ -36,10 +35,9 @@ func (u *User) BeforeSave(tx *gorm.DB) (err error) {
 
 // UserRole 用户角色关联表
 type UserRole struct {
-	gorm.Model
-	ID     UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
-	UserID int64  `gorm:"column:user_id" json:"user_id"`                // 用户ID
-	RoleID int64  `gorm:"column:role_id" json:"role_id"`                // 角色ID
+	ID     UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	UserID int64  `gorm:"column:user_id;not null" json:"user_id"`
+	RoleID int64  `gorm:"column:role_id;not null" json:"role_id"`
 }
 
 func (UserRole) TableName() string {
@@ -48,14 +46,13 @@ func (UserRole) TableName() string {
 
 // Role 角色表
 type Role struct {
-	gorm.Model
-	ID          UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
-	Name        string `gorm:"column:name" json:"name"`                      // 角色名称
-	Code        string `gorm:"column:code;unique" json:"code"`               // 角色唯一标识
-	Description string `gorm:"column:description" json:"description"`        // 描述
-	Status      int8   `gorm:"column:status" json:"status"`                  // 状态
-	CreateTime  int64  `gorm:"column:create_time" json:"create_time"`        // 创建时间
-	UpdateTime  int64  `gorm:"column:update_time" json:"update_time"`        // 更新时间
+	ID          UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Name        string `gorm:"column:name;type:varchar(64);not null;default:''" json:"name"`
+	Code        string `gorm:"column:code;type:varchar(64);not null;unique;default:''" json:"code"`
+	Description string `gorm:"column:description;type:varchar(255);not null;default:''" json:"description"`
+	Status      int8   `gorm:"column:status;not null;default:1" json:"status"`
+	CreateTime  int64  `gorm:"column:create_time;not null;default:0;autoCreateTime" json:"create_time"`
+	UpdateTime  int64  `gorm:"column:update_time;not null;default:0;autoUpdateTime" json:"update_time"`
 }
 
 func (Role) TableName() string {
@@ -64,10 +61,9 @@ func (Role) TableName() string {
 
 // RolePermission 角色权限关联表
 type RolePermission struct {
-	gorm.Model
-	ID           UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
-	RoleID       int64  `gorm:"column:role_id" json:"role_id"`                // 角色ID
-	PermissionID int64  `gorm:"column:permission_id" json:"permission_id"`    // 权限ID
+	ID           UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	RoleID       int64  `gorm:"column:role_id;not null" json:"role_id"`
+	PermissionID int64  `gorm:"column:permission_id;not null" json:"permission_id"`
 }
 
 func (RolePermission) TableName() string {
@@ -76,17 +72,16 @@ func (RolePermission) TableName() string {
 
 // Permission 权限表
 type Permission struct {
-	gorm.Model
-	ID          UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"` // 主键ID
-	Name        string `gorm:"column:name" json:"name"`                      // 权限名称
-	Code        string `gorm:"column:code;unique" json:"code"`               // 权限标识
-	Type        int8   `gorm:"column:type" json:"type"`                      // 类型 1:菜单 2:按钮 3:API
-	Resource    string `gorm:"column:resource" json:"resource"`              // 资源路径
-	Action      string `gorm:"column:action" json:"action"`                  // 请求方法
-	Description string `gorm:"column:description" json:"description"`        // 描述
-	Status      int8   `gorm:"column:status" json:"status"`                  // 状态
-	CreateTime  int64  `gorm:"column:create_time" json:"create_time"`        // 创建时间
-	UpdateTime  int64  `gorm:"column:update_time" json:"update_time"`        // 更新时间
+	ID          UserID `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Name        string `gorm:"column:name;type:varchar(64);not null;default:''" json:"name"`
+	Code        string `gorm:"column:code;type:varchar(128);not null;unique;default:''" json:"code"`
+	Type        int8   `gorm:"column:type;not null;default:0" json:"type"`
+	Resource    string `gorm:"column:resource;type:varchar(255);not null;default:''" json:"resource"`
+	Action      string `gorm:"column:action;type:varchar(32);not null;default:''" json:"action"`
+	Description string `gorm:"column:description;type:varchar(255);not null;default:''" json:"description"`
+	Status      int8   `gorm:"column:status;not null;default:1" json:"status"`
+	CreateTime  int64  `gorm:"column:create_time;not null;default:0;autoCreateTime" json:"create_time"`
+	UpdateTime  int64  `gorm:"column:update_time;not null;default:0;autoUpdateTime" json:"update_time"`
 }
 
 func (Permission) TableName() string {

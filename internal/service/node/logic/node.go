@@ -83,23 +83,31 @@ echo "disk=$(df -BG / | tail -1 | awk '{print $2}' | tr -d G)"
 
 func (l *NodeLogic) CreateNode(ctx context.Context, req v1.CreateNodeReq) (v1.NodeResp, error) {
 
+	var sshKeyID *model.NodeID
+	if req.SSHKeyID != 0 {
+		sshKeyID = &req.SSHKeyID
+	}
+
 	node := &model.Node{
 		Name:        req.Name,
 		IP:          req.IP,
 		Port:        req.Port,
 		SSHUser:     req.SSHUser,
 		SSHPassword: req.SSHPassword,
-		SSHKeyID:    req.SSHKeyID,
+		SSHKeyID:    sshKeyID,
 		Labels:      utils.MapToString(req.Labels, ","),
 	}
 
-	SSHKey, err := l.nodeDao.FindSSHKeyByID(ctx, node.SSHKeyID)
-
-	if err != nil {
-		return v1.NodeResp{}, err
+	var privateKey string
+	if node.SSHKeyID != nil {
+		SSHKey, err := l.nodeDao.FindSSHKeyByID(ctx, *node.SSHKeyID)
+		if err != nil {
+			return v1.NodeResp{}, err
+		}
+		privateKey = SSHKey.PrivateKey
 	}
 
-	cli, err := client.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, SSHKey.PrivateKey)
+	cli, err := client.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
 	if err != nil {
 		return v1.NodeResp{}, err
 	}

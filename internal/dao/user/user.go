@@ -61,7 +61,7 @@ func (d *UserDAO) Delete(ctx context.Context, id model.UserID) error {
 	return d.db.WithContext(ctx).Delete(&model.User{}, id).Error
 }
 
-func (d *UserDAO) FindOneById(ctx context.Context, id int64) (*model.User, error) {
+func (d *UserDAO) FindOneById(ctx context.Context, id model.UserID) (*model.User, error) {
 	var user model.User
 	// 先从redis获取数据
 	key := fmt.Sprintf("%s%d", constants.UserIdKey, id)
