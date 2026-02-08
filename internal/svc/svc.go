@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/casbin/casbin/v2"
 	"github.com/cy77cc/k8s-manage/internal/ai"
+	casbinadapter "github.com/cy77cc/k8s-manage/internal/component/casbin"
 	"github.com/cy77cc/k8s-manage/internal/logger"
 	"github.com/cy77cc/k8s-manage/storage"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -18,11 +20,12 @@ import (
 )
 
 type ServiceContext struct {
-	Clientset *kubernetes.Clientset       // K8s 客户端
-	DB        *gorm.DB                    // GORM 数据库实例
-	Rdb       redis.UniversalClient       // Redis 客户端
-	Cache     *expirable.LRU[string, any] // 本地缓存 (LRU)
-	AI        *ai.K8sCopilot              // AI Copilot
+	Clientset      *kubernetes.Clientset       // K8s 客户端
+	DB             *gorm.DB                    // GORM 数据库实例
+	Rdb            redis.UniversalClient       // Redis 客户端
+	Cache          *expirable.LRU[string, any] // 本地缓存 (LRU)
+	AI             *ai.K8sCopilot              // AI Copilot
+	CasbinEnforcer *casbin.Enforcer            // Casbin Enforcer
 }
 
 // MustNewServiceContext 创建服务上下文，如果失败则 panic
@@ -41,16 +44,32 @@ func MustNewServiceContext() *ServiceContext {
 
 	copilot, err := ai.NewK8sCopilot(ctx, chatModel, clientset)
 	if err != nil {
-		// handle error
 		logger.L().Warn("Failed to initialize AI Copilot", logger.Error(err))
 	}
 
+	db := storage.MustNewDB()
+
+	// Initialize Casbin
+	adapter := casbinadapter.NewAdapter(db)
+	enforcer, err := casbin.NewEnforcer("resource/casbin/rbac_model.conf", adapter)
+	if err != nil {
+		// Try absolute path if relative fails, or panic
+		// Assuming running from project root
+		logger.L().Error("Failed to initialize Casbin Enforcer", logger.Error(err))
+		// panic(err) // Optional: panic if auth is critical
+	} else {
+		if err := enforcer.LoadPolicy(); err != nil {
+			logger.L().Error("Failed to load Casbin policy", logger.Error(err))
+		}
+	}
+
 	return &ServiceContext{
-		Clientset: clientset,
-		DB:        storage.MustNewDB(),
-		Rdb:       storage.MustNewRdb(),
-		Cache:     expirable.NewLRU[string, any](5_000, nil, 24*time.Hour),
-		AI:        copilot,
+		Clientset:      clientset,
+		DB:             db,
+		Rdb:            storage.MustNewRdb(),
+		Cache:          expirable.NewLRU[string, any](5_000, nil, 24*time.Hour),
+		AI:             copilot,
+		CasbinEnforcer: enforcer,
 	}
 }
 

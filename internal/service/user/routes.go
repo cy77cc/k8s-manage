@@ -20,7 +20,7 @@ func RegisterUserHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
 		authGroup.POST("register", userHandler.Register)
 	}
 	
-	userGroup := r.Group("user", middleware.JWTAuth())
+	userGroup := r.Group("user", middleware.JWTAuth(), middleware.CasbinAuth(serverCtx.CasbinEnforcer))
 	{
 		userGroup.POST("/")
 	}
