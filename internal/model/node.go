@@ -16,7 +16,7 @@ type Node struct {
 	Port        int       `gorm:"column:port" json:"port"`
 	SSHUser     string    `gorm:"column:ssh_user" json:"ssh_user"`
 	SSHPassword string    `gorm:"column:ssh_password" json:"ssh_password"`
-	SSHKeyID    uint      `gorm:"column:ssh_key_id" json:"ssh_key_id"`
+	SSHKeyID    NodeID    `gorm:"column:ssh_key_id" json:"ssh_key_id"`
 	OS          string    `gorm:"column:os" json:"os"`
 	Arch        string    `gorm:"column:arch" json:"arch"`
 	Kernel      string    `gorm:"column:kernel" json:"kernel"`
@@ -36,11 +36,12 @@ func (n *Node) TableName() string {
 }
 
 type SSHKey struct {
-	ID        NodeID    `gorm:"primaryKey;column:id" json:"id"`
-	Name      string    `gorm:"column:name" json:"name"`
-	PublicKey string    `gorm:"column:public_key" json:"public_key"`
-	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at" json:"updated_at"`
+	ID         NodeID    `gorm:"primaryKey;column:id" json:"id"`
+	Name       string    `gorm:"column:name" json:"name"`
+	PublicKey  string    `gorm:"column:public_key" json:"public_key"`
+	PrivateKey string    `gorm:"column:private_key" json:"private_key"`
+	CreatedAt  time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at" json:"updated_at"`
 }
 
 func (s *SSHKey) TableName() string {

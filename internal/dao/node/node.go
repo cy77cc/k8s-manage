@@ -70,3 +70,27 @@ func (d *NodeDao) Delete(ctx context.Context, id model.NodeID) error {
 	}
 	return nil
 }
+
+func (d *NodeDao) FindSSHKeyByID(ctx context.Context, id model.NodeID) (*model.SSHKey, error) {
+	key := fmt.Sprintf("%s%d", constants.SSHKey, id)
+	var data model.SSHKey
+	bs, err := d.rdb.Get(ctx, key).Bytes()
+	if err == nil {
+		if err := json.Unmarshal(bs, &data); err != nil {
+			return &data, nil
+		}
+	}
+
+	if err := d.db.WithContext(ctx).First(&data, id).Error; err != nil {
+		return nil, err
+	}
+
+	// 保存到redis
+	b, err := json.Marshal(data)
+	if err == nil {
+		d.rdb.SetNX(ctx, key, b, constants.RdbTTL)
+	}
+
+	return &data, nil
+
+}

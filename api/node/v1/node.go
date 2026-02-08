@@ -1,6 +1,10 @@
 package v1
 
-import "time"
+import (
+	"time"
+
+	"github.com/cy77cc/k8s-manage/internal/model"
+)
 
 // -------------------- Node APIs --------------------
 
@@ -13,7 +17,7 @@ type CreateNodeReq struct {
 	Port        int               `json:"port" binding:"required,min=1"` // SSH端口
 	SSHUser     string            `json:"ssh_user" binding:"required"`   // SSH用户名
 	SSHPassword string            `json:"ssh_password"`
-	SSHKeyID    int64             `json:"ssh_key_id" binding:"required"`           // SSH密钥ID
+	SSHKeyID    model.NodeID      `json:"ssh_key_id" binding:"required"`           // SSH密钥ID
 	ClusterID   int64             `json:"cluster_id"`                              // 所属集群ID (可选)
 	Labels      map[string]string `json:"labels"`                                  // 标签
 	Role        string            `json:"role" binding:"oneof=master worker none"` // 节点角色
@@ -21,7 +25,7 @@ type CreateNodeReq struct {
 
 // UpdateNodeReq 更新节点请求
 type UpdateNodeReq struct {
-	ID          int64             `json:"id" binding:"required"`
+	ID          model.NodeID      `json:"id" binding:"required"`
 	Name        string            `json:"name"`
 	Hostname    string            `json:"hostname"`
 	Description string            `json:"description"`
@@ -34,14 +38,14 @@ type UpdateNodeReq struct {
 
 // NodeResp 节点响应
 type NodeResp struct {
-	ID          int64             `json:"id"`
+	ID          model.NodeID      `json:"id"`
 	Name        string            `json:"name"`
 	Hostname    string            `json:"hostname"`
 	Description string            `json:"description"`
 	IP          string            `json:"ip"`
 	Port        int               `json:"port"`
 	SSHUser     string            `json:"ssh_user"`
-	SSHKeyID    int64             `json:"ssh_key_id"`
+	SSHKeyID    model.NodeID      `json:"ssh_key_id"`
 	OS          string            `json:"os"`
 	Arch        string            `json:"arch"`
 	Kernel      string            `json:"kernel"`
@@ -51,7 +55,7 @@ type NodeResp struct {
 	Status      string            `json:"status"`
 	Role        string            `json:"role"`
 	ClusterID   int64             `json:"cluster_id"`
-	Labels      map[string]string `json:"labels"`
+	Labels      string `json:"labels"`
 	LastCheckAt time.Time         `json:"last_check_at"`
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
@@ -83,9 +87,9 @@ type CreateSSHKeyReq struct {
 
 // SSHKeyResp SSH密钥响应
 type SSHKeyResp struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        model.NodeID `json:"id"`
+	Name      string       `json:"name"`
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 // ListSSHKeyReq SSH密钥列表请求
@@ -104,12 +108,12 @@ type ListSSHKeyResp struct {
 
 // NodeShellReq 节点Shell请求 (WebSocket)
 type NodeShellReq struct {
-	NodeID int64 `form:"node_id" binding:"required"`
+	NodeID model.NodeID `form:"node_id" binding:"required"`
 }
 
 // NodeBatchOpReq 批量操作请求 (如批量安装Docker、加入集群)
 type NodeBatchOpReq struct {
-	NodeIDs []int64 `json:"node_ids" binding:"required"`
-	OpType  string  `json:"op_type" binding:"required"` // install_docker, join_cluster, etc.
-	Params  string  `json:"params"`                     // JSON参数
+	NodeIDs []model.NodeID `json:"node_ids" binding:"required"`
+	OpType  string         `json:"op_type" binding:"required"` // install_docker, join_cluster, etc.
+	Params  string         `json:"params"`                     // JSON参数
 }

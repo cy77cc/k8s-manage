@@ -2,6 +2,7 @@ package handler
 
 import (
 	v1 "github.com/cy77cc/k8s-manage/api/node/v1"
+	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/response"
 	nodeLogic "github.com/cy77cc/k8s-manage/internal/service/node/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
@@ -29,6 +30,22 @@ func (n *NodeHandler) Add(c *gin.Context) {
 	resp, err := nodeLogic.NewNodeLogic(n.svcCtx).CreateNode(c.Request.Context(), req)
 	if err != nil {
 		response.Response(c, nil, xcode.FromError(err))
+		return
+	}
+	response.Response(c, resp, nil)
+}
+
+func (n *NodeHandler) Get(c *gin.Context) {
+	var id model.NodeID
+	if err := c.BindQuery(&id); err != nil {
+		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
+		return
+	}
+
+	resp, err := nodeLogic.NewNodeLogic(n.svcCtx).GetNode(id)
+	if err != nil {
+		response.Response(c, nil , xcode.FromError(err))
+		return
 	}
 	response.Response(c, resp, nil)
 }

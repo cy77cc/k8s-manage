@@ -1,13 +1,14 @@
-package ssh
+package client
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
-func NewSSHClient(user, password, host string, privateKey string, port int) (*ssh.Client, error) {
+func NewSSHClient(user, password, host string, port int, privateKey string) (*ssh.Client, error) {
 	signer, err := ssh.ParsePrivateKey([]byte(privateKey))
 	if err != nil {
 		return nil, err
@@ -34,5 +35,5 @@ func RunCommand(client *ssh.Client, cmd string) (string, error) {
 	defer session.Close()
 
 	output, err := session.CombinedOutput(cmd)
-	return string(output), err
+	return strings.TrimSpace(string(output)), err
 }

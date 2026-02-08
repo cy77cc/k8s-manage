@@ -9,4 +9,5 @@ const (
 	RdbTTL = time.Hour * 24 * 2
 	RdbAddTTL = time.Minute * 10
 	NodeKey = "node:id:"
+	SSHKey = "node:ssh:key:id:"
 )

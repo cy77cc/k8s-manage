@@ -34,6 +34,7 @@ CREATE TABLE ssh_keys (
     id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT 'SSH密钥ID',
     name        VARCHAR(64) COMMENT '密钥名称',
     private_key TEXT NOT NULL COMMENT '私钥',
+    public_key  TEXT NOT NULL COMMENT '公钥',
     passphrase  VARCHAR(128) COMMENT 'passphrase',
     created_at  TIMESTAMP COMMENT '创建时间'
 );
