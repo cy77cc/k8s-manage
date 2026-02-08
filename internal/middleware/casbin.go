@@ -10,8 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// CasbinAuth returns a middleware that enforces Casbin authorization.
-func CasbinAuth(enforcer *casbin.Enforcer) gin.HandlerFunc {
+// CasbinAuth returns a middleware that enforces Casbin authorization using a specific permission code.
+func CasbinAuth(enforcer *casbin.Enforcer, permissionCode string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 1. Check if enforcer is initialized
 		if enforcer == nil {
@@ -32,14 +32,12 @@ func CasbinAuth(enforcer *casbin.Enforcer) gin.HandlerFunc {
 
 		// 3. Prepare Enforce parameters
 		// sub: user id (string)
-		// obj: request path
-		// act: request method
+		// obj: permission code (e.g., "user:add")
 		sub := fmt.Sprintf("%v", uid)
-		obj := c.Request.URL.Path
-		act := c.Request.Method
+		obj := permissionCode
 
 		// 4. Enforce
-		ok, err := enforcer.Enforce(sub, obj, act)
+		ok, err := enforcer.Enforce(sub, obj)
 		if err != nil {
 			resp := response.NewResp(xcode.ServerError, "权限验证错误", nil)
 			c.JSON(http.StatusInternalServerError, resp)
