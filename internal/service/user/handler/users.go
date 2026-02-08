@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strconv"
+
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/response"
 	userLogic "github.com/cy77cc/k8s-manage/internal/service/user/logic"
@@ -29,10 +31,14 @@ func NewUserHandler(svcCtx *svc.ServiceContext) *UserHandler {
 // @Success 200 {object} response.Resp "登录成功"
 // @Router /user/:id [get]
 func (u *UserHandler) GetUserInfo(c *gin.Context) {
+	idStr := c.Param("id")
 	var id model.UserID
-	if err := c.ShouldBindUri(&id); err != nil {
-		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
+
+	if idInt, err := strconv.Atoi(idStr); err != nil {
+		response.Response(c, nil, xcode.FromError(err))
 		return
+	} else {
+		id = model.UserID(idInt)
 	}
 	resp, err := userLogic.NewUserLogic(u.svcCtx).GetUser(c.Request.Context(), id)
 	if err != nil {
