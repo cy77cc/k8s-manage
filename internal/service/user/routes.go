@@ -19,9 +19,12 @@ func RegisterUserHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
 		authGroup.POST("refresh", userHandler.Refresh)
 		authGroup.POST("register", userHandler.Register)
 	}
-	
-	userGroup := r.Group("user", middleware.JWTAuth(), middleware.CasbinAuth(serverCtx.CasbinEnforcer))
+
+	userGroup := r.Group("user", middleware.JWTAuth())
 	{
-		userGroup.POST("/")
+		userGroup.POST("/", middleware.CasbinAuth(serverCtx.CasbinEnforcer, "user:view"), func(c *gin.Context) {
+			// Placeholder for user logic
+			c.JSON(200, gin.H{"msg": "user info"})
+		})
 	}
 }

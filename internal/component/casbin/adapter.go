@@ -18,16 +18,15 @@ func NewAdapter(db *gorm.DB) *Adapter {
 
 // LoadPolicy loads all policy rules from the storage.
 func (a *Adapter) LoadPolicy(model model.Model) error {
-	// 1. Load Role Policies (p, role, resource, action)
-	// Query: SELECT r.code, p.resource, p.action FROM roles r JOIN role_permissions rp ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id WHERE r.status = 1 AND p.status = 1
+	// 1. Load Role Policies (p, role, permission_code)
+	// Query: SELECT r.code as role_code, p.code as permission_code FROM roles r JOIN role_permissions rp ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id WHERE r.status = 1 AND p.status = 1
 	type PolicyResult struct {
-		RoleCode string
-		Resource string
-		Action   string
+		RoleCode       string
+		PermissionCode string
 	}
 	var policies []PolicyResult
 	err := a.db.Table("roles").
-		Select("roles.code as role_code, permissions.resource, permissions.action").
+		Select("roles.code as role_code, permissions.code as permission_code").
 		Joins("JOIN role_permissions ON roles.id = role_permissions.role_id").
 		Joins("JOIN permissions ON permissions.id = role_permissions.permission_id").
 		Where("roles.status = 1 AND permissions.status = 1").
@@ -37,7 +36,7 @@ func (a *Adapter) LoadPolicy(model model.Model) error {
 	}
 
 	for _, policy := range policies {
-		persist.LoadPolicyLine(fmt.Sprintf("p, %s, %s, %s", policy.RoleCode, policy.Resource, policy.Action), model)
+		persist.LoadPolicyLine(fmt.Sprintf("p, %s, %s", policy.RoleCode, policy.PermissionCode), model)
 	}
 
 	// 2. Load User Role Inheritance (g, user_id, role)

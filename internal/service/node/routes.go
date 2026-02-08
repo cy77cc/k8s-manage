@@ -8,7 +8,8 @@ import (
 )
 
 func RegisterNodeHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
-	g := r.Group("node", middleware.JWTAuth(), middleware.CasbinAuth(serverCtx.CasbinEnforcer))
+	g := r.Group("node", middleware.JWTAuth())
 	handler := handler.NewNodeHandler(serverCtx)
-	g.POST("add", handler.Add)
+	// Add Node permission check
+	g.POST("add", middleware.CasbinAuth(serverCtx.CasbinEnforcer, "node:add"), handler.Add)
 }
