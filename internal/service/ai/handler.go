@@ -45,14 +45,8 @@ func ChatHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 			"If you use a tool, answer based on the tool's output.", clusterInfo)
 
 		input := []*schema.Message{
-			{
-				Role:    schema.System,
-				Content: systemPrompt,
-			},
-			{
-				Role:    schema.User,
-				Content: req.Message,
-			},
+			schema.SystemMessage(systemPrompt),
+			schema.UserMessage(req.Message),
 		}
 
 		// Set headers for SSE

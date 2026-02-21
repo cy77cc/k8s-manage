@@ -115,8 +115,7 @@ security:
 
 llm:
   enable: true
-  provider: "openai" # 或 "ark" (火山引擎), "ollama"
-  base_url: "https://api.openai.com/v1"
-  api_key: "sk-xxxxxxxx"
-  model: "gpt-4o"
+  provider: "ollama" # 或 "ark" (火山引擎), "ollama"
+  base_url: "http://localhost:11434"
+  model: "kimi-k2.5:cloud"
   temperature: 0.7
