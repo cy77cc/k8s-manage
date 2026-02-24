@@ -1,0 +1,91 @@
+package cmd
+
+import (
+	"fmt"
+
+	"github.com/cy77cc/k8s-manage/internal/config"
+	"github.com/cy77cc/k8s-manage/internal/logger"
+	"github.com/cy77cc/k8s-manage/storage"
+	"github.com/cy77cc/k8s-manage/storage/migration"
+	"github.com/spf13/cobra"
+	"gorm.io/gorm"
+)
+
+var (
+	upSteps   int
+	downSteps int
+)
+
+var migrateCMD = &cobra.Command{
+	Use:   "migrate",
+	Short: "database migration commands",
+}
+
+var migrateUpCMD = &cobra.Command{
+	Use:   "up",
+	Short: "apply versioned migrations",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		db, cleanup := mustInitMigrationDeps()
+		defer cleanup()
+		return migration.Migrate(db, migration.DirectionUp, upSteps)
+	},
+}
+
+var migrateDownCMD = &cobra.Command{
+	Use:   "down",
+	Short: "rollback versioned migrations",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		db, cleanup := mustInitMigrationDeps()
+		defer cleanup()
+		return migration.Migrate(db, migration.DirectionDown, downSteps)
+	},
+}
+
+var migrateStatusCMD = &cobra.Command{
+	Use:   "status",
+	Short: "print migration status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		db, cleanup := mustInitMigrationDeps()
+		defer cleanup()
+
+		items, err := migration.Status(db)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			state := "pending"
+			at := "-"
+			if item.Applied {
+				state = "applied"
+				if item.AppliedAt != nil {
+					at = item.AppliedAt.Format("2006-01-02 15:04:05")
+				}
+			}
+			fmt.Printf("%s\t%s\t%s\t%s\n", item.Version, item.Name, state, at)
+		}
+		return nil
+	},
+}
+
+func mustInitMigrationDeps() (*gorm.DB, func()) {
+	config.MustNewConfig()
+	logger.Init(logger.MustNewZapLogger())
+	db := storage.MustNewDB()
+	cleanup := func() {
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	}
+	return db, cleanup
+}
+
+func init() {
+	migrateUpCMD.Flags().IntVar(&upSteps, "steps", 0, "number of steps to run, 0 means all")
+	migrateDownCMD.Flags().IntVar(&downSteps, "steps", 1, "number of steps to rollback")
+
+	migrateCMD.AddCommand(migrateUpCMD)
+	migrateCMD.AddCommand(migrateDownCMD)
+	migrateCMD.AddCommand(migrateStatusCMD)
+	rootCMD.AddCommand(migrateCMD)
+}

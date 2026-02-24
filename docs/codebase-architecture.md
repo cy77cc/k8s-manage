@@ -65,3 +65,22 @@
 - admin 全量放行为短期可用性策略，需要后续替换为精细权限配置。
 - 页面权限码与 Casbin/API 权限码尚未形成单一规范字典。
 - AI 控制面当前为进程内存态，后续需迁移到 DB/Redis 以支持多实例。
+
+## 6. Service & Migration Refactor (2026-02-24)
+
+- 目录组织对齐 `service/user` 风格：
+  - `internal/service/host/{routes.go,handler/*,logic/*}`
+  - `internal/service/cluster/handler/*`
+  - `internal/service/rbac/handler/*`
+- Host 成为统一外部域：
+  - 主路径：`/api/v1/hosts/*`
+  - 兼容路径：`/api/v1/node/add`（内部委托 host logic）
+  - 兼容 Header：`Deprecation: true`, `Sunset: Mon, 30 Jun 2026 00:00:00 GMT`
+- 主机 onboarding 新契约：
+  - `POST /hosts/probe`
+  - `POST /hosts`（支持 `probe_token`）
+  - `PUT /hosts/:id/credentials`
+- 版本化迁移：
+  - `storage/migration/runner.go`
+  - `storage/migrations/*.sql`
+  - 启动前执行 `RunMigrations(db)`，`app.auto_migrate` 仅用于开发显式开启。

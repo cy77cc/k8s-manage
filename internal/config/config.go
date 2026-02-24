@@ -26,10 +26,11 @@ type Config struct {
 }
 
 type App struct {
-	Name     string `mapstructure:"name"`
-	Env      string `mapstructure:"env"`
-	Debug    bool   `mapstructure:"debug"`
-	Timezone string `mapstructure:"timezone"`
+	Name        string `mapstructure:"name"`
+	Env         string `mapstructure:"env"`
+	Debug       bool   `mapstructure:"debug"`
+	Timezone    string `mapstructure:"timezone"`
+	AutoMigrate bool   `mapstructure:"auto_migrate"`
 }
 
 type Server struct {

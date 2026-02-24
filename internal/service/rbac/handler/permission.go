@@ -1,4 +1,4 @@
-package rbac
+package handler
 
 import (
 	"net/http"

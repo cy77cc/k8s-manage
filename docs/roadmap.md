@@ -12,11 +12,12 @@
 
 - Frontend hosting in backend (`Go Embed web/dist`)
 - Auth & session bootstrap
-- Hosts resource APIs + SSH command execution
+- Hosts resource APIs + SSH command execution + 3-step onboarding (`probe/create/credentials`)
 - Clusters resource APIs + K8s read/deploy preview/apply
 - Services CRUD + deploy
 - RBAC users/roles/permissions minimum APIs
 - AI minimum APIs for K8s pages and global assistant
+- Versioned DB migration framework (`migrate up/down/status`)
 
 ### Phase 2 - Pending
 
@@ -36,7 +37,7 @@
 | --- | --- | --- |
 | Frontend Embed Serving | Done | `web/dist` embed + SPA fallback |
 | Auth | In Progress | login/register/refresh/logout + `auth/me` |
-| Hosts | In Progress | CRUD + action + ssh exec + batch |
+| Hosts | In Progress | CRUD + action + ssh exec + batch + onboarding token flow |
 | Clusters / K8s | In Progress | list/create/detail + nodes/pods/deployments/services/ingresses/events/logs + deploy preview/apply |
 | Services | In Progress | CRUD + deploy + quota/events/rollback(mvp stub) |
 | RBAC | In Progress | admin 全量放行（含 `*:*`），非 admin 继续走数据库权限 |
@@ -52,6 +53,7 @@
 | Services | `/api/v1/services/*` | In Progress |
 | Settings-RBAC | `/api/v1/rbac/*` | In Progress |
 | Global AI Assistant | `/api/v1/ai/*` | In Progress |
+| Node legacy adapter | `/api/v1/node/add` | In Progress (deprecated, delegating to host domain) |
 
 ## 5. Current Decisions (2026-02-24)
 

@@ -48,12 +48,17 @@ func (h *handler) chat(c *gin.Context) {
 	}
 
 	sid := strings.TrimSpace(req.SessionID)
+	scene := normalizeScene(toString(req.Context["scene"]))
 	if sid == "" {
-		sid = fmt.Sprintf("sess-%d", time.Now().UnixNano())
+		if session, ok := h.store.currentSession(uid, scene); ok {
+			sid = session.ID
+		} else {
+			sid = fmt.Sprintf("sess-%d", time.Now().UnixNano())
+		}
 	}
 
 	userTime := time.Now()
-	session := h.store.appendMessage(sid, map[string]any{
+	session := h.store.appendMessage(uid, scene, sid, map[string]any{
 		"id":        fmt.Sprintf("u-%d", userTime.UnixNano()),
 		"role":      "user",
 		"content":   msg,
@@ -120,13 +125,14 @@ func (h *handler) chat(c *gin.Context) {
 		content = "已完成。"
 	}
 	assistantTime := time.Now()
-	session = h.store.appendMessage(sid, map[string]any{
+	session = h.store.appendMessage(uid, scene, sid, map[string]any{
 		"id":        fmt.Sprintf("a-%d", assistantTime.UnixNano()),
 		"role":      "assistant",
 		"content":   content,
 		"thinking":  strings.TrimSpace(reasoningContent.String()),
 		"timestamp": assistantTime,
 	})
+	h.refreshSuggestions(uid, scene, content)
 	_ = writeSSE(c, flusher, "done", gin.H{"session": session})
 }
 

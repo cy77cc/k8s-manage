@@ -215,3 +215,84 @@
 
 - `go test ./...` 通过。
 - `cd web && npm run build` 通过。
+
+## 2026-02-24 (Team + Skill Check: Suggestion Pipeline / Persistence / Scene Chat / Trigger UX)
+
+### Team & Skills
+
+- 按 `team` 协作方式执行（CTO/Product/Fullstack/QA 分工）。
+- 按要求检查 `find-skills`：本轮无需新增安装技能，直接基于现有代码栈实现。
+
+### Completed
+
+- Suggestion 链路改造：
+  - 用户对话完成后，后端将 assistant 输出送入 suggestion 智能体（LLM prompt）提炼建议。
+  - 建议按 `user + scene` 缓存，`/ai/recommendations` 直接返回对应场景建议。
+  - 前端在对话完成后自动刷新 recommendation。
+- 对话持久化：
+  - 新增表：`ai_chat_sessions`、`ai_chat_messages`。
+  - 通过 Gorm AutoMigrate 自动迁移。
+  - 会话与消息落库，替换原纯内存会话。
+- 分场景会话：
+  - 新增 `GET /api/v1/ai/sessions/current?scene=...`。
+  - 聊天发送携带 `context.scene`，默认复用该场景最近会话。
+  - 前端打开 AI 助手时自动加载当前场景历史；支持“当前场景/全局”切换。
+- 触发按钮 UX：
+  - AI 助手按钮改为 Header 内联触发，不再固定悬浮。
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+## 2026-02-24 (Team Refactor Phase-1: Migration + Host Domain + Onboarding)
+
+### Team
+
+- CTO(`cto-vogels`): 重构边界、兼容策略、迁移与回滚方案。
+- Fullstack(`fullstack-dhh`): 后端目录重排、API 实现、前端主机向导落地。
+- Product(`product-norman`): 主机三步接入流与错误交互模型。
+- QA(`qa-bach`): 迁移与兼容回归矩阵。
+
+### Completed
+
+- 版本化迁移框架落地：
+  - 新增 `storage/migration/runner.go`，支持 `up/down/status`。
+  - 新增 migration SQL：
+    - `20260224_000001_create_ai_chat_tables.sql`
+    - `20260224_000002_host_onboarding_tables.sql`
+  - 新增命令：`make migrate-up|migrate-status|migrate-down`。
+  - 启动流程改为先执行版本化迁移（`internal/cmd/root.go`）。
+- 配置与数据库职责调整：
+  - `app.auto_migrate=false` 默认关闭。
+  - `storage/gorm.go` 移除生产迁移职责，仅保留连接。
+- service 结构重排：
+  - `host` 改为 `routes + handler + logic`。
+  - `cluster/rbac` handler 移入子目录（统一组织方式）。
+- Host/Node 收敛：
+  - 新增 `POST /api/v1/hosts/probe`。
+  - 新增 `PUT /api/v1/hosts/:id/credentials`。
+  - `POST /api/v1/hosts` 支持 `probe_token` 创建。
+  - `/api/v1/node/add` 改为委托 host 逻辑，并返回 `Deprecation/Sunset` Header。
+- 模型统一：
+  - 新增 `internal/model/host_probe.go`（`host_probe_sessions`）。
+- 前端主机向导：
+  - `HostOnboardingPage` 改为 3-step：连接信息 -> 探测结果 -> 入库确认。
+  - `hosts API` 新增 `probeHost`、`updateCredentials`，`createHost` 支持 probe token。
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+### Known Gaps / Risks
+
+- `rbac` 与 `cluster` 已迁移到 handler 子目录，但仍可继续细分为更小 handler 文件。
+- `POST /hosts` 仍保留无 `probe_token` 的 legacy 路径以兼容旧调用，后续应逐步收敛。
+- 迁移 `down` 仅建议测试环境使用。
+
+### Next Actions
+
+1. 将 `rbac` 拆分为 `permission.go + user_role.go` 等更细文件。
+2. 在 HostList 页面移除 legacy 弹窗创建，统一跳转三步向导。
+3. 为 onboarding 增加后端集成测试（token 一次性消费/过期/非 admin force）。

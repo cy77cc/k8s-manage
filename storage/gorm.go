@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/logger"
-	"github.com/cy77cc/k8s-manage/internal/model"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -79,22 +77,4 @@ func MustNewDB() *gorm.DB {
 		db = db.Debug()
 	}
 	return db
-}
-
-func MustMigrate(db *gorm.DB) {
-	logger.L().Info("开始迁移数据库")
-	logger.L().Info(db.Migrator().CurrentDatabase())
-	err := db.AutoMigrate(
-		&model.User{},
-		&model.Role{},
-		&model.Permission{},
-		&model.UserRole{},
-		&model.RolePermission{},
-		&model.Node{},
-		&model.NodeEvent{},
-		&model.SSHKey{},
-	)
-	if err != nil {
-		log.Fatal("数据库迁移失败，请重试！！！！！")
-	}
 }

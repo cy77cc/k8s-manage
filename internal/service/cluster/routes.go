@@ -2,12 +2,13 @@ package cluster
 
 import (
 	"github.com/cy77cc/k8s-manage/internal/middleware"
+	clusterhandler "github.com/cy77cc/k8s-manage/internal/service/cluster/handler"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 
 func RegisterClusterHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
-	h := NewHandler(svcCtx)
+	h := clusterhandler.NewHandler(svcCtx)
 	g := v1.Group("/clusters", middleware.JWTAuth())
 	{
 		g.GET("", h.List)

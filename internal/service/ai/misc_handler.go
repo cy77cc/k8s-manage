@@ -1,7 +1,9 @@
 package ai
 
 import (
+	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,12 +12,38 @@ import (
 )
 
 func (h *handler) listSessions(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.store.listSessions()})
+	uid, ok := uidFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": gin.H{"message": "unauthorized"}})
+		return
+	}
+	scene := c.Query("scene")
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.store.listSessions(uid, scene)})
+}
+
+func (h *handler) currentSession(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": gin.H{"message": "unauthorized"}})
+		return
+	}
+	scene := c.Query("scene")
+	session, found := h.store.currentSession(uid, scene)
+	if !found {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": session})
 }
 
 func (h *handler) getSession(c *gin.Context) {
-	session, ok := h.store.getSession(c.Param("id"))
+	uid, ok := uidFromContext(c)
 	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": gin.H{"message": "unauthorized"}})
+		return
+	}
+	session, found := h.store.getSession(uid, c.Param("id"))
+	if !found {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": gin.H{"message": "session not found"}})
 		return
 	}
@@ -23,7 +51,12 @@ func (h *handler) getSession(c *gin.Context) {
 }
 
 func (h *handler) deleteSession(c *gin.Context) {
-	h.store.deleteSession(c.Param("id"))
+	uid, ok := uidFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": gin.H{"message": "unauthorized"}})
+		return
+	}
+	h.store.deleteSession(uid, c.Param("id"))
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
 }
 
@@ -50,13 +83,48 @@ func (h *handler) analyze(c *gin.Context) {
 }
 
 func (h *handler) recommendations(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": []gin.H{{
-		"id":        "rec-" + strconvFormatInt(time.Now().UnixNano()),
-		"type":      "suggestion",
-		"title":     "建议 #1",
-		"content":   "建议先观察资源使用，再执行变更。",
-		"relevance": 0.8,
-	}}})
+	uid, ok := uidFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": gin.H{"message": "unauthorized"}})
+		return
+	}
+	var req struct {
+		Type    string         `json:"type"`
+		Context map[string]any `json:"context"`
+		Limit   int            `json:"limit"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	scene := normalizeScene(toString(req.Context["scene"]))
+	if scene == "global" {
+		scene = normalizeScene(toString(req.Context["page"]))
+	}
+	if req.Limit <= 0 {
+		req.Limit = 5
+	}
+	existing := h.store.getRecommendations(uid, scene, req.Limit)
+	if len(existing) == 0 {
+		existing = []recommendationRecord{{
+			ID:        "rec-" + strconvFormatInt(time.Now().UnixNano()),
+			UserID:    uid,
+			Scene:     scene,
+			Type:      "suggestion",
+			Title:     "通用建议",
+			Content:   "先执行只读诊断，再进行变更操作，并确认回滚方案。",
+			Relevance: 0.7,
+			CreatedAt: time.Now(),
+		}}
+	}
+	out := make([]gin.H, 0, len(existing))
+	for _, r := range existing {
+		out = append(out, gin.H{
+			"id":        r.ID,
+			"type":      r.Type,
+			"title":     r.Title,
+			"content":   r.Content,
+			"relevance": r.Relevance,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": out})
 }
 
 func (h *handler) k8sAnalyze(c *gin.Context) {
@@ -90,4 +158,55 @@ func (h *handler) actionExecute(c *gin.Context) {
 		"approval_token": req.ApprovalToken,
 		"status":         "executed",
 	}})
+}
+
+func (h *handler) refreshSuggestions(uid uint64, scene, answer string) {
+	scene = normalizeScene(scene)
+	prompt := "你是 suggestion 智能体。基于下面回答提炼 3 条可执行建议，每条一行，格式为：标题|内容|相关度(0-1)。回答内容如下：\n" + answer
+	out := []recommendationRecord{}
+	if h.svcCtx.AI != nil {
+		msg, err := h.svcCtx.AI.Generate(context.Background(), []*schema.Message{schema.UserMessage(prompt)})
+		if err == nil && msg != nil {
+			lines := strings.Split(msg.Content, "\n")
+			for _, line := range lines {
+				trim := strings.TrimSpace(line)
+				if trim == "" {
+					continue
+				}
+				parts := strings.SplitN(trim, "|", 3)
+				if len(parts) < 2 {
+					continue
+				}
+				rel := 0.7
+				if len(parts) == 3 {
+					if v, err := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64); err == nil {
+						rel = v
+					}
+				}
+				out = append(out, recommendationRecord{
+					ID:        "rec-" + strconvFormatInt(time.Now().UnixNano()),
+					UserID:    uid,
+					Scene:     scene,
+					Type:      "suggestion",
+					Title:     strings.TrimSpace(parts[0]),
+					Content:   strings.TrimSpace(parts[1]),
+					Relevance: rel,
+					CreatedAt: time.Now(),
+				})
+			}
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, recommendationRecord{
+			ID:        "rec-" + strconvFormatInt(time.Now().UnixNano()),
+			UserID:    uid,
+			Scene:     scene,
+			Type:      "suggestion",
+			Title:     "先做健康检查",
+			Content:   "优先检查资源/日志，再进行部署或配置变更。",
+			Relevance: 0.7,
+			CreatedAt: time.Now(),
+		})
+	}
+	h.store.setRecommendations(uid, scene, out)
 }

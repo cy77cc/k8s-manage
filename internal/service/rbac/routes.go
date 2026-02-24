@@ -2,12 +2,13 @@ package rbac
 
 import (
 	"github.com/cy77cc/k8s-manage/internal/middleware"
+	rbachandler "github.com/cy77cc/k8s-manage/internal/service/rbac/handler"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 
 func RegisterRBACHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
-	h := NewHandler(svcCtx)
+	h := rbachandler.NewHandler(svcCtx)
 	g := v1.Group("/rbac", middleware.JWTAuth())
 	{
 		g.GET("/me/permissions", h.MyPermissions)

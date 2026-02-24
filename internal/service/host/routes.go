@@ -2,20 +2,23 @@ package host
 
 import (
 	"github.com/cy77cc/k8s-manage/internal/middleware"
+	"github.com/cy77cc/k8s-manage/internal/service/host/handler"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 
 func RegisterHostHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
-	h := NewHandler(svcCtx)
+	h := handler.NewHandler(svcCtx)
 	g := v1.Group("/hosts", middleware.JWTAuth())
 	{
 		g.GET("", h.List)
+		g.POST("/probe", h.Probe)
 		g.POST("", h.Create)
 		g.POST("/batch", h.Batch)
 		g.POST("/batch/exec", h.BatchExec)
 		g.GET("/:id", h.Get)
 		g.PUT("/:id", h.Update)
+		g.PUT("/:id/credentials", h.UpdateCredentials)
 		g.DELETE("/:id", h.Delete)
 		g.POST("/:id/actions", h.Action)
 		g.POST("/:id/ssh/check", h.SSHCheck)
