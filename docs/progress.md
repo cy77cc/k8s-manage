@@ -52,3 +52,40 @@
 2. 完成主机详情页与 K8s 页面联调问题修复（字段补齐与边界错误处理）。
 3. 为 RBAC 与 Clusters 补充基础集成测试。
 4. 在 `README.md` 补充 `build-all` 启动说明与 MVP 当前状态说明。
+
+## 2026-02-24 (AI + RBAC Fix Round)
+
+### Scope
+
+- AI 模块从 mock 升级为 Eino + Ollama(`glm-5:cloud`) 实际调用。
+- `/api/v1/ai/chat` 切换为 SSE 流式响应，并完成前端流式消费。
+- 修复 admin 权限导致页面 403 的可用性问题。
+
+### Completed
+
+- 后端 AI：
+  - `internal/service/ai/handler.go` 改为 SSE 聊天（`meta/delta/done/error`）。
+  - 对接 `svcCtx.AI.Runnable.Stream/Generate`，并保留 sessions 接口 JSON 读写。
+  - `analyze/recommendations/k8s/analyze` 接入 LLM 摘要能力，失败回退到 fallback。
+- LLM 初始化：
+  - `internal/ai/client.go` 强制 `provider=ollama`，并注入 temperature 到 Ollama options。
+  - `internal/svc/svc.go` 增加 AI 初始化失败结构化日志（base_url/model/provider）。
+  - `configs/config.yaml` 默认模型改为 `glm-5:cloud`。
+- 前端 AI：
+  - `web/src/api/modules/ai.ts` 新增 `chatStream()`（POST + ReadableStream 解析 SSE）。
+  - `web/src/components/AI/ChatInterface.tsx` 改为流式增量渲染 assistant 消息。
+- RBAC：
+  - `internal/service/rbac/handler.go`：admin 用户（用户名=admin 或角色 code=admin）返回全量权限并含 `*:*`。
+  - `rbac/check` 支持通配判定（`resource:*` 与 `*:*`）。
+  - `web/src/components/RBAC/PermissionContext.tsx` 支持通配权限匹配。
+
+### Known Gaps / Risks
+
+- admin 全量放行是临时策略；页面权限码与 Casbin/API 权限码仍未完全统一。
+- AI 依赖本地/远端 Ollama 可达与模型可用性；不可达时返回 error/fallback，不会中断服务。
+
+### Next Actions
+
+1. 增加 AI SSE handler 的单元测试（流式事件顺序、错误分支、会话落盘）。
+2. 将 RBAC 页面权限码与后端 Casbin 权限模型整理为统一字典。
+3. 对非 admin 用户补齐角色-权限初始化脚本，降低“有账号无权限”问题。

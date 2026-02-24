@@ -117,5 +117,5 @@ llm:
   enable: true
   provider: "ollama" # 或 "ark" (火山引擎), "ollama"
   base_url: "http://localhost:11434"
-  model: "kimi-k2.5:cloud"
+  model: "glm-5:cloud"
   temperature: 0.7

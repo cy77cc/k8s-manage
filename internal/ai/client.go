@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino-ext/components/model/ollama"
 	"github.com/cloudwego/eino/components/model"
@@ -14,13 +16,17 @@ func NewChatModel(ctx context.Context) (model.ToolCallingChatModel, error) {
 	if !config.CFG.LLM.Enable {
 		return nil, nil
 	}
+	provider := strings.ToLower(strings.TrimSpace(config.CFG.LLM.Provider))
+	if provider != "" && provider != "ollama" {
+		return nil, fmt.Errorf("unsupported llm provider %q, only ollama is allowed", config.CFG.LLM.Provider)
+	}
 
-	// Create OpenAI ChatModel
-	// Note: API Key and BaseURL are required.
-	// temp := float32(config.CFG.LLM.Temperature)
 	chatModel, err := ollama.NewChatModel(ctx, &ollama.ChatModelConfig{
-		BaseURL: config.CFG.LLM.BaseURL,
+		BaseURL: config.CFG.LLM.BaseURL, 
 		Model:   config.CFG.LLM.Model,
+		Options: &ollama.Options{
+			Temperature: float32(config.CFG.LLM.Temperature),
+		},
 	})
 	if err != nil {
 		return nil, err

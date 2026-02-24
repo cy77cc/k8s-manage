@@ -8,6 +8,7 @@ import (
 	"github.com/casbin/casbin/v2"
 	"github.com/cy77cc/k8s-manage/internal/ai"
 	casbinadapter "github.com/cy77cc/k8s-manage/internal/component/casbin"
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/logger"
 	"github.com/cy77cc/k8s-manage/storage"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -33,18 +34,23 @@ func MustNewServiceContext() *ServiceContext {
 	ctx := context.Background()
 	chatModel, err := ai.NewChatModel(ctx)
 	if err != nil {
-		// Log warning but don't panic if AI fails? Or panic?
-		// User wants Eino integration, so maybe panic if config is enabled but fails.
-		// For now, let's just log or ignore if not enabled.
-		// But MustNewServiceContext implies "Must".
-		// However, ai.NewChatModel returns nil, nil if disabled.
+		logger.L().Warn("Failed to initialize AI chat model",
+			logger.String("provider", config.CFG.LLM.Provider),
+			logger.String("base_url", aiBaseURL()),
+			logger.String("model", aiModel()),
+			logger.Error(err),
+		)
 	}
 
 	clientset := MustNewClientset()
 
 	copilot, err := ai.NewK8sCopilot(ctx, chatModel, clientset)
 	if err != nil {
-		logger.L().Warn("Failed to initialize AI Copilot", logger.Error(err))
+		logger.L().Warn("Failed to initialize AI Copilot",
+			logger.String("base_url", aiBaseURL()),
+			logger.String("model", aiModel()),
+			logger.Error(err),
+		)
 	}
 
 	db := storage.MustNewDB()
@@ -71,6 +77,14 @@ func MustNewServiceContext() *ServiceContext {
 		AI:             copilot,
 		CasbinEnforcer: enforcer,
 	}
+}
+
+func aiBaseURL() string {
+	return config.CFG.LLM.BaseURL
+}
+
+func aiModel() string {
+	return config.CFG.LLM.Model
 }
 
 func MustNewClientset() *kubernetes.Clientset {

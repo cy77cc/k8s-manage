@@ -8,7 +8,7 @@ web-build:
 	cd web && npm run build
 
 build:
-	go build -o bin/k8s-mange main.go
+	go build -o bin/k8s-manage main.go
 
 build-all: web-build build
 

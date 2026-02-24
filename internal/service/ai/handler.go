@@ -1,11 +1,18 @@
 package ai
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/schema"
+	"github.com/cy77cc/k8s-manage/internal/logger"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"github.com/gin-gonic/gin"
 )
@@ -35,38 +42,86 @@ func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	g.GET("/sessions", listSessionsHandler())
 	g.GET("/sessions/:id", getSessionHandler())
 	g.DELETE("/sessions/:id", deleteSessionHandler())
-	g.POST("/analyze", analyzeHandler())
-	g.POST("/recommendations", recommendationsHandler())
-	g.POST("/k8s/analyze", k8sAnalyzeHandler())
+	g.POST("/analyze", analyzeHandler(svcCtx))
+	g.POST("/recommendations", recommendationsHandler(svcCtx))
+	g.POST("/k8s/analyze", k8sAnalyzeHandler(svcCtx))
 	g.POST("/k8s/actions/preview", actionPreviewHandler())
 	g.POST("/k8s/actions/execute", actionExecuteHandler())
 	g.POST("/actions/preview", actionPreviewHandler())
 	g.POST("/actions/execute", actionExecuteHandler())
 }
 
-func chatHandler(_ *svc.ServiceContext) gin.HandlerFunc {
+func chatHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req chatRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 			return
 		}
-		respText := "已收到你的问题：" + req.Message
-		sessionMu.Lock()
-		defer sessionMu.Unlock()
+
+		msg := strings.TrimSpace(req.Message)
+		if msg == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": "message is required"}})
+			return
+		}
+
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+		c.Status(http.StatusOK)
+
+		flusher, ok := c.Writer.(http.Flusher)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": "streaming not supported"}})
+			return
+		}
+
 		sid := req.SessionID
 		if sid == "" {
 			sid = fmt.Sprintf("sess-%d", time.Now().UnixNano())
 		}
-		s, ok := sessions[sid]
-		if !ok {
-			s = &aiSession{ID: sid, Title: "AI Session", CreatedAt: time.Now()}
-			sessions[sid] = s
+
+		userTime := time.Now()
+		session := appendMessage(sid, map[string]any{
+			"id":        fmt.Sprintf("u-%d", userTime.UnixNano()),
+			"role":      "user",
+			"content":   msg,
+			"timestamp": userTime,
+		})
+		if !writeSSE(c, flusher, "meta", gin.H{
+			"sessionId": session.ID,
+			"createdAt": session.CreatedAt,
+		}) {
+			return
 		}
-		now := time.Now()
-		s.Messages = append(s.Messages, map[string]any{"id": fmt.Sprintf("u-%d", now.UnixNano()), "role": "user", "content": req.Message, "timestamp": now}, map[string]any{"id": fmt.Sprintf("a-%d", now.UnixNano()+1), "role": "assistant", "content": respText, "timestamp": now})
-		s.UpdatedAt = now
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"session": s, "response": gin.H{"id": fmt.Sprintf("a-%d", now.UnixNano()+1), "role": "assistant", "content": respText, "timestamp": now}}})
+
+		var assistantContent strings.Builder
+		if err := streamAssistant(c.Request.Context(), svcCtx, msg, req.Context, func(chunk string) bool {
+			if chunk == "" {
+				return true
+			}
+			assistantContent.WriteString(chunk)
+			return writeSSE(c, flusher, "delta", gin.H{"contentChunk": chunk})
+		}); err != nil {
+			logger.L().Warn("ai stream failed", logger.Error(err))
+			_ = writeSSE(c, flusher, "error", gin.H{"message": err.Error()})
+			return
+		}
+
+		content := strings.TrimSpace(assistantContent.String())
+		if content == "" {
+			content = "当前没有可返回的结果，请稍后重试。"
+		}
+		assistantTime := time.Now()
+		session = appendMessage(sid, map[string]any{
+			"id":        fmt.Sprintf("a-%d", assistantTime.UnixNano()),
+			"role":      "assistant",
+			"content":   content,
+			"timestamp": assistantTime,
+		})
+
+		_ = writeSSE(c, flusher, "done", gin.H{"session": session})
 	}
 }
 
@@ -104,21 +159,87 @@ func deleteSessionHandler() gin.HandlerFunc {
 	}
 }
 
-func analyzeHandler() gin.HandlerFunc {
+func analyzeHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"id": fmt.Sprintf("ana-%d", time.Now().UnixNano()), "type": "generic", "title": "AI 分析结果", "summary": "MVP阶段分析能力已启用", "details": gin.H{}, "createdAt": time.Now()}})
+		var req map[string]any
+		_ = c.ShouldBindJSON(&req)
+
+		summary := "MVP阶段分析能力已启用"
+		dataSource := "fallback"
+		if out, err := generateByLLM(c.Request.Context(), svcCtx, "请根据输入生成简短运维分析摘要，最多120字："+mustJSON(req)); err == nil && strings.TrimSpace(out) != "" {
+			summary = out
+			dataSource = "llm"
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"id":          fmt.Sprintf("ana-%d", time.Now().UnixNano()),
+				"type":        "generic",
+				"title":       "AI 分析结果",
+				"summary":     summary,
+				"details":     req,
+				"createdAt":   time.Now(),
+				"data_source": dataSource,
+			},
+		})
 	}
 }
 
-func recommendationsHandler() gin.HandlerFunc {
+func recommendationsHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": []gin.H{{"id": fmt.Sprintf("rec-%d", time.Now().UnixNano()), "type": "suggestion", "title": "建议 #1", "content": "建议先观察资源使用，再执行变更。", "relevance": 0.8, "action": "k8s.scale.deployment", "params": gin.H{"replicas": 2}}}})
+		var req map[string]any
+		_ = c.ShouldBindJSON(&req)
+
+		content := "建议先观察资源使用，再执行变更。"
+		dataSource := "fallback"
+		if out, err := generateByLLM(c.Request.Context(), svcCtx, "请基于运维上下文给出一条可执行建议："+mustJSON(req)); err == nil && strings.TrimSpace(out) != "" {
+			content = out
+			dataSource = "llm"
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": []gin.H{{
+				"id":          fmt.Sprintf("rec-%d", time.Now().UnixNano()),
+				"type":        "suggestion",
+				"title":       "建议 #1",
+				"content":     content,
+				"relevance":   0.8,
+				"action":      "k8s.scale.deployment",
+				"params":      gin.H{"replicas": 2},
+				"data_source": dataSource,
+			}},
+		})
 	}
 }
 
-func k8sAnalyzeHandler() gin.HandlerFunc {
+func k8sAnalyzeHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"insights": []string{"建议优先检查异常 Pod 的重启次数和事件。", "建议确认 Deployment 副本数与实际运行数是否一致。"}, "risks": []string{"高峰时段直接变更副本可能引发抖动。"}, "recommended_actions": []gin.H{{"action": "k8s.scale.deployment", "params": gin.H{"replicas": 2}, "reason": "优先验证扩缩容链路"}}}})
+		var req map[string]any
+		_ = c.ShouldBindJSON(&req)
+
+		insights := []string{
+			"建议优先检查异常 Pod 的重启次数和事件。",
+			"建议确认 Deployment 副本数与实际运行数是否一致。",
+		}
+		dataSource := "fallback"
+		if out, err := generateByLLM(c.Request.Context(), svcCtx, "你是K8s运维助手。根据如下输入给出2条诊断建议（每条一句）:"+mustJSON(req)); err == nil && strings.TrimSpace(out) != "" {
+			insights = strings.Split(out, "\n")
+			dataSource = "llm"
+		}
+
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"insights": insights,
+			"risks": []string{
+				"高峰时段直接变更副本可能引发抖动。",
+			},
+			"recommended_actions": []gin.H{{
+				"action": "k8s.scale.deployment",
+				"params": gin.H{"replicas": 2},
+				"reason": "优先验证扩缩容链路",
+			}},
+			"data_source": dataSource,
+		}})
 	}
 }
 
@@ -142,4 +263,105 @@ func actionExecuteHandler() gin.HandlerFunc {
 		_ = c.ShouldBindJSON(&req)
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"approval_token": req.ApprovalToken, "status": "executed"}})
 	}
+}
+
+func streamAssistant(ctx context.Context, svcCtx *svc.ServiceContext, message string, msgContext map[string]any, onDelta func(chunk string) bool) error {
+	if svcCtx == nil || svcCtx.AI == nil || svcCtx.AI.Runnable == nil {
+		if !onDelta("AI 功能未初始化，请检查 LLM 配置与服务连接。") {
+			return errors.New("client closed")
+		}
+		return nil
+	}
+
+	prompt := message
+	if len(msgContext) > 0 {
+		prompt = message + "\n\n上下文:\n" + mustJSON(msgContext)
+	}
+	stream, err := svcCtx.AI.Runnable.Stream(ctx, []*schema.Message{schema.UserMessage(prompt)})
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	for {
+		msg, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			return nil
+		}
+		if recvErr != nil {
+			return recvErr
+		}
+		if msg == nil || msg.Role != schema.Assistant || msg.Content == "" {
+			continue
+		}
+		if !onDelta(msg.Content) {
+			return errors.New("client closed")
+		}
+	}
+}
+
+func generateByLLM(ctx context.Context, svcCtx *svc.ServiceContext, prompt string) (string, error) {
+	if svcCtx == nil || svcCtx.AI == nil || svcCtx.AI.Runnable == nil {
+		return "", errors.New("ai not initialized")
+	}
+	msg, err := svcCtx.AI.Runnable.Generate(ctx, []*schema.Message{schema.UserMessage(prompt)})
+	if err != nil {
+		return "", err
+	}
+	if msg == nil {
+		return "", errors.New("empty ai response")
+	}
+	return strings.TrimSpace(msg.Content), nil
+}
+
+func appendMessage(sessionID string, message map[string]any) *aiSession {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
+	now := time.Now()
+	s, ok := sessions[sessionID]
+	if !ok {
+		s = &aiSession{
+			ID:        sessionID,
+			Title:     "AI Session",
+			CreatedAt: now,
+		}
+		sessions[sessionID] = s
+	}
+	s.Messages = append(s.Messages, message)
+	s.UpdatedAt = now
+	return cloneSession(s)
+}
+
+func cloneSession(in *aiSession) *aiSession {
+	out := *in
+	out.Messages = make([]map[string]any, 0, len(in.Messages))
+	for _, m := range in.Messages {
+		cloned := make(map[string]any, len(m))
+		for k, v := range m {
+			cloned[k] = v
+		}
+		out.Messages = append(out.Messages, cloned)
+	}
+	return &out
+}
+
+func writeSSE(c *gin.Context, flusher http.Flusher, event string, payload any) bool {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+	if _, err = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, raw); err != nil {
+		return false
+	}
+	flusher.Flush()
+	return true
+}
+
+func mustJSON(v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
 }

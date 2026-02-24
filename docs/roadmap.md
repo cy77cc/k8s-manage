@@ -39,8 +39,8 @@
 | Hosts | In Progress | CRUD + action + ssh exec + batch |
 | Clusters / K8s | In Progress | list/create/detail + nodes/pods/deployments/services/ingresses/events/logs + deploy preview/apply |
 | Services | In Progress | CRUD + deploy + quota/events/rollback(mvp stub) |
-| RBAC | In Progress | me permissions/check + users/roles/permissions minimal CRUD |
-| AI | In Progress | chat/session/analyze/recommendations + k8s analyze/action preview/execute |
+| RBAC | In Progress | admin 全量放行（含 `*:*`），非 admin 继续走数据库权限 |
+| AI | In Progress | Eino + Ollama(`glm-5:cloud`) + `/ai/chat` SSE 流式，保留 sessions/analyze/k8s actions |
 
 ## 4. API Coverage Matrix (MVP)
 
@@ -52,3 +52,9 @@
 | Services | `/api/v1/services/*` | In Progress |
 | Settings-RBAC | `/api/v1/rbac/*` | In Progress |
 | Global AI Assistant | `/api/v1/ai/*` | In Progress |
+
+## 5. Current Decisions (2026-02-24)
+
+- AI chat protocol统一为 SSE（`meta/delta/done/error`）。
+- LLM 统一走 `ollama` provider，默认模型 `glm-5:cloud`。
+- RBAC admin 采用临时全量放行策略，保障平台管理页可用性。
