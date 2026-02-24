@@ -2,6 +2,8 @@ package handler
 
 import (
 	"errors"
+	"strings"
+
 	v1 "github.com/cy77cc/k8s-manage/api/node/v1"
 	"github.com/cy77cc/k8s-manage/internal/response"
 	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
@@ -43,7 +45,34 @@ func (n *NodeHandler) Add(c *gin.Context) {
 		keyID := uint64(req.SSHKeyID)
 		createReq.SSHKeyID = &keyID
 	}
-	node, err := hostlogic.NewHostService(n.svcCtx).CreateWithProbe(c.Request.Context(), 0, true, createReq)
+	hostSvc := hostlogic.NewHostService(n.svcCtx)
+	probeReq := hostlogic.ProbeReq{
+		Name:     req.Name,
+		IP:       req.IP,
+		Port:     req.Port,
+		AuthType: "password",
+		Username: req.SSHUser,
+		Password: req.SSHPassword,
+	}
+	if createReq.SSHKeyID != nil {
+		probeReq.AuthType = "key"
+		probeReq.SSHKeyID = createReq.SSHKeyID
+	}
+	probeResp, err := hostSvc.Probe(c.Request.Context(), 0, probeReq)
+	if err != nil {
+		response.Response(c, nil, xcode.FromError(err))
+		return
+	}
+	if probeResp == nil || !probeResp.Reachable {
+		msg := "ssh probe failed"
+		if probeResp != nil && strings.TrimSpace(probeResp.Message) != "" {
+			msg = probeResp.Message
+		}
+		response.Response(c, nil, xcode.FromError(errors.New(msg)))
+		return
+	}
+	createReq.ProbeToken = probeResp.ProbeToken
+	node, err := hostSvc.CreateWithProbe(c.Request.Context(), 0, true, createReq)
 	if err != nil {
 		response.Response(c, nil, xcode.FromError(err))
 		return

@@ -58,12 +58,16 @@ func (h *handler) chat(c *gin.Context) {
 	}
 
 	userTime := time.Now()
-	session := h.store.appendMessage(uid, scene, sid, map[string]any{
+	session, err := h.store.appendMessage(uid, scene, sid, map[string]any{
 		"id":        fmt.Sprintf("u-%d", userTime.UnixNano()),
 		"role":      "user",
 		"content":   msg,
 		"timestamp": userTime,
 	})
+	if err != nil {
+		_ = writeSSE(c, flusher, "error", gin.H{"message": err.Error()})
+		return
+	}
 	if !writeSSE(c, flusher, "meta", gin.H{"sessionId": session.ID, "createdAt": session.CreatedAt}) {
 		return
 	}
@@ -125,13 +129,17 @@ func (h *handler) chat(c *gin.Context) {
 		content = "已完成。"
 	}
 	assistantTime := time.Now()
-	session = h.store.appendMessage(uid, scene, sid, map[string]any{
+	session, err = h.store.appendMessage(uid, scene, sid, map[string]any{
 		"id":        fmt.Sprintf("a-%d", assistantTime.UnixNano()),
 		"role":      "assistant",
 		"content":   content,
 		"thinking":  strings.TrimSpace(reasoningContent.String()),
 		"timestamp": assistantTime,
 	})
+	if err != nil {
+		_ = writeSSE(c, flusher, "error", gin.H{"message": err.Error()})
+		return
+	}
 	h.refreshSuggestions(uid, scene, content)
 	_ = writeSSE(c, flusher, "done", gin.H{"session": session})
 }

@@ -1,15 +1,17 @@
 package ai
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/cy77cc/k8s-manage/internal/model"
+	"gorm.io/gorm"
 )
 
-func (s *memoryStore) appendMessage(userID uint64, scene, sessionID string, message map[string]any) *aiSession {
+func (s *memoryStore) appendMessage(userID uint64, scene, sessionID string, message map[string]any) (*aiSession, error) {
 	now := time.Now()
 	scene = normalizeScene(scene)
 	sid := strings.TrimSpace(sessionID)
@@ -21,20 +23,34 @@ func (s *memoryStore) appendMessage(userID uint64, scene, sessionID string, mess
 	}
 
 	if !s.dbEnabled() {
-		return &aiSession{ID: sid, Scene: scene, Title: "AI Session", Messages: []map[string]any{message}, CreatedAt: now, UpdatedAt: now}
+		return &aiSession{ID: sid, Scene: scene, Title: "AI Session", Messages: []map[string]any{message}, CreatedAt: now, UpdatedAt: now}, nil
 	}
 
 	var sess model.AIChatSession
 	err := s.db.Where("id = ? AND user_id = ?", sid, userID).First(&sess).Error
-	if err != nil {
-		sess = model.AIChatSession{ID: sid, UserID: userID, Scene: scene, Title: "AI Session", CreatedAt: now, UpdatedAt: now}
-		_ = s.db.Create(&sess).Error
-	} else {
+	switch {
+	case err == nil:
 		if sess.Scene == "" {
 			sess.Scene = scene
 		}
 		sess.UpdatedAt = now
-		_ = s.db.Save(&sess).Error
+		if saveErr := s.db.Save(&sess).Error; saveErr != nil {
+			return nil, saveErr
+		}
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		var exists int64
+		if countErr := s.db.Model(&model.AIChatSession{}).Where("id = ?", sid).Count(&exists).Error; countErr != nil {
+			return nil, countErr
+		}
+		if exists > 0 {
+			return nil, errors.New("session not found")
+		}
+		sess = model.AIChatSession{ID: sid, UserID: userID, Scene: scene, Title: "AI Session", CreatedAt: now, UpdatedAt: now}
+		if createErr := s.db.Create(&sess).Error; createErr != nil {
+			return nil, createErr
+		}
+	default:
+		return nil, err
 	}
 
 	msgID := strings.TrimSpace(toString(message["id"]))
@@ -48,16 +64,22 @@ func (s *memoryStore) appendMessage(userID uint64, scene, sessionID string, mess
 	if t, ok := message["timestamp"].(time.Time); ok {
 		createdAt = t
 	}
-	_ = s.db.Create(&model.AIChatMessage{
+	if err := s.db.Create(&model.AIChatMessage{
 		ID:        msgID,
 		SessionID: sid,
 		Role:      role,
 		Content:   content,
 		Thinking:  thinking,
 		CreatedAt: createdAt,
-	}).Error
+	}).Error; err != nil {
+		return nil, err
+	}
 
-	return s.mustLoadSession(userID, sid)
+	loaded := s.mustLoadSession(userID, sid)
+	if loaded == nil {
+		return nil, errors.New("session not found")
+	}
+	return loaded, nil
 }
 
 func (s *memoryStore) getOrCreateCurrentSessionID(userID uint64, scene string) string {
@@ -124,8 +146,16 @@ func (s *memoryStore) deleteSession(userID uint64, id string) {
 	if !s.dbEnabled() {
 		return
 	}
-	_ = s.db.Where("session_id = ?", id).Delete(&model.AIChatMessage{}).Error
-	_ = s.db.Where("id = ? AND user_id = ?", id, userID).Delete(&model.AIChatSession{}).Error
+	_ = s.db.Transaction(func(tx *gorm.DB) error {
+		var sess model.AIChatSession
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).First(&sess).Error; err != nil {
+			return nil
+		}
+		if err := tx.Where("session_id = ?", sess.ID).Delete(&model.AIChatMessage{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ? AND user_id = ?", sess.ID, userID).Delete(&model.AIChatSession{}).Error
+	})
 }
 
 func (s *memoryStore) mustLoadSession(userID uint64, id string) *aiSession {
