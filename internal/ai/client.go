@@ -19,7 +19,7 @@ func NewChatModel(ctx context.Context) (chatModel model.ToolCallingChatModel, er
 
 	switch provider {
 	case "qwen":
-		qwen.NewChatModel(ctx, &qwen.ChatModelConfig{
+		chatModel, err = qwen.NewChatModel(ctx, &qwen.ChatModelConfig{
 			BaseURL: config.CFG.LLM.BaseURL,
 			Model:   config.CFG.LLM.Model,
 			APIKey:  config.CFG.LLM.APIKey,
