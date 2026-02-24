@@ -89,3 +89,47 @@
 1. 增加 AI SSE handler 的单元测试（流式事件顺序、错误分支、会话落盘）。
 2. 将 RBAC 页面权限码与后端 Casbin 权限模型整理为统一字典。
 3. 对非 admin 用户补齐角色-权限初始化脚本，降低“有账号无权限”问题。
+
+## 2026-02-24 (AI Control Plane + Function Calling)
+
+### Scope
+
+- 实施 AI 全域融合第 1 批：控制面、工具运行时、审批执行链、OS/K8s/Service/Host function calling。
+
+### Completed
+
+- 后端 AI 控制面新增接口：
+  - `GET /api/v1/ai/capabilities`
+  - `POST /api/v1/ai/tools/preview`
+  - `POST /api/v1/ai/tools/execute`
+  - `GET /api/v1/ai/executions/:id`
+  - `POST /api/v1/ai/approvals`
+  - `POST /api/v1/ai/approvals/:id/confirm`
+- `/api/v1/ai/chat` SSE 新增事件：
+  - `tool_call`
+  - `tool_result`
+  - `approval_required`
+- 工具注册与执行：
+  - OS: cpu/mem, disk/fs, net stat, process top, journal tail, container runtime
+  - K8s: list resources, events, pod logs
+  - Services: detail, deploy preview, deploy apply(审批)
+  - Host: ssh readonly command
+- 策略基线：
+  - 默认只读
+  - mutating 工具必须 `approval_token`
+  - 目标白名单（localhost 或数据库已登记节点）
+- 前端 API 扩展：
+  - `AICapability`, `ToolExecution`, `ApprovalTicket`, `RiskLevel`
+  - 工具预览/执行/审批/执行查询接口
+
+### Known Gaps / Risks
+
+- 控制面状态当前为内存态（单实例友好，多实例需落库或Redis共享状态）。
+- 审批与执行审计表尚未落 DB（已保留后续迁移接口与文档）。
+- SSE 聊天中的工具触发暂为显式触发（`/tool` 或 `context.tool_name`）。
+
+### Next Actions
+
+1. 落地 `ai_sessions/ai_messages/ai_tool_calls/ai_approvals` 数据表与迁移脚本。
+2. 前端新增审批中心与执行时间线 UI。
+3. 将 tool runtime 从内存迁移到持久化审计存储并增加分页查询。

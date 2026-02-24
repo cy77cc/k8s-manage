@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/cy77cc/k8s-manage/internal/logger"
+	"github.com/cy77cc/k8s-manage/internal/middleware"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"github.com/gin-gonic/gin"
 )
@@ -37,8 +38,17 @@ var (
 )
 
 func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
-	g := v1.Group("/ai")
+	ensureControlPlane(svcCtx)
+	maybeAddAIPermissions(svcCtx)
+
+	g := v1.Group("/ai", middleware.JWTAuth())
 	g.POST("/chat", chatHandler(svcCtx))
+	g.GET("/capabilities", capabilitiesHandler(svcCtx))
+	g.POST("/tools/preview", previewToolHandler(svcCtx))
+	g.POST("/tools/execute", executeToolHandler(svcCtx))
+	g.GET("/executions/:id", executionHandler(svcCtx))
+	g.POST("/approvals", createApprovalHandler(svcCtx))
+	g.POST("/approvals/:id/confirm", confirmApprovalHandler(svcCtx))
 	g.GET("/sessions", listSessionsHandler())
 	g.GET("/sessions/:id", getSessionHandler())
 	g.DELETE("/sessions/:id", deleteSessionHandler())
@@ -93,6 +103,54 @@ func chatHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
 			"sessionId": session.ID,
 			"createdAt": session.CreatedAt,
 		}) {
+			return
+		}
+
+		uid, _ := getUIDFromContext(c)
+		if toolName, params, approvalToken, ok := extractToolRequest(msg, req.Context); ok {
+			_ = writeSSE(c, flusher, "tool_call", gin.H{"tool": toolName, "params": params})
+
+			cp := ensureControlPlane(svcCtx)
+			previewData, err := cp.previewTool(uid, toolName, params)
+			if err != nil {
+				_ = writeSSE(c, flusher, "error", gin.H{"message": err.Error()})
+				return
+			}
+
+			needApproval, _ := previewData["approval_required"].(bool)
+			if needApproval && strings.TrimSpace(approvalToken) == "" {
+				_ = writeSSE(c, flusher, "approval_required", previewData)
+				assistantTime := time.Now()
+				session = appendMessage(sid, map[string]any{
+					"id":        fmt.Sprintf("a-%d", assistantTime.UnixNano()),
+					"role":      "assistant",
+					"content":   "该操作需要审批，请先确认 approval token 后重试执行。",
+					"timestamp": assistantTime,
+				})
+				_ = writeSSE(c, flusher, "done", gin.H{"session": session})
+				return
+			}
+
+			execRec, err := cp.executeTool(c.Request.Context(), uid, toolName, params, approvalToken)
+			if err != nil {
+				_ = writeSSE(c, flusher, "tool_result", gin.H{"execution": execRec})
+				_ = writeSSE(c, flusher, "error", gin.H{"message": err.Error()})
+				return
+			}
+			_ = writeSSE(c, flusher, "tool_result", gin.H{"execution": execRec})
+
+			toolText := "工具调用已完成。"
+			if execRec.Result != nil {
+				toolText = fmt.Sprintf("工具 %s 执行完成，状态：%s。", execRec.Tool, execRec.Status)
+			}
+			assistantTime := time.Now()
+			session = appendMessage(sid, map[string]any{
+				"id":        fmt.Sprintf("a-%d", assistantTime.UnixNano()),
+				"role":      "assistant",
+				"content":   toolText,
+				"timestamp": assistantTime,
+			})
+			_ = writeSSE(c, flusher, "done", gin.H{"session": session})
 			return
 		}
 
@@ -364,4 +422,31 @@ func mustJSON(v any) string {
 		return "{}"
 	}
 	return string(raw)
+}
+
+func extractToolRequest(message string, msgContext map[string]any) (string, map[string]any, string, bool) {
+	toolName := strings.TrimSpace(toString(msgContext["tool_name"]))
+	params, _ := msgContext["tool_params"].(map[string]any)
+	approvalToken := strings.TrimSpace(toString(msgContext["approval_token"]))
+	if toolName != "" {
+		if params == nil {
+			params = map[string]any{}
+		}
+		return toolName, params, approvalToken, true
+	}
+
+	msg := strings.TrimSpace(message)
+	if !strings.HasPrefix(msg, "/tool ") {
+		return "", nil, "", false
+	}
+	parts := strings.SplitN(strings.TrimSpace(strings.TrimPrefix(msg, "/tool ")), " ", 2)
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return "", nil, "", false
+	}
+	toolName = strings.TrimSpace(parts[0])
+	params = map[string]any{}
+	if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+		_ = json.Unmarshal([]byte(parts[1]), &params)
+	}
+	return toolName, params, approvalToken, true
 }
