@@ -11,7 +11,9 @@ import (
 	"time"
 
 	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/k8s-manage/internal/utils"
 	"github.com/google/uuid"
 )
 
@@ -92,8 +94,11 @@ func (s *HostService) loadPrivateKey(ctx context.Context, sshKeyID *uint64) (str
 		return "", nil
 	}
 	var key model.SSHKey
-	if err := s.svcCtx.DB.WithContext(ctx).Select("id", "private_key").Where("id = ?", *sshKeyID).First(&key).Error; err != nil {
+	if err := s.svcCtx.DB.WithContext(ctx).Select("id", "private_key", "encrypted").Where("id = ?", *sshKeyID).First(&key).Error; err != nil {
 		return "", err
+	}
+	if key.Encrypted {
+		return utils.DecryptText(key.PrivateKey, config.CFG.Security.EncryptionKey)
 	}
 	return key.PrivateKey, nil
 }

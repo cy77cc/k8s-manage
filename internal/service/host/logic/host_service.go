@@ -58,20 +58,24 @@ type ProbeResp struct {
 }
 
 type CreateReq struct {
-	ProbeToken  string   `json:"probe_token"`
-	Name        string   `json:"name"`
-	IP          string   `json:"ip"`
-	Port        int      `json:"port"`
-	AuthType    string   `json:"auth_type"`
-	Username    string   `json:"username"`
-	Password    string   `json:"password"`
-	SSHKeyID    *uint64  `json:"ssh_key_id"`
-	Description string   `json:"description"`
-	Labels      []string `json:"labels"`
-	Role        string   `json:"role"`
-	ClusterID   uint     `json:"cluster_id"`
-	Force       bool     `json:"force"`
-	Status      string   `json:"status"`
+	ProbeToken   string   `json:"probe_token"`
+	Name         string   `json:"name"`
+	IP           string   `json:"ip"`
+	Port         int      `json:"port"`
+	AuthType     string   `json:"auth_type"`
+	Username     string   `json:"username"`
+	Password     string   `json:"password"`
+	SSHKeyID     *uint64  `json:"ssh_key_id"`
+	Description  string   `json:"description"`
+	Labels       []string `json:"labels"`
+	Role         string   `json:"role"`
+	ClusterID    uint     `json:"cluster_id"`
+	Source       string   `json:"source"`
+	Provider     string   `json:"provider"`
+	ProviderID   string   `json:"provider_instance_id"`
+	ParentHostID *uint64  `json:"parent_host_id"`
+	Force        bool     `json:"force"`
+	Status       string   `json:"status"`
 }
 
 type UpdateCredentialsReq struct {

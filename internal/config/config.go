@@ -121,6 +121,7 @@ type Metrics struct {
 type Security struct {
 	TrustedProxies []string `mapstructure:"trusted_proxies"`
 	HideBanner     bool     `mapstructure:"hide_banner"`
+	EncryptionKey  string   `mapstructure:"encryption_key"`
 }
 
 type LLM struct {

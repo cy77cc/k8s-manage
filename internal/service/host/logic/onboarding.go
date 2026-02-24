@@ -48,10 +48,16 @@ func (s *HostService) CreateWithProbe(ctx context.Context, userID uint64, isAdmi
 		DiskGB:      facts.DiskGB,
 		Role:        req.Role,
 		ClusterID:   req.ClusterID,
+		Source:      firstNonEmpty(req.Source, "manual_ssh"),
+		Provider:    req.Provider,
+		ProviderID:  req.ProviderID,
 		LastCheckAt: time.Now(),
 	}
 	if probe.SSHKeyID != nil {
 		node.SSHKeyID = nodeIDPtr(*probe.SSHKeyID)
+	}
+	if req.ParentHostID != nil {
+		node.ParentHostID = nodeIDPtr(*req.ParentHostID)
 	}
 
 	if err := s.svcCtx.DB.WithContext(ctx).Create(node).Error; err != nil {
@@ -126,9 +132,15 @@ func (s *HostService) createFromLegacyReq(ctx context.Context, req CreateReq) (*
 		Status:      status,
 		Role:        req.Role,
 		ClusterID:   req.ClusterID,
+		Source:      firstNonEmpty(req.Source, "manual_ssh"),
+		Provider:    req.Provider,
+		ProviderID:  req.ProviderID,
 	}
 	if req.SSHKeyID != nil {
 		node.SSHKeyID = nodeIDPtr(*req.SSHKeyID)
+	}
+	if req.ParentHostID != nil {
+		node.ParentHostID = nodeIDPtr(*req.ParentHostID)
 	}
 	if err := s.svcCtx.DB.WithContext(ctx).Create(node).Error; err != nil {
 		return nil, err

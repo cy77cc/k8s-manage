@@ -113,6 +113,7 @@ security:
     - 10.0.0.0/8
     - 192.168.0.0/16
   hide_banner: true
+  encryption_key: ${SECURITY_ENCRYPTION_KEY}
 
 llm:
   enable: true

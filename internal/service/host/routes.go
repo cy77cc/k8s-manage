@@ -11,6 +11,18 @@ func RegisterHostHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	h := handler.NewHandler(svcCtx)
 	g := v1.Group("/hosts", middleware.JWTAuth())
 	{
+		g.GET("/sources", func(c *gin.Context) {
+			c.JSON(200, gin.H{"code": 1000, "msg": "ok", "data": []string{"manual_ssh", "cloud_import", "kvm_provision"}})
+		})
+		g.GET("/cloud/accounts", h.ListCloudAccounts)
+		g.POST("/cloud/accounts", h.CreateCloudAccount)
+		g.POST("/cloud/providers/:provider/accounts/test", h.TestCloudAccount)
+		g.POST("/cloud/providers/:provider/instances/query", h.QueryCloudInstances)
+		g.POST("/cloud/providers/:provider/instances/import", h.ImportCloudInstances)
+		g.GET("/cloud/import_tasks/:task_id", h.GetCloudImportTask)
+		g.POST("/virtualization/kvm/hosts/:id/preview", h.KVMPreview)
+		g.POST("/virtualization/kvm/hosts/:id/provision", h.KVMProvision)
+		g.GET("/virtualization/tasks/:task_id", h.GetVirtualizationTask)
 		g.GET("", h.List)
 		g.POST("/probe", h.Probe)
 		g.POST("", h.Create)
@@ -29,5 +41,13 @@ func RegisterHostHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.DELETE("/:id/tags/:tag", h.RemoveTag)
 		g.GET("/:id/metrics", h.Metrics)
 		g.GET("/:id/audits", h.Audits)
+	}
+
+	cred := v1.Group("/credentials", middleware.JWTAuth())
+	{
+		cred.GET("/ssh_keys", h.ListSSHKeys)
+		cred.POST("/ssh_keys", h.CreateSSHKey)
+		cred.DELETE("/ssh_keys/:id", h.DeleteSSHKey)
+		cred.POST("/ssh_keys/:id/verify", h.VerifySSHKey)
 	}
 }

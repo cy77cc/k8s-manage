@@ -296,3 +296,56 @@
 1. 将 `rbac` 拆分为 `permission.go + user_role.go` 等更细文件。
 2. 在 HostList 页面移除 legacy 弹窗创建，统一跳转三步向导。
 3. 为 onboarding 增加后端集成测试（token 一次性消费/过期/非 admin force）。
+
+## 2026-02-24 (Team: Host Platform Expansion - SSH/Credentials/Cloud/KVM)
+
+### Team
+
+- CTO(`cto-vogels`): 多入口主机接入架构与安全边界。
+- Product(`product-norman`): 主机多入口流程与页面路径规划。
+- Fullstack(`fullstack-dhh`): 后端接口与前端页面落地。
+- QA(`qa-bach`): 回归矩阵与发布验收项。
+
+### Completed
+
+- Host 领域新增能力（后端）：
+  - `GET|POST|DELETE /api/v1/credentials/ssh_keys*`
+  - `POST /api/v1/credentials/ssh_keys/:id/verify`
+  - `GET|POST /api/v1/hosts/cloud/accounts`
+  - `POST /api/v1/hosts/cloud/providers/:provider/accounts/test`
+  - `POST /api/v1/hosts/cloud/providers/:provider/instances/query`
+  - `POST /api/v1/hosts/cloud/providers/:provider/instances/import`
+  - `GET /api/v1/hosts/cloud/import_tasks/:task_id`
+  - `POST /api/v1/hosts/virtualization/kvm/hosts/:id/preview`
+  - `POST /api/v1/hosts/virtualization/kvm/hosts/:id/provision`
+  - `GET /api/v1/hosts/virtualization/tasks/:task_id`
+- 安全：
+  - 新增 `internal/utils/secret.go`（AES-GCM）
+  - SSH 私钥、云账号密钥加密落库（依赖 `security.encryption_key`）
+- 数据模型：
+  - `nodes` 扩展：`source/provider/provider_instance_id/parent_host_id`
+  - `ssh_keys` 扩展：`fingerprint/algorithm/encrypted/usage_count`
+  - 新增表模型：`host_cloud_accounts/host_import_tasks/host_virtualization_tasks`
+- 迁移：
+  - 新增 `storage/migrations/20260224_000003_host_platform_and_key_management.sql`
+- 前端：
+  - 新增页面：`/hosts/keys`、`/hosts/cloud-import`、`/hosts/virtualization`
+  - `HostListPage` 新增“新增主机”下拉入口，支持三种接入方式 + 密钥管理
+  - `hosts.ts` API 模块扩展 cloud/kvm/credentials 方法
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+### Known Gaps / Risks
+
+- 云平台 provider 当前是 MVP mock 适配，未接真实云SDK调用。
+- KVM 创建当前是任务模型与主机纳管闭环，未接 libvirt 实际执行器。
+- migration 中 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 依赖较新 MySQL 版本。
+
+### Next Actions
+
+1. 接入阿里云/腾讯云 SDK 的真实实例查询与导入。
+2. 将 KVM 流程切换到 libvirt 执行器并补充任务状态机。
+3. 为密钥管理和云导入补充后端集成测试与 RBAC 细粒度权限码。

@@ -84,3 +84,18 @@
   - `storage/migration/runner.go`
   - `storage/migrations/*.sql`
   - 启动前执行 `RunMigrations(db)`，`app.auto_migrate` 仅用于开发显式开启。
+
+## 7. Host Platform Expansion (2026-02-24)
+
+- Host 接入来源扩展：`manual_ssh` / `cloud_import` / `kvm_provision`。
+- 新接口组：
+  - `/api/v1/credentials/ssh_keys*`
+  - `/api/v1/hosts/cloud/*`
+  - `/api/v1/hosts/virtualization/*`
+- 数据结构扩展：
+  - `nodes`: `source/provider/provider_instance_id/parent_host_id`
+  - `ssh_keys`: `fingerprint/algorithm/encrypted/usage_count`
+  - 新表：`host_cloud_accounts`, `host_import_tasks`, `host_virtualization_tasks`
+- 安全策略：
+  - 私钥与云密钥使用 AES-GCM 加密落库（`security.encryption_key`）
+  - 前端不回显私钥，仅展示指纹与元信息。

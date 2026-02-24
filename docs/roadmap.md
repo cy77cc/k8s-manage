@@ -37,7 +37,7 @@
 | --- | --- | --- |
 | Frontend Embed Serving | Done | `web/dist` embed + SPA fallback |
 | Auth | In Progress | login/register/refresh/logout + `auth/me` |
-| Hosts | In Progress | CRUD + action + ssh exec + batch + onboarding token flow |
+| Hosts | In Progress | CRUD + action + ssh exec + batch + onboarding token flow + cloud/kvm/credentials mvp |
 | Clusters / K8s | In Progress | list/create/detail + nodes/pods/deployments/services/ingresses/events/logs + deploy preview/apply |
 | Services | In Progress | CRUD + deploy + quota/events/rollback(mvp stub) |
 | RBAC | In Progress | admin 全量放行（含 `*:*`），非 admin 继续走数据库权限 |
@@ -54,6 +54,9 @@
 | Settings-RBAC | `/api/v1/rbac/*` | In Progress |
 | Global AI Assistant | `/api/v1/ai/*` | In Progress |
 | Node legacy adapter | `/api/v1/node/add` | In Progress (deprecated, delegating to host domain) |
+| Host Credentials | `/api/v1/credentials/ssh_keys*` | In Progress |
+| Host Cloud Import | `/api/v1/hosts/cloud/*` | In Progress |
+| Host Virtualization | `/api/v1/hosts/virtualization/*` | In Progress |
 
 ## 5. Current Decisions (2026-02-24)
 

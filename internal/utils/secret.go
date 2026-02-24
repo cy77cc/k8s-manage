@@ -1,0 +1,64 @@
+package utils
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
+	"io"
+)
+
+func EncryptText(plainText string, key string) (string, error) {
+	if key == "" {
+		return "", errors.New("encryption key is empty")
+	}
+	block, err := aes.NewCipher(normalizeKey(key))
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	cipherData := gcm.Seal(nonce, nonce, []byte(plainText), nil)
+	return base64.StdEncoding.EncodeToString(cipherData), nil
+}
+
+func DecryptText(cipherTextB64 string, key string) (string, error) {
+	if key == "" {
+		return "", errors.New("encryption key is empty")
+	}
+	cipherData, err := base64.StdEncoding.DecodeString(cipherTextB64)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(normalizeKey(key))
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(cipherData) < nonceSize {
+		return "", errors.New("cipher data too short")
+	}
+	nonce, payload := cipherData[:nonceSize], cipherData[nonceSize:]
+	plain, err := gcm.Open(nil, nonce, payload, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
+
+func normalizeKey(key string) []byte {
+	sum := sha256.Sum256([]byte(key))
+	return sum[:]
+}

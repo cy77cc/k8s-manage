@@ -75,8 +75,10 @@ func Migrate(db *gorm.DB, direction Direction, steps int) error {
 				return fmt.Errorf("migration %s has empty up sql", mf.Name)
 			}
 			if err := db.Transaction(func(tx *gorm.DB) error {
-				if err := tx.Exec(mf.UpSQL).Error; err != nil {
-					return err
+				for _, stmt := range splitSQLStatements(mf.UpSQL) {
+					if err := tx.Exec(stmt).Error; err != nil {
+						return err
+					}
 				}
 				return tx.Exec(
 					"INSERT INTO "+migrationTable+" (version, name, applied_at) VALUES (?, ?, ?)",
@@ -107,8 +109,10 @@ func Migrate(db *gorm.DB, direction Direction, steps int) error {
 				return fmt.Errorf("migration %s has empty down sql", mf.Name)
 			}
 			if err := db.Transaction(func(tx *gorm.DB) error {
-				if err := tx.Exec(mf.DownSQL).Error; err != nil {
-					return err
+				for _, stmt := range splitSQLStatements(mf.DownSQL) {
+					if err := tx.Exec(stmt).Error; err != nil {
+						return err
+					}
 				}
 				return tx.Exec("DELETE FROM "+migrationTable+" WHERE version = ?", mf.Version).Error
 			}); err != nil {
@@ -259,4 +263,32 @@ func parseMigrationSQL(path string) (string, string, error) {
 		return "", "", err
 	}
 	return strings.TrimSpace(up.String()), strings.TrimSpace(down.String()), nil
+}
+
+func splitSQLStatements(sqlText string) []string {
+	lines := strings.Split(sqlText, "\n")
+	var b strings.Builder
+	out := make([]string, 0)
+
+	flush := func() {
+		stmt := strings.TrimSpace(b.String())
+		if stmt != "" {
+			out = append(out, stmt)
+		}
+		b.Reset()
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+		if strings.HasSuffix(trimmed, ";") {
+			flush()
+		}
+	}
+	flush()
+	return out
 }

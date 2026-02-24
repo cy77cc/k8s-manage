@@ -1,0 +1,516 @@
+import apiService from '../api';
+import type { ApiResponse, PaginatedResponse } from '../api';
+
+export interface Host {
+  id: string;
+  name: string;
+  ip: string;
+  status: string;
+  cpu: number;
+  memory: number;
+  disk: number;
+  network: number;
+  tags: string[];
+  region: string;
+  createdAt: string;
+  lastActive: string;
+  os?: string;
+  username?: string;
+  port?: number;
+  description?: string;
+  source?: string;
+  provider?: string;
+  providerInstanceId?: string;
+  parentHostId?: string;
+}
+
+export interface HostListParams {
+  page?: number;
+  pageSize?: number;
+  status?: string;
+  region?: string;
+  tags?: string[];
+}
+
+export interface HostCreateParams {
+  probeToken?: string;
+  name: string;
+  ip: string;
+  status?: string;
+  tags?: string[];
+  region?: string;
+  description?: string;
+  role?: string;
+  clusterId?: number;
+  force?: boolean;
+  authType?: 'password' | 'key';
+  username?: string;
+  port?: number;
+  password?: string;
+  sshKeyId?: number;
+  source?: 'manual_ssh' | 'cloud_import' | 'kvm_provision';
+  provider?: string;
+  providerInstanceId?: string;
+  parentHostId?: number;
+}
+
+export interface HostUpdateParams {
+  name?: string;
+  status?: string;
+  tags?: string[];
+}
+
+export interface HostBatchParams {
+  hostIds: string[];
+  action: string;
+  tags?: string[];
+  groupId?: number;
+}
+
+export interface HostMetricPoint {
+  id: string;
+  cpu: number;
+  memory: number;
+  disk: number;
+  network: number;
+  createdAt: string;
+}
+
+export interface HostAuditItem {
+  id: string;
+  action: string;
+  operator: string;
+  detail: string;
+  createdAt: string;
+}
+
+export interface SSHExecResult {
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+}
+
+export interface HostProbeParams {
+  name: string;
+  ip: string;
+  port?: number;
+  authType: 'password' | 'key';
+  username: string;
+  password?: string;
+  sshKeyId?: number;
+}
+
+export interface HostProbeResult {
+  probeToken: string;
+  reachable: boolean;
+  latencyMs: number;
+  facts: {
+    hostname?: string;
+    os?: string;
+    arch?: string;
+    kernel?: string;
+    cpuCores?: number;
+    memoryMB?: number;
+    diskGB?: number;
+  };
+  warnings: string[];
+  errorCode?: string;
+  message?: string;
+  expiresAt: string;
+}
+
+export interface SSHKeyItem {
+  id: string;
+  name: string;
+  publicKey: string;
+  fingerprint: string;
+  algorithm: string;
+  encrypted: boolean;
+  usageCount: number;
+  createdAt: string;
+}
+
+export interface CloudAccount {
+  id: string;
+  provider: string;
+  accountName: string;
+  accessKeyId: string;
+  regionDefault: string;
+  status: string;
+}
+
+export interface CloudInstance {
+  instanceId: string;
+  name: string;
+  ip: string;
+  region: string;
+  status: string;
+  os: string;
+  cpu: number;
+  memoryMB: number;
+  diskGB: number;
+}
+
+export const hostApi = {
+  async getHostList(params?: HostListParams): Promise<ApiResponse<PaginatedResponse<Host>>> {
+    const response = await apiService.get<Host[]>('/hosts', {
+      params: {
+        page: params?.page,
+        page_size: params?.pageSize,
+      },
+    });
+    const list = (response.data || []).map((item: any) => ({
+      id: String(item.id),
+      name: item.name,
+      ip: item.ip,
+      status: item.status,
+      cpu: item.cpu_cores ?? item.cpu ?? 0,
+      memory: item.memory_mb ?? item.memory ?? 0,
+      disk: item.disk_gb ?? item.disk ?? 0,
+      network: item.network ?? 0,
+      tags: item.tags ?? (item.labels ? String(item.labels).split(',').filter(Boolean) : []),
+      region: item.region ?? '',
+      source: item.source,
+      provider: item.provider,
+      providerInstanceId: item.provider_instance_id,
+      parentHostId: item.parent_host_id ? String(item.parent_host_id) : undefined,
+      createdAt: item.created_at ?? item.createdAt,
+      lastActive: item.updated_at ?? item.lastActive,
+    }));
+    return {
+      ...response,
+      data: {
+        list,
+        total: response.total || 0,
+      },
+    };
+  },
+
+  async getHostDetail(id: string): Promise<ApiResponse<Host>> {
+    const response = await apiService.get<any>(`/hosts/${id}`);
+    const item = response.data || {};
+    return {
+      ...response,
+      data: {
+        id: String(item.id),
+        name: item.name,
+        ip: item.ip,
+        status: item.status,
+        cpu: item.cpu_cores ?? item.cpu ?? 0,
+        memory: item.memory_mb ?? item.memory ?? 0,
+        disk: item.disk_gb ?? item.disk ?? 0,
+        network: item.network ?? 0,
+        tags: item.tags ?? (item.labels ? String(item.labels).split(',').filter(Boolean) : []),
+        region: item.region ?? '',
+        createdAt: item.created_at ?? item.createdAt,
+        lastActive: item.updated_at ?? item.lastActive,
+        os: item.os,
+        username: item.ssh_user ?? item.username,
+        port: item.port,
+        description: item.description,
+        source: item.source,
+        provider: item.provider,
+        providerInstanceId: item.provider_instance_id,
+        parentHostId: item.parent_host_id ? String(item.parent_host_id) : undefined,
+      },
+    };
+  },
+
+  async createHost(data: HostCreateParams): Promise<ApiResponse<Host>> {
+    return apiService.post('/hosts', {
+      probe_token: data.probeToken,
+      name: data.name,
+      ip: data.ip,
+      status: data.status || 'offline',
+      username: data.username || 'root',
+      auth_type: data.authType || 'password',
+      password: data.password,
+      ssh_key_id: data.sshKeyId,
+      port: data.port || 22,
+      labels: data.tags || [],
+      role: data.role || '',
+      cluster_id: data.clusterId || 0,
+      source: data.source || 'manual_ssh',
+      provider: data.provider || '',
+      provider_instance_id: data.providerInstanceId || '',
+      parent_host_id: data.parentHostId || undefined,
+      force: !!data.force,
+      description: data.description || `${data.region || ''} ${(data.tags || []).join(',')}`.trim(),
+    });
+  },
+
+  async probeHost(data: HostProbeParams): Promise<ApiResponse<HostProbeResult>> {
+    const res = await apiService.post<any>('/hosts/probe', {
+      name: data.name,
+      ip: data.ip,
+      port: data.port || 22,
+      auth_type: data.authType,
+      username: data.username,
+      password: data.password,
+      ssh_key_id: data.sshKeyId,
+    });
+    const d = res.data || {};
+    return {
+      ...res,
+      data: {
+        probeToken: d.probe_token,
+        reachable: !!d.reachable,
+        latencyMs: Number(d.latency_ms || 0),
+        facts: {
+          hostname: d.facts?.hostname,
+          os: d.facts?.os,
+          arch: d.facts?.arch,
+          kernel: d.facts?.kernel,
+          cpuCores: d.facts?.cpu_cores,
+          memoryMB: d.facts?.memory_mb,
+          diskGB: d.facts?.disk_gb,
+        },
+        warnings: d.warnings || [],
+        errorCode: d.error_code,
+        message: d.message,
+        expiresAt: d.expires_at,
+      },
+    };
+  },
+
+  async updateCredentials(id: string, data: { authType: 'password' | 'key'; username: string; password?: string; sshKeyId?: number; port?: number }): Promise<ApiResponse<any>> {
+    return apiService.put(`/hosts/${id}/credentials`, {
+      auth_type: data.authType,
+      username: data.username,
+      password: data.password,
+      ssh_key_id: data.sshKeyId,
+      port: data.port || 22,
+    });
+  },
+
+  async updateHost(id: string, data: HostUpdateParams): Promise<ApiResponse<Host>> {
+    return apiService.put(`/hosts/${id}`, data);
+  },
+
+  async deleteHost(id: string): Promise<ApiResponse<void>> {
+    return apiService.delete(`/hosts/${id}`);
+  },
+
+  async batchUpdate(data: HostBatchParams): Promise<ApiResponse<void>> {
+    return apiService.post('/hosts/batch', {
+      host_ids: data.hostIds.map((x) => Number(x)),
+      action: data.action,
+      tags: data.tags || [],
+      group_id: data.groupId || 0,
+    });
+  },
+
+  async getHostMetrics(id: string): Promise<ApiResponse<HostMetricPoint[]>> {
+    const response = await apiService.get<any[]>(`/hosts/${id}/metrics`);
+    return {
+      ...response,
+      data: (response.data || []).map((m: any) => ({
+        id: String(m.id),
+        cpu: Number(m.cpu || 0),
+        memory: Number(m.memory || 0),
+        disk: Number(m.disk || 0),
+        network: Number(m.network || 0),
+        createdAt: m.created_at ?? m.createdAt,
+      })),
+    };
+  },
+
+  async getHostAudits(id: string): Promise<ApiResponse<HostAuditItem[]>> {
+    const response = await apiService.get<any[]>(`/hosts/${id}/audits`);
+    return {
+      ...response,
+      data: (response.data || []).map((a: any) => ({
+        id: String(a.id),
+        action: a.action,
+        operator: a.operator,
+        detail: a.detail,
+        createdAt: a.created_at ?? a.createdAt,
+      })),
+    };
+  },
+
+  async hostAction(id: string, action: string): Promise<ApiResponse<void>> {
+    return apiService.post(`/hosts/${id}/actions`, { action });
+  },
+
+  async sshCheck(id: string): Promise<ApiResponse<void>> {
+    return apiService.post(`/hosts/${id}/ssh/check`);
+  },
+
+  async sshExec(id: string, command: string): Promise<ApiResponse<SSHExecResult>> {
+    return apiService.post(`/hosts/${id}/ssh/exec`, { command });
+  },
+
+  async batchExec(hostIds: string[], command: string): Promise<ApiResponse<Record<string, SSHExecResult>>> {
+    return apiService.post('/hosts/batch/exec', { host_ids: hostIds.map((x) => Number(x)), command });
+  },
+
+  async getFacts(id: string): Promise<ApiResponse<any>> {
+    return apiService.get(`/hosts/${id}/facts`);
+  },
+
+  async listTags(id: string): Promise<ApiResponse<string[]>> {
+    return apiService.get(`/hosts/${id}/tags`);
+  },
+
+  async addTag(id: string, tag: string): Promise<ApiResponse<void>> {
+    return apiService.post(`/hosts/${id}/tags`, { tag });
+  },
+
+  async removeTag(id: string, tag: string): Promise<ApiResponse<void>> {
+    return apiService.delete(`/hosts/${id}/tags/${encodeURIComponent(tag)}`);
+  },
+
+  async listSSHKeys(): Promise<ApiResponse<SSHKeyItem[]>> {
+    const res = await apiService.get<any[]>('/credentials/ssh_keys');
+    return {
+      ...res,
+      data: (res.data || []).map((x: any) => ({
+        id: String(x.id),
+        name: x.name,
+        publicKey: x.public_key || '',
+        fingerprint: x.fingerprint || '',
+        algorithm: x.algorithm || '',
+        encrypted: !!x.encrypted,
+        usageCount: Number(x.usage_count || 0),
+        createdAt: x.created_at,
+      })),
+    };
+  },
+
+  async createSSHKey(payload: { name: string; privateKey: string; passphrase?: string }): Promise<ApiResponse<SSHKeyItem>> {
+    const res = await apiService.post<any>('/credentials/ssh_keys', {
+      name: payload.name,
+      private_key: payload.privateKey,
+      passphrase: payload.passphrase || '',
+    });
+    const x = res.data || {};
+    return {
+      ...res,
+      data: {
+        id: String(x.id),
+        name: x.name,
+        publicKey: x.public_key || '',
+        fingerprint: x.fingerprint || '',
+        algorithm: x.algorithm || '',
+        encrypted: !!x.encrypted,
+        usageCount: Number(x.usage_count || 0),
+        createdAt: x.created_at,
+      },
+    };
+  },
+
+  async verifySSHKey(id: string, payload: { ip: string; port?: number; username?: string }): Promise<ApiResponse<any>> {
+    return apiService.post(`/credentials/ssh_keys/${id}/verify`, {
+      ip: payload.ip,
+      port: payload.port || 22,
+      username: payload.username || 'root',
+    });
+  },
+
+  async deleteSSHKey(id: string): Promise<ApiResponse<void>> {
+    return apiService.delete(`/credentials/ssh_keys/${id}`);
+  },
+
+  async listCloudAccounts(provider?: string): Promise<ApiResponse<CloudAccount[]>> {
+    const res = await apiService.get<any[]>('/hosts/cloud/accounts', { params: { provider } });
+    return {
+      ...res,
+      data: (res.data || []).map((x: any) => ({
+        id: String(x.id),
+        provider: x.provider,
+        accountName: x.account_name,
+        accessKeyId: x.access_key_id,
+        regionDefault: x.region_default,
+        status: x.status,
+      })),
+    };
+  },
+
+  async createCloudAccount(payload: { provider: string; accountName: string; accessKeyId: string; accessKeySecret: string; regionDefault?: string }): Promise<ApiResponse<CloudAccount>> {
+    const res = await apiService.post<any>('/hosts/cloud/accounts', {
+      provider: payload.provider,
+      account_name: payload.accountName,
+      access_key_id: payload.accessKeyId,
+      access_key_secret: payload.accessKeySecret,
+      region_default: payload.regionDefault || '',
+    });
+    const x = res.data || {};
+    return {
+      ...res,
+      data: {
+        id: String(x.id),
+        provider: x.provider,
+        accountName: x.account_name,
+        accessKeyId: x.access_key_id,
+        regionDefault: x.region_default,
+        status: x.status,
+      },
+    };
+  },
+
+  async queryCloudInstances(payload: { provider: string; accountId: number; region?: string; keyword?: string }): Promise<ApiResponse<CloudInstance[]>> {
+    const res = await apiService.post<any[]>(`/hosts/cloud/providers/${payload.provider}/instances/query`, {
+      account_id: payload.accountId,
+      region: payload.region || '',
+      keyword: payload.keyword || '',
+    });
+    return {
+      ...res,
+      data: (res.data || []).map((x: any) => ({
+        instanceId: x.instance_id,
+        name: x.name,
+        ip: x.ip,
+        region: x.region,
+        status: x.status,
+        os: x.os,
+        cpu: Number(x.cpu || 0),
+        memoryMB: Number(x.memory_mb || 0),
+        diskGB: Number(x.disk_gb || 0),
+      })),
+    };
+  },
+
+  async importCloudInstances(payload: { provider: string; accountId: number; instances: CloudInstance[]; role?: string; labels?: string[] }): Promise<ApiResponse<any>> {
+    return apiService.post(`/hosts/cloud/providers/${payload.provider}/instances/import`, {
+      account_id: payload.accountId,
+      instances: payload.instances.map((x) => ({
+        instance_id: x.instanceId,
+        name: x.name,
+        ip: x.ip,
+        region: x.region,
+        status: x.status,
+        os: x.os,
+        cpu: x.cpu,
+        memory_mb: x.memoryMB,
+        disk_gb: x.diskGB,
+      })),
+      role: payload.role || '',
+      labels: payload.labels || [],
+    });
+  },
+
+  async kvmPreview(hostId: string, payload: { name: string; cpu: number; memoryMB: number; diskGB: number; networkBridge?: string; template?: string }): Promise<ApiResponse<any>> {
+    return apiService.post(`/hosts/virtualization/kvm/hosts/${hostId}/preview`, {
+      name: payload.name,
+      cpu: payload.cpu,
+      memory_mb: payload.memoryMB,
+      disk_gb: payload.diskGB,
+      network_bridge: payload.networkBridge || 'br0',
+      template: payload.template || 'ubuntu-22.04',
+    });
+  },
+
+  async kvmProvision(hostId: string, payload: { name: string; ip: string; cpu: number; memoryMB: number; diskGB: number; sshUser?: string; password?: string; sshKeyId?: number }): Promise<ApiResponse<any>> {
+    return apiService.post(`/hosts/virtualization/kvm/hosts/${hostId}/provision`, {
+      name: payload.name,
+      ip: payload.ip,
+      cpu: payload.cpu,
+      memory_mb: payload.memoryMB,
+      disk_gb: payload.diskGB,
+      ssh_user: payload.sshUser || 'root',
+      password: payload.password || '',
+      ssh_key_id: payload.sshKeyId,
+    });
+  },
+};
