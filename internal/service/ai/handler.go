@@ -1,119 +1,145 @@
 package ai
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
+	"sync"
+	"time"
 
-	"github.com/cloudwego/eino/schema"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"github.com/gin-gonic/gin"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
-type ChatRequest struct {
-	Message string `json:"message" binding:"required"`
+type chatRequest struct {
+	SessionID string         `json:"sessionId"`
+	Message   string         `json:"message" binding:"required"`
+	Context   map[string]any `json:"context"`
 }
 
-func ChatHandler(svcCtx *svc.ServiceContext) gin.HandlerFunc {
+type aiSession struct {
+	ID        string           `json:"id"`
+	Title     string           `json:"title"`
+	Messages  []map[string]any `json:"messages"`
+	CreatedAt time.Time        `json:"createdAt"`
+	UpdatedAt time.Time        `json:"updatedAt"`
+}
+
+var (
+	sessionMu sync.Mutex
+	sessions  = map[string]*aiSession{}
+)
+
+func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
+	g := v1.Group("/ai")
+	g.POST("/chat", chatHandler(svcCtx))
+	g.GET("/sessions", listSessionsHandler())
+	g.GET("/sessions/:id", getSessionHandler())
+	g.DELETE("/sessions/:id", deleteSessionHandler())
+	g.POST("/analyze", analyzeHandler())
+	g.POST("/recommendations", recommendationsHandler())
+	g.POST("/k8s/analyze", k8sAnalyzeHandler())
+	g.POST("/k8s/actions/preview", actionPreviewHandler())
+	g.POST("/k8s/actions/execute", actionExecuteHandler())
+	g.POST("/actions/preview", actionPreviewHandler())
+	g.POST("/actions/execute", actionExecuteHandler())
+}
+
+func chatHandler(_ *svc.ServiceContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if svcCtx.AI == nil || svcCtx.AI.Runnable == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI service not enabled"})
-			return
-		}
-
-		var req ChatRequest
+		var req chatRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 			return
 		}
-
-		ctx := c.Request.Context()
-
-		// Prepare input with context
-		clusterInfo := getClusterInfo(ctx, svcCtx.Clientset)
-		systemPrompt := fmt.Sprintf("You are a Kubernetes Expert Assistant.\n"+
-			"Your goal is to help users manage and troubleshoot their Kubernetes clusters.\n\n"+
-			"Current Cluster Context:\n"+
-			"%s\n\n"+
-			"You have access to tools to query the cluster state (list_pods, etc.). "+
-			"Use them when necessary to answer the user's question accurately. "+
-			"If you use a tool, answer based on the tool's output.", clusterInfo)
-
-		input := []*schema.Message{
-			schema.SystemMessage(systemPrompt),
-			schema.UserMessage(req.Message),
+		respText := "已收到你的问题：" + req.Message
+		sessionMu.Lock()
+		defer sessionMu.Unlock()
+		sid := req.SessionID
+		if sid == "" {
+			sid = fmt.Sprintf("sess-%d", time.Now().UnixNano())
 		}
-
-		// Set headers for SSE
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
-		c.Writer.Header().Set("Connection", "keep-alive")
-		c.Writer.Header().Set("Transfer-Encoding", "chunked")
-
-		s, err := svcCtx.AI.Runnable.Stream(ctx, input)
-		if err != nil {
-			c.SSEvent("error", err.Error())
-			return
+		s, ok := sessions[sid]
+		if !ok {
+			s = &aiSession{ID: sid, Title: "AI Session", CreatedAt: time.Now()}
+			sessions[sid] = s
 		}
-		defer s.Close()
-
-		for {
-			chunk, err := s.Recv()
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if err != nil {
-				c.SSEvent("error", err.Error())
-				break
-			}
-
-			c.SSEvent("message", chunk.Content)
-			c.Writer.Flush()
-		}
+		now := time.Now()
+		s.Messages = append(s.Messages, map[string]any{"id": fmt.Sprintf("u-%d", now.UnixNano()), "role": "user", "content": req.Message, "timestamp": now}, map[string]any{"id": fmt.Sprintf("a-%d", now.UnixNano()+1), "role": "assistant", "content": respText, "timestamp": now})
+		s.UpdatedAt = now
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"session": s, "response": gin.H{"id": fmt.Sprintf("a-%d", now.UnixNano()+1), "role": "assistant", "content": respText, "timestamp": now}}})
 	}
 }
 
-func getClusterInfo(ctx context.Context, clientset *kubernetes.Clientset) string {
-	if clientset == nil {
-		return "Kubernetes Cluster: Not Connected (Clientset is nil)"
-	}
-
-	var sb strings.Builder
-	sb.WriteString("Cluster Status Overview:\n")
-
-	// Get Server Version
-	if v, err := clientset.Discovery().ServerVersion(); err == nil {
-		sb.WriteString(fmt.Sprintf("- Kubernetes Version: %s\n", v.String()))
-	} else {
-		sb.WriteString("- Kubernetes Version: Unknown (Error)\n")
-	}
-
-	// Get Node Count & Details
-	if nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); err == nil {
-		sb.WriteString(fmt.Sprintf("- Total Nodes: %d\n", len(nodes.Items)))
-		for i, node := range nodes.Items {
-			if i >= 5 {
-				sb.WriteString(fmt.Sprintf("  ... and %d more nodes\n", len(nodes.Items)-5))
-				break
-			}
-			// Check Ready status
-			ready := "NotReady"
-			for _, cond := range node.Status.Conditions {
-				if cond.Type == "Ready" && cond.Status == "True" {
-					ready = "Ready"
-					break
-				}
-			}
-			sb.WriteString(fmt.Sprintf("  - Node: %s [%s]\n", node.Name, ready))
+func listSessionsHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sessionMu.Lock()
+		defer sessionMu.Unlock()
+		out := make([]*aiSession, 0, len(sessions))
+		for _, s := range sessions {
+			out = append(out, s)
 		}
-	} else {
-		sb.WriteString("- Nodes: Unknown (Error listing nodes)\n")
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": out})
 	}
+}
 
-	return sb.String()
+func getSessionHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sessionMu.Lock()
+		defer sessionMu.Unlock()
+		s, ok := sessions[c.Param("id")]
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": gin.H{"message": "session not found"}})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": s})
+	}
+}
+
+func deleteSessionHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sessionMu.Lock()
+		defer sessionMu.Unlock()
+		delete(sessions, c.Param("id"))
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+	}
+}
+
+func analyzeHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"id": fmt.Sprintf("ana-%d", time.Now().UnixNano()), "type": "generic", "title": "AI 分析结果", "summary": "MVP阶段分析能力已启用", "details": gin.H{}, "createdAt": time.Now()}})
+	}
+}
+
+func recommendationsHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": []gin.H{{"id": fmt.Sprintf("rec-%d", time.Now().UnixNano()), "type": "suggestion", "title": "建议 #1", "content": "建议先观察资源使用，再执行变更。", "relevance": 0.8, "action": "k8s.scale.deployment", "params": gin.H{"replicas": 2}}}})
+	}
+}
+
+func k8sAnalyzeHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"insights": []string{"建议优先检查异常 Pod 的重启次数和事件。", "建议确认 Deployment 副本数与实际运行数是否一致。"}, "risks": []string{"高峰时段直接变更副本可能引发抖动。"}, "recommended_actions": []gin.H{{"action": "k8s.scale.deployment", "params": gin.H{"replicas": 2}, "reason": "优先验证扩缩容链路"}}}})
+	}
+}
+
+func actionPreviewHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Action string         `json:"action"`
+			Params map[string]any `json:"params"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		token := fmt.Sprintf("approve-%d", time.Now().UnixNano())
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"approval_token": token, "intent": req.Action, "risk": "medium", "params": req.Params, "previewDiff": "MVP preview"}})
+	}
+}
+
+func actionExecuteHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			ApprovalToken string `json:"approval_token"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"approval_token": req.ApprovalToken, "status": "executed"}})
+	}
 }

@@ -1,37 +1,63 @@
 package service
 
 import (
+	"io/fs"
 	"net/http"
+	"strings"
 
-	_ "github.com/cy77cc/k8s-manage/docs"
 	"github.com/cy77cc/k8s-manage/internal/middleware"
 	"github.com/cy77cc/k8s-manage/internal/service/ai"
+	"github.com/cy77cc/k8s-manage/internal/service/cluster"
+	"github.com/cy77cc/k8s-manage/internal/service/host"
 	"github.com/cy77cc/k8s-manage/internal/service/node"
 	"github.com/cy77cc/k8s-manage/internal/service/project"
+	"github.com/cy77cc/k8s-manage/internal/service/rbac"
 	"github.com/cy77cc/k8s-manage/internal/service/user"
 	"github.com/cy77cc/k8s-manage/internal/svc"
+	webui "github.com/cy77cc/k8s-manage/web"
 	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	gs "github.com/swaggo/gin-swagger"
 )
 
 func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	r.Use(middleware.ContextMiddleware(), middleware.Cors(), middleware.Logger())
-	r.GET("/swagger/*any", func(c *gin.Context) {
-		if c.Param("any") == "" || c.Param("any") == "/" {
-			c.Redirect(http.StatusMovedPermanently, "/swagger/index.html")
-			return
-		}
-		gs.WrapHandler(swaggerFiles.Handler)(c)
-	})
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
 	v1 := r.Group("/api/v1")
 	user.RegisterUserHandlers(v1, serverCtx)
 	node.RegisterNodeHandlers(v1, serverCtx)
 	project.RegisterProjectHandlers(v1, serverCtx)
+	host.RegisterHostHandlers(v1, serverCtx)
+	cluster.RegisterClusterHandlers(v1, serverCtx)
+	rbac.RegisterRBACHandlers(v1, serverCtx)
+	ai.RegisterAIHandlers(v1, serverCtx)
 
-	// AI routes
-	v1.POST("/ai/chat", ai.ChatHandler(serverCtx))
+	registerWebStaticRoutes(r)
+}
+
+func registerWebStaticRoutes(r *gin.Engine) {
+	distFS, err := webui.SubDist()
+	if err != nil {
+		return
+	}
+
+	staticServer := http.FileServer(http.FS(distFS))
+	r.GET("/assets/*filepath", gin.WrapH(staticServer))
+	r.GET("/vite.svg", gin.WrapH(staticServer))
+	r.GET("/favicon.ico", gin.WrapH(staticServer))
+
+	r.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+
+		indexFile, err := fs.ReadFile(distFS, "index.html")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "frontend not built"})
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", indexFile)
+	})
 }

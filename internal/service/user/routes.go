@@ -18,6 +18,7 @@ func RegisterUserHandlers(r *gin.RouterGroup, serverCtx *svc.ServiceContext) {
 		authGroup.POST("logout", userHandler.Logout)
 		authGroup.POST("refresh", userHandler.Refresh)
 		authGroup.POST("register", userHandler.Register)
+		authGroup.GET("me", middleware.JWTAuth(), userHandler.Me)
 	}
 
 	userGroup := r.Group("user", middleware.JWTAuth())

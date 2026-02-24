@@ -2,6 +2,7 @@ package logic
 
 import (
 	"context"
+	"fmt"
 
 	v1 "github.com/cy77cc/k8s-manage/api/user/v1"
 	dao "github.com/cy77cc/k8s-manage/internal/dao/user"
@@ -38,5 +39,37 @@ func (l *UserLogic) GetUser(ctx context.Context, id model.UserID) (v1.UserResp, 
 		CreateTime:    user.CreateTime,
 		UpdateTime:    user.UpdateTime,
 		LastLoginTime: user.LastLoginTime,
+	}, nil
+}
+
+func (l *UserLogic) GetMe(ctx context.Context, uid any) (map[string]any, error) {
+	var userID model.UserID
+	switch v := uid.(type) {
+	case uint:
+		userID = model.UserID(v)
+	case uint64:
+		userID = model.UserID(v)
+	case int:
+		userID = model.UserID(v)
+	case int64:
+		userID = model.UserID(v)
+	case float64:
+		userID = model.UserID(v)
+	default:
+		return nil, fmt.Errorf("invalid uid type")
+	}
+
+	user, err := l.userDAO.FindOneById(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"id":          user.ID,
+		"username":    user.Username,
+		"name":        user.Username,
+		"email":       user.Email,
+		"status":      "active",
+		"roles":       []string{},
+		"permissions": []string{},
 	}, nil
 }

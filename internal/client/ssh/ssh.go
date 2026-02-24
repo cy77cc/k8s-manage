@@ -9,18 +9,25 @@ import (
 )
 
 func NewSSHClient(user, password, host string, port int, privateKey string) (*ssh.Client, error) {
-	signer, err := ssh.ParsePrivateKey([]byte(privateKey))
-	if err != nil {
-		return nil, err
+	authMethods := make([]ssh.AuthMethod, 0, 2)
+	if password != "" {
+		authMethods = append(authMethods, ssh.Password(password))
+	}
+	if strings.TrimSpace(privateKey) != "" {
+		signer, err := ssh.ParsePrivateKey([]byte(privateKey))
+		if err != nil {
+			return nil, err
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	}
+	if len(authMethods) == 0 {
+		return nil, fmt.Errorf("no ssh auth method provided")
 	}
 	config := &ssh.ClientConfig{
 		User:            user,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         10 * time.Second,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(password),
-			ssh.PublicKeys(signer),
-		},
+		Auth:            authMethods,
 	}
 	addr := fmt.Sprintf("%s:%d", host, port)
 	return ssh.Dial("tcp", addr, config)

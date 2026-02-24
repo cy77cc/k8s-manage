@@ -23,6 +23,7 @@ func (u *UserHandler) Login(c *gin.Context) {
 
 	if err := c.ShouldBind(&req); err != nil {
 		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
+		return
 	}
 	resp, err := userLogic.NewUserLogic(u.svcCtx).Login(c.Request.Context(), req)
 	if err != nil {
@@ -105,4 +106,19 @@ func (u *UserHandler) Logout(c *gin.Context) {
 		return
 	}
 	response.Response(c, nil, nil)
+}
+
+// Me 获取当前登录用户信息
+func (u *UserHandler) Me(c *gin.Context) {
+	uid, ok := c.Get("uid")
+	if !ok {
+		response.Response(c, nil, xcode.NewErrCode(xcode.Unauthorized))
+		return
+	}
+	resp, err := userLogic.NewUserLogic(u.svcCtx).GetMe(c.Request.Context(), uid)
+	if err != nil {
+		response.Response(c, nil, xcode.FromError(err))
+		return
+	}
+	response.Response(c, resp, nil)
 }

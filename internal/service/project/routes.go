@@ -21,11 +21,14 @@ func RegisterProjectHandlers(g *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	// Services
 	services := g.Group("/services")
 	{
+		services.GET("/quota", serviceHandler.GetQuota)
 		services.POST("", serviceHandler.CreateService)
 		services.GET("", serviceHandler.ListServices)
 		services.GET("/:id", serviceHandler.GetService)
 		services.PUT("/:id", serviceHandler.UpdateService)
 		services.DELETE("/:id", serviceHandler.DeleteService)
-		services.POST("/deploy", serviceHandler.DeployService)
+		services.POST("/:id/deploy", serviceHandler.DeployService)
+		services.POST("/:id/rollback", serviceHandler.RollbackService)
+		services.GET("/:id/events", serviceHandler.GetEvents)
 	}
 }

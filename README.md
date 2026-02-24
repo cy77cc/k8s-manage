@@ -94,3 +94,24 @@ API 开放平台：允许外部系统通过 API 调用平台功能。
 - 阶段三：运维 Agent (Tool Use)
   - 功能 : 用户说 "帮我扩容 nginx 到 3 个副本"，AI 调用 client-go 执行操作。
   - 实现 : 使用 Eino 的 ToolsNode 封装 Service 层的方法。
+
+## 本地构建与运行（前后端一体）
+
+```bash
+# 1) 编译前端静态资源到 web/dist
+make web-build
+
+# 2) 编译后端（会 embed 当前 web/dist）
+make build
+
+# 或一步完成
+make build-all
+
+# 本地启动
+make run
+```
+
+说明：
+
+- 服务启动后访问 `/` 会直接加载前端页面。
+- API 统一前缀为 `/api/v1`。

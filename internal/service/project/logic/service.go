@@ -76,7 +76,11 @@ func (l *ServiceLogic) CreateService(ctx context.Context, req v1.CreateServiceRe
 
 func (l *ServiceLogic) ListServices(ctx context.Context, projectID uint) ([]v1.ServiceResp, error) {
 	var services []model.Service
-	if err := l.svcCtx.DB.Where("project_id = ?", projectID).Find(&services).Error; err != nil {
+	query := l.svcCtx.DB
+	if projectID > 0 {
+		query = query.Where("project_id = ?", projectID)
+	}
+	if err := query.Find(&services).Error; err != nil {
 		return nil, err
 	}
 

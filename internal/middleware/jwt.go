@@ -34,6 +34,7 @@ func JWTAuth() gin.HandlerFunc {
 			resp.Msg = "token 无效请重新登录"
 			c.JSON(http.StatusUnauthorized, resp)
 			c.Abort()
+			return
 		}
 
 		c.Set("uid", accessToken.Uid)
