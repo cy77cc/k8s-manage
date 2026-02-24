@@ -25,7 +25,7 @@ type ServiceContext struct {
 	DB             *gorm.DB                    // GORM 数据库实例
 	Rdb            redis.UniversalClient       // Redis 客户端
 	Cache          *expirable.LRU[string, any] // 本地缓存 (LRU)
-	AI             *ai.K8sCopilot              // AI Copilot
+	AI             *ai.PlatformAgent           // AI Platform Agent
 	CasbinEnforcer *casbin.Enforcer            // Casbin Enforcer
 }
 
@@ -44,16 +44,19 @@ func MustNewServiceContext() *ServiceContext {
 
 	clientset := MustNewClientset()
 
-	copilot, err := ai.NewK8sCopilot(ctx, chatModel, clientset)
+	db := storage.MustNewDB()
+
+	platformAgent, err := ai.NewPlatformAgent(ctx, chatModel, ai.PlatformDeps{
+		DB:        db,
+		Clientset: clientset,
+	})
 	if err != nil {
-		logger.L().Warn("Failed to initialize AI Copilot",
+		logger.L().Warn("Failed to initialize AI PlatformAgent",
 			logger.String("base_url", aiBaseURL()),
 			logger.String("model", aiModel()),
 			logger.Error(err),
 		)
 	}
-
-	db := storage.MustNewDB()
 
 	// Initialize Casbin
 	adapter := casbinadapter.NewAdapter(db)
@@ -74,7 +77,7 @@ func MustNewServiceContext() *ServiceContext {
 		DB:             db,
 		Rdb:            storage.MustNewRdb(),
 		Cache:          expirable.NewLRU[string, any](5_000, nil, 24*time.Hour),
-		AI:             copilot,
+		AI:             platformAgent,
 		CasbinEnforcer: enforcer,
 	}
 }

@@ -1,0 +1,191 @@
+package ai
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/flow/agent/react"
+	"github.com/cloudwego/eino/schema"
+)
+
+type PlatformAgent struct {
+	Runnable *react.Agent
+	Model    model.ToolCallingChatModel
+	experts  map[string]*react.Agent
+	tools    map[string]tool.InvokableTool
+	metas    map[string]ToolMeta
+	mcp      *MCPClientManager
+}
+
+func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel, deps PlatformDeps) (*PlatformAgent, error) {
+	if chatModel == nil {
+		return nil, nil
+	}
+
+	localTools, err := BuildLocalTools(deps)
+	if err != nil {
+		return nil, err
+	}
+	mcpManager, err := NewMCPClientManager(ctx, MCPConfigFromEnv())
+	if err != nil {
+		return nil, err
+	}
+	mcpTools, err := BuildMCPProxyTools(mcpManager)
+	if err != nil {
+		return nil, err
+	}
+	registered := append(localTools, mcpTools...)
+	baseTools := make([]tool.BaseTool, 0, len(registered))
+	toolMap := make(map[string]tool.InvokableTool, len(registered))
+	metaMap := make(map[string]ToolMeta, len(registered))
+	for _, item := range registered {
+		baseTools = append(baseTools, item.Tool)
+		toolMap[item.Meta.Name] = item.Tool
+		metaMap[item.Meta.Name] = item.Meta
+	}
+
+	agent, err := react.NewAgent(ctx, &react.AgentConfig{
+		ToolCallingModel: chatModel,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools: baseTools,
+		},
+		MaxStep: 20,
+	})
+	if err != nil {
+		return nil, err
+	}
+	opsExpert, err := react.NewAgent(ctx, &react.AgentConfig{
+		ToolCallingModel: chatModel,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools: baseTools,
+		},
+		MaxStep:         20,
+		MessageModifier: react.NewPersonaModifier("You are Ops Expert. Focus on host/os diagnostics, stability and safe operations."),
+	})
+	if err != nil {
+		return nil, err
+	}
+	k8sExpert, err := react.NewAgent(ctx, &react.AgentConfig{
+		ToolCallingModel: chatModel,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools: baseTools,
+		},
+		MaxStep:         20,
+		MessageModifier: react.NewPersonaModifier("You are Kubernetes Expert. Focus on cluster health, events, pods and rollout troubleshooting."),
+	})
+	if err != nil {
+		return nil, err
+	}
+	securityExpert, err := react.NewAgent(ctx, &react.AgentConfig{
+		ToolCallingModel: chatModel,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools: baseTools,
+		},
+		MaxStep:         20,
+		MessageModifier: react.NewPersonaModifier("You are Security/RBAC Expert. Focus on permissions, roles, least privilege and access diagnostics."),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &PlatformAgent{
+		Runnable: agent,
+		Model:    chatModel,
+		experts: map[string]*react.Agent{
+			"default":  agent,
+			"ops":      opsExpert,
+			"k8s":      k8sExpert,
+			"security": securityExpert,
+		},
+		tools: toolMap,
+		metas: metaMap,
+		mcp:   mcpManager,
+	}, nil
+}
+
+func (p *PlatformAgent) ToolMetas() []ToolMeta {
+	if p == nil {
+		return nil
+	}
+	out := make([]ToolMeta, 0, len(p.metas))
+	for _, m := range p.metas {
+		out = append(out, m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (p *PlatformAgent) Stream(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
+	if p == nil {
+		return nil, fmt.Errorf("agent not initialized")
+	}
+	a := p.selectAgent(messages)
+	return a.Stream(ctx, messages)
+}
+
+func (p *PlatformAgent) Generate(ctx context.Context, messages []*schema.Message) (*schema.Message, error) {
+	if p == nil {
+		return nil, fmt.Errorf("agent not initialized")
+	}
+	a := p.selectAgent(messages)
+	return a.Generate(ctx, messages)
+}
+
+func (p *PlatformAgent) selectAgent(messages []*schema.Message) *react.Agent {
+	if p == nil || p.experts == nil {
+		return p.Runnable
+	}
+	content := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i] != nil && messages[i].Role == schema.User {
+			content = strings.ToLower(strings.TrimSpace(messages[i].Content))
+			break
+		}
+	}
+	switch {
+	case strings.Contains(content, "k8s") || strings.Contains(content, "kubernetes") || strings.Contains(content, "pod") || strings.Contains(content, "deployment") || strings.Contains(content, "cluster"):
+		return p.experts["k8s"]
+	case strings.Contains(content, "rbac") || strings.Contains(content, "permission") || strings.Contains(content, "role") || strings.Contains(content, "权限"):
+		return p.experts["security"]
+	case strings.Contains(content, "ssh") || strings.Contains(content, "cpu") || strings.Contains(content, "memory") || strings.Contains(content, "disk") || strings.Contains(content, "host") || strings.Contains(content, "系统"):
+		return p.experts["ops"]
+	default:
+		return p.experts["default"]
+	}
+}
+
+func (p *PlatformAgent) RunTool(ctx context.Context, toolName string, params map[string]any) (ToolResult, error) {
+	if p == nil {
+		return ToolResult{OK: false, Error: "agent not initialized", Source: "platform"}, fmt.Errorf("agent not initialized")
+	}
+	t, ok := p.tools[toolName]
+	if !ok {
+		return ToolResult{OK: false, Error: "tool not found", Source: "platform"}, fmt.Errorf("tool not found")
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return ToolResult{OK: false, Error: err.Error(), Source: "platform"}, err
+	}
+	out, err := t.InvokableRun(ctx, string(raw))
+	if err != nil {
+		return ToolResult{OK: false, Error: err.Error(), Source: "platform"}, nil
+	}
+	var result ToolResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return ToolResult{OK: true, Data: out, Source: "platform"}, nil
+	}
+	return result, nil
+}
+
+func (p *PlatformAgent) Close() error {
+	if p == nil || p.mcp == nil {
+		return nil
+	}
+	return p.mcp.Close()
+}

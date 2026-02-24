@@ -8,9 +8,9 @@
 
 ## 2. AI Module (Eino + Ollama)
 
-- 入口：`internal/service/ai/handler.go`。
-- 能力层：`internal/ai/client.go` + `internal/ai/chain.go`。
-- 初始化：`internal/svc/svc.go` 在服务启动时构建 ChatModel 与 ReAct Agent。
+- 入口：`internal/service/ai/routes.go` + `internal/service/ai/chat_handler.go` + `internal/service/ai/capability_handler.go`。
+- 能力层：`internal/ai/platform_agent.go` + `internal/ai/model_factory(client.go)` + `internal/ai/tools_*.go`。
+- 初始化：`internal/svc/svc.go` 在服务启动时构建 ChatModel、PlatformAgent、MCP client manager。
 - 模型约束：当前固定 `llm.provider=ollama`，默认模型 `glm-5:cloud`。
 
 ### 2.1 Chat Protocol
@@ -56,6 +56,9 @@
   - readonly 工具可直接执行
   - mutating 工具必须审批通过且 token 未过期
   - 工具执行输出统一 `{ok,data,error,source,latency_ms}`
+- 工具接入形态：
+  - Eino 本地工具：`os.*` / `k8s.*` / `service.*` / `host.*`
+  - MCP 代理工具：`mcp.default.*`（由 `mcp-go` client 动态发现并注册到 Eino Agent）
 
 ## 5. Known Technical Debt
 

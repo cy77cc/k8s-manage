@@ -59,3 +59,4 @@
 - LLM 统一走 `ollama` provider，默认模型 `glm-5:cloud`。
 - RBAC admin 采用临时全量放行策略，保障平台管理页可用性。
 - AI function calling 默认只读放行，变更动作必须审批后执行。
+- AI 工具实现采用 “本地 Eino Tool + mcp-go MCP Tool Proxy” 混合模式。

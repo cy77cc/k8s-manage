@@ -133,3 +133,85 @@
 1. 落地 `ai_sessions/ai_messages/ai_tool_calls/ai_approvals` 数据表与迁移脚本。
 2. 前端新增审批中心与执行时间线 UI。
 3. 将 tool runtime 从内存迁移到持久化审计存储并增加分页查询。
+
+## 2026-02-24 (AI Refactor Supplement: Eino Spec + mcp-go + UI)
+
+### Scope
+
+- 按 Eino 规范重构 function calling 主链路，并新增平台级单一 `PlatformAgent`。
+- MCP 接入改为 `mcp-go client`，本地工具与 MCP 工具混合注册。
+- 前端 AI 聊天窗口样式与渲染升级：加宽抽屉 + Markdown/GFM + 代码高亮 + tool trace 可见。
+
+### Completed
+
+- 后端结构化重构：
+  - `internal/ai/` 拆分为：
+    - `platform_agent.go`
+    - `mcp_client.go`
+    - `tool_contracts.go`
+    - `tools_registry.go`
+    - `tools_os.go`
+    - `tools_k8s.go`
+    - `tools_service.go`
+    - `tools_host.go`
+    - `tools_mcp_proxy.go`
+    - `tools_common.go`
+  - 删除历史大文件 `tools_local.go`，按功能拆分实现。
+- Eino + Agent：
+  - `react.NewAgent` 作为唯一平台 agent（`PlatformAgent`）。
+  - `/api/v1/ai/chat` 内部统一调用 `PlatformAgent.Runnable.Stream`。
+- MCP（mcp-go）：
+  - 支持 `sse|stdio` 初始化、`Initialize`、`ListTools`、`CallTool`。
+  - MCP tool 动态封装为 Eino tool，命名 `mcp.default.<tool>`。
+- SSE 事件链：
+  - 保持并验证 `meta/delta/tool_call/tool_result/approval_required/done/error`。
+- 前端 AI 聊天：
+  - `GlobalAIAssistant` 抽屉放大（桌面更宽，移动端全宽）。
+  - `ChatInterface` 改为 Markdown-only 渲染（GFM）+ 代码块高亮。
+  - 对话中可见 tool calling 轨迹系统消息。
+- 工程回归：
+  - `go test ./...` 通过。
+  - `cd web && npm run build` 通过。
+
+### Known Gaps / Risks
+
+- tool trace 当前以系统消息块展示，后续可升级为独立时间线组件。
+- AI 审批/执行状态目前仍为内存态，重启后不保留。
+- 前端产物 chunk 体积偏大（vite 构建有 >500k 警告），后续建议按页面拆包。
+
+### Next Actions
+
+1. 将 `ai_approvals/ai_tool_calls` 迁移到 DB，并新增审计查询 API。
+2. 补充 E2E：审批前拦截、审批后重放、MCP 不可达降级。
+3. 优化前端 tool trace UI（时间线 + 折叠 JSON + 风险标签）。
+
+## 2026-02-24 (Team Follow-up: Long Stream + Scroll + Thinking + Memory + MoE)
+
+### Team
+
+- CTO(`cto-vogels`): 长流式与Agent能力边界设计（MaxStep/NumPredict/MoE路由）。
+- Product(`product-norman`): 思考过程可见性与可折叠体验。
+- Fullstack(`fullstack-dhh`): 前后端实现（SSE事件、滚动行为、会话记忆注入）。
+- QA(`qa-bach`): 回归关注点（中断恢复、长输出、滚动交互）。
+
+### Completed
+
+- 修复长回答中途中断：
+  - `PlatformAgent` 的 `MaxStep` 提升到 `20`。
+  - Ollama `NumPredict` 提升到 `1024`。
+  - SSE接收错误时不立即丢弃已生成内容，改为先发 `error` 再落 `done`。
+- 修复“不能上下翻页”：
+  - 聊天区加入“仅在接近底部时自动滚动”策略；用户上滑阅读时不再被强制拉回底部。
+- 新增“思考过程”展示：
+  - 后端新增 `thinking_delta` SSE 事件（来自 `schema.Message.ReasoningContent`）。
+  - 前端新增可折叠 Thinking 消息块（Reasoning 标签）。
+- 增加会话记忆：
+  - 聊天请求会自动携带最近 20 条会话历史（user/assistant）作为上下文输入，而非单轮问答。
+- 强化 Agent（MoE）：
+  - 新增专家路由：`default / ops / k8s / security`。
+  - 根据用户问题关键词自动选择专家 agent 执行 `Stream/Generate`。
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
