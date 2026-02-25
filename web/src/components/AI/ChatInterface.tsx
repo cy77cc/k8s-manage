@@ -22,7 +22,7 @@ type StreamState = 'idle' | 'running' | 'timeout' | 'done' | 'error';
 type LocalMessage = AIMessage & { turnId?: string };
 
 const renderMarkdown = (content: string) => (
-  <div style={{ color: '#1f2937', lineHeight: 1.7, fontSize: 14 }}>
+  <div className="ai-markdown-content">
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
@@ -306,16 +306,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         },
       }}
     >
-      <div
-        ref={scrollContainerRef}
-        onScroll={handleScroll}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          padding: '12px 16px',
-        }}
-      >
+      <div ref={scrollContainerRef} onScroll={handleScroll} className="ai-chat-message-scroll">
         <List
           dataSource={messages}
           renderItem={(message) => (
@@ -339,23 +330,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 }
                 description={
                   message.role === 'assistant' ? (
-                    <div style={{ margin: 0, background: '#fff', border: '1px solid #f0f0f0', borderRadius: 10, padding: '10px 12px' }}>
+                    <div className="ai-assistant-message-bubble">
                       {message.thinking ? (
-                        <div style={{ marginBottom: 8 }}>
+                        <div className="ai-thinking-block">
                           <Collapse
                             size="small"
                             ghost
                             items={[{
                               key: `thinking-${message.id}`,
                               label: (
-                                <Space>
+                                <Space className="ai-thinking-header">
                                   <BulbOutlined />
-                                  <Text>思考过程</Text>
+                                  <Text className="ai-thinking-title">思考过程</Text>
                                   <Tag color="cyan">{message.thinking.length} chars</Tag>
                                 </Space>
                               ),
                               children: (
-                                <div style={{ margin: 0, background: '#f7fcff', border: '1px solid #d6efff', borderRadius: 8, padding: '10px 12px' }}>
+                                <div className="ai-thinking-content">
                                   {renderMarkdown(message.thinking)}
                                 </div>
                               ),
@@ -364,16 +355,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         </div>
                       ) : null}
                       {message.traces && message.traces.length > 0 ? (
-                        <div style={{ marginBottom: 8 }}>
+                        <div className="ai-trace-block">
                           <Collapse
                             size="small"
                             ghost
                             items={[{
                               key: `trace-${message.id}`,
                               label: (
-                                <Space>
+                                <Space className="ai-trace-header">
                                   <ToolOutlined />
-                                  <Text>工具调用轨迹</Text>
+                                  <Text className="ai-trace-title">工具调用轨迹</Text>
                                   <Tag color="gold">{message.traces.length}</Tag>
                                 </Space>
                               ),
@@ -385,8 +376,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                       ? ((trace.payload?.result?.ok || trace.payload?.payload?.result?.ok) ? 'success' : 'error')
                                       : (trace.type === 'approval_required' ? 'warning' : 'processing');
                                     return (
-                                      <Card key={trace.id} size="small" style={{ borderRadius: 8 }}>
-                                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                                      <Card key={trace.id} size="small" className="ai-trace-card">
+                                        <Space className="ai-trace-card-head">
                                           <Space>
                                             <Tag color={traceStatus === 'success' ? 'green' : traceStatus === 'error' ? 'red' : traceStatus === 'warning' ? 'orange' : 'blue'}>
                                               {trace.type}
@@ -397,9 +388,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                             {isRawShown ? '隐藏原始JSON' : '显示原始JSON'}
                                           </Button>
                                         </Space>
-                                        <Text type="secondary">{new Date(trace.timestamp).toLocaleTimeString()}</Text>
+                                        <Text type="secondary" className="ai-trace-time">{new Date(trace.timestamp).toLocaleTimeString()}</Text>
                                         {isRawShown ? (
-                                          <pre style={{ marginTop: 8, whiteSpace: 'pre-wrap', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: 8 }}>
+                                          <pre className="ai-trace-json">
                                             {JSON.stringify(trace.payload, null, 2)}
                                           </pre>
                                         ) : null}
@@ -414,16 +405,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       ) : null}
                       {renderMarkdown(message.content)}
                     </div>
-                  ) : <Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{message.content}</Paragraph>
+                  ) : <Paragraph className="ai-chat-user-paragraph">{message.content}</Paragraph>
                 }
               />
             </List.Item>
           )}
         />
         {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', padding: '8px 16px' }}>
+          <div className="ai-chat-loading-row">
             <Spin size="small" />
-            <Text style={{ marginLeft: '8px' }}>AI 正在思考...</Text>
+            <Text className="ai-chat-loading-text">AI 正在思考...</Text>
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -444,7 +435,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         </div>
       ) : null}
 
-      <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f0f0', flexShrink: 0 }}>
+      <div className="ai-chat-input-wrap">
         <Input.TextArea
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
@@ -453,7 +444,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           rows={3}
           disabled={loading}
         />
-        <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+        <div className="ai-chat-send-row">
           <Button
             type="primary"
             icon={<SendOutlined />}

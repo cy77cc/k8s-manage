@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Collapse, Descriptions, List, Modal, Space, Spin, Tag, Typography, message } from 'antd';
+import { Button, Card, Collapse, Descriptions, List, Modal, Skeleton, Space, Spin, Tag, Typography, message } from 'antd';
 import { AlertOutlined, BookOutlined, BulbOutlined, RocketOutlined } from '@ant-design/icons';
 import { Api } from '../../api';
 import type { AIRecommendation } from '../../api';
@@ -12,6 +12,7 @@ interface RecommendationPanelProps {
   limit?: number;
   className?: string;
   refreshSignal?: number;
+  onLoadingChange?: (loading: boolean) => void;
 }
 
 const recommendationIcons: Record<string, React.ReactNode> = {
@@ -21,7 +22,7 @@ const recommendationIcons: Record<string, React.ReactNode> = {
   warning: <AlertOutlined />,
 };
 
-const RecommendationPanel: React.FC<RecommendationPanelProps> = ({ type, context, limit = 5, className, refreshSignal = 0 }) => {
+const RecommendationPanel: React.FC<RecommendationPanelProps> = ({ type, context, limit = 5, className, refreshSignal = 0, onLoadingChange }) => {
   const [recommendations, setRecommendations] = useState<AIRecommendation[]>([]);
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -32,6 +33,7 @@ const RecommendationPanel: React.FC<RecommendationPanelProps> = ({ type, context
   const loadRecommendations = async () => {
     try {
       setLoading(true);
+      onLoadingChange?.(true);
       const response = await Api.ai.getRecommendations({ type, context, limit });
       const list = response.data || [];
       if (list.length === 0) {
@@ -56,6 +58,7 @@ const RecommendationPanel: React.FC<RecommendationPanelProps> = ({ type, context
       }]);
     } finally {
       setLoading(false);
+      onLoadingChange?.(false);
     }
   };
 
@@ -107,11 +110,14 @@ const RecommendationPanel: React.FC<RecommendationPanelProps> = ({ type, context
             <Text strong>智能推荐</Text>
           </Space>
         }
-        className={className || ''}
+        className={`ai-recommendation-panel ${className || ''}`}
       >
+        {loading ? <div className="ai-recommendation-header-progress" /> : null}
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 24 }}>
-            <Spin />
+          <div className="ai-recommendation-skeleton-wrap">
+            <Skeleton active paragraph={{ rows: 2 }} title={{ width: '45%' }} />
+            <Skeleton active paragraph={{ rows: 2 }} title={{ width: '50%' }} />
+            <Skeleton active paragraph={{ rows: 1 }} title={{ width: '40%' }} />
           </div>
         ) : (
           <List
@@ -138,6 +144,7 @@ const RecommendationPanel: React.FC<RecommendationPanelProps> = ({ type, context
                       <Text type="secondary">{item.content}</Text>
                       {item.reasoning ? (
                         <Collapse
+                          className="ai-recommendation-reasoning"
                           size="small"
                           ghost
                           items={[{
