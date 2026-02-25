@@ -151,6 +151,27 @@ export interface CloudInstance {
   diskGB: number;
 }
 
+const parseLabels = (labels: any): string[] => {
+  if (Array.isArray(labels)) {
+    return labels.map((x) => String(x).trim()).filter(Boolean);
+  }
+  const raw = String(labels || '').trim();
+  if (!raw) {
+    return [];
+  }
+  if (raw.startsWith('[')) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return arr.map((x) => String(x).trim()).filter(Boolean);
+      }
+    } catch {
+      // fallback to csv parser
+    }
+  }
+  return raw.split(',').map((x) => x.trim()).filter(Boolean);
+};
+
 export const hostApi = {
   async getHostList(params?: HostListParams): Promise<ApiResponse<PaginatedResponse<Host>>> {
     const response = await apiService.get<Host[]>('/hosts', {
@@ -168,7 +189,7 @@ export const hostApi = {
       memory: item.memory_mb ?? item.memory ?? 0,
       disk: item.disk_gb ?? item.disk ?? 0,
       network: item.network ?? 0,
-      tags: item.tags ?? (item.labels ? String(item.labels).split(',').filter(Boolean) : []),
+      tags: item.tags ?? parseLabels(item.labels),
       region: item.region ?? '',
       source: item.source,
       provider: item.provider,
@@ -200,7 +221,7 @@ export const hostApi = {
         memory: item.memory_mb ?? item.memory ?? 0,
         disk: item.disk_gb ?? item.disk ?? 0,
         network: item.network ?? 0,
-        tags: item.tags ?? (item.labels ? String(item.labels).split(',').filter(Boolean) : []),
+        tags: item.tags ?? parseLabels(item.labels),
         region: item.region ?? '',
         createdAt: item.created_at ?? item.createdAt,
         lastActive: item.updated_at ?? item.lastActive,

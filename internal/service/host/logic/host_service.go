@@ -2,6 +2,7 @@ package logic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -151,12 +152,49 @@ func (s *HostService) consumeProbe(ctx context.Context, userID uint64, token str
 }
 
 func ParseLabels(labels string) []string {
-	parts := strings.Split(labels, ",")
+	trimmed := strings.TrimSpace(labels)
+	if trimmed == "" {
+		return nil
+	}
+
+	// Preferred format: JSON array string persisted in `nodes.labels`.
+	if strings.HasPrefix(trimmed, "[") {
+		var arr []string
+		if err := json.Unmarshal([]byte(trimmed), &arr); err == nil {
+			out := make([]string, 0, len(arr))
+			for _, item := range arr {
+				if s := strings.TrimSpace(item); s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+	}
+
+	// Backward compatibility: legacy comma-separated storage.
+	parts := strings.Split(trimmed, ",")
 	out := make([]string, 0, len(parts))
 	for _, item := range parts {
-		if trimmed := strings.TrimSpace(item); trimmed != "" {
-			out = append(out, trimmed)
+		if s := strings.TrimSpace(item); s != "" {
+			out = append(out, s)
 		}
 	}
 	return out
+}
+
+func EncodeLabels(labels []string) string {
+	out := make([]string, 0, len(labels))
+	for _, item := range labels {
+		if s := strings.TrimSpace(item); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
 }

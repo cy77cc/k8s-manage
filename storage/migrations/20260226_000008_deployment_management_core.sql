@@ -1,4 +1,27 @@
 -- +migrate Up
+CREATE TABLE IF NOT EXISTS clusters (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(64) NOT NULL,
+  description VARCHAR(256) NOT NULL DEFAULT '',
+  version VARCHAR(64) NOT NULL DEFAULT '',
+  status VARCHAR(32) NOT NULL DEFAULT 'created',
+  type VARCHAR(32) NOT NULL DEFAULT 'kubernetes',
+  endpoint VARCHAR(256) NOT NULL DEFAULT '',
+  kubeconfig MEDIUMTEXT,
+  ca_cert TEXT,
+  token TEXT,
+  nodes JSON,
+  auth_method VARCHAR(32) NOT NULL DEFAULT 'kubeconfig',
+  management_mode VARCHAR(32) NOT NULL DEFAULT 'k8s-only',
+  created_by VARCHAR(64) NOT NULL DEFAULT '',
+  updated_by VARCHAR(64) NOT NULL DEFAULT '',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_cluster_name (name),
+  INDEX idx_cluster_status (status),
+  INDEX idx_cluster_type (type)
+);
+
 CREATE TABLE IF NOT EXISTS deployment_targets (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(128) NOT NULL,

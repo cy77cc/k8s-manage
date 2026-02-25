@@ -29,7 +29,6 @@ func (s *HostService) CreateWithProbe(ctx context.Context, userID uint64, isAdmi
 
 	facts := ProbeFacts{}
 	_ = json.Unmarshal([]byte(probe.FactsJSON), &facts)
-	labels := strings.Join(req.Labels, ",")
 	node := &model.Node{
 		Name:        firstNonEmpty(req.Name, probe.Name),
 		Hostname:    facts.Hostname,
@@ -38,7 +37,7 @@ func (s *HostService) CreateWithProbe(ctx context.Context, userID uint64, isAdmi
 		Port:        probe.Port,
 		SSHUser:     probe.Username,
 		SSHPassword: probe.PasswordCipher,
-		Labels:      labels,
+		Labels:      EncodeLabels(req.Labels),
 		Status:      buildStatus(probe.Reachable),
 		OS:          facts.OS,
 		Arch:        facts.Arch,
@@ -128,7 +127,7 @@ func (s *HostService) createFromLegacyReq(ctx context.Context, req CreateReq) (*
 		SSHUser:     firstNonEmpty(req.Username, "root"),
 		SSHPassword: req.Password,
 		Description: req.Description,
-		Labels:      strings.Join(req.Labels, ","),
+		Labels:      EncodeLabels(req.Labels),
 		Status:      status,
 		Role:        req.Role,
 		ClusterID:   req.ClusterID,

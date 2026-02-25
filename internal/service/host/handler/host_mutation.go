@@ -125,7 +125,7 @@ func (h *Handler) AddTag(c *gin.Context) {
 	}
 	labels := hostlogic.ParseLabels(node.Labels)
 	labels = append(labels, req.Tag)
-	_, err = h.hostService.Update(c.Request.Context(), id, map[string]any{"labels": strings.Join(labels, ",")})
+	_, err = h.hostService.Update(c.Request.Context(), id, map[string]any{"labels": hostlogic.EncodeLabels(labels)})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
@@ -151,7 +151,7 @@ func (h *Handler) RemoveTag(c *gin.Context) {
 			filtered = append(filtered, item)
 		}
 	}
-	_, err = h.hostService.Update(c.Request.Context(), id, map[string]any{"labels": strings.Join(filtered, ",")})
+	_, err = h.hostService.Update(c.Request.Context(), id, map[string]any{"labels": hostlogic.EncodeLabels(filtered)})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
