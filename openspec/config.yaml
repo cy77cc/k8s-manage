@@ -1,20 +1,45 @@
 schema: spec-driven
+context: |
+  Project: k8s-manage (Kubernetes/PaaS operations platform, backend+frontend single-process delivery)
+  API base: /api/v1, health: /api/health
+  Backend: Go 1.25.x, Gin, GORM, Casbin, Redis, client-go, CloudWeGo Eino + MCP
+  Frontend: React 19 + TypeScript + Vite + Ant Design + Tailwind
+  Key paths:
+    - Backend domains: internal/service/<domain> (routes/handler/logic split)
+    - API contracts: api/<domain>/v1
+    - Frontend API modules: web/src/api/modules
+    - Migrations: storage/migrations (must include Up/Down)
+    - OpenSpec changes: openspec/changes/*
+  Runtime conventions:
+    - New business APIs use /api/v1 and JWT auth unless explicitly public
+    - RBAC/Casbin checks are required for protected operations
+    - Mutating AI/tool actions require approval flow
+  Delivery conventions:
+    - OpenSpec-first: behavior/capability changes must update OpenSpec in same PR
+    - Validate before merge: openspec validate --json
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+rules:
+  proposal:
+    - Keep sections explicit: Why, What Changes, Capabilities, Impact.
+    - Capabilities MUST be kebab-case and map 1:1 to specs/<capability>/spec.md.
+    - For status-oriented proposals, include a concrete snapshot date.
+    - Impact section should list concrete affected paths/modules.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  design:
+    - Use for cross-domain, security, approval, migration, or data model changes.
+    - Include Goals/Non-Goals and explicit Decisions with rationale and alternatives.
+    - Include Risks with mitigation and migration/rollback notes when applicable.
+    - Reference concrete backend/frontend/storage paths involved.
+
+  specs:
+    - Use normative language (SHALL/MUST), avoid vague wording.
+    - Every requirement MUST include at least one `#### Scenario` with WHEN/THEN.
+    - For behavior changes on existing capabilities, use MODIFIED with full requirement blocks.
+    - Security-sensitive changes MUST specify auth/RBAC/approval expectations.
+    - API-affecting changes MUST describe compatibility or migration expectation.
+
+  tasks:
+    - "Use strict checkbox format: `- [ ] X.Y ...` and update to `- [x]` when done."
+    - Group tasks by phase (modeling, implementation, validation, rollout/governance).
+    - Include verification tasks (`go test ./...`; if web touched, `cd web && npm run build`).
+    - Include OpenSpec sync task: update specs/tasks and run `openspec validate --json`.
