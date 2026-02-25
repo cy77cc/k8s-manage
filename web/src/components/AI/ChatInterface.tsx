@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Api } from '../../api';
-import type { AIMessage, AISession, ToolTrace } from '../../api';
+import type { AIMessage, AISession, EmbeddedRecommendation, ToolTrace } from '../../api';
 
 const { Text, Paragraph } = Typography;
 
@@ -92,6 +92,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [currentSession, setCurrentSession] = useState<AISession | null>(null);
   const [lastPrompt, setLastPrompt] = useState('');
   const [traceRawVisible, setTraceRawVisible] = useState<Record<string, boolean>>({});
+  const [followupLoadingId, setFollowupLoadingId] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -258,9 +259,28 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               timestamp: new Date().toISOString(),
             });
           },
+          onToolIntentUnresolved: (payload) => {
+            const turnID = payload.turn_id || activeTurnID;
+            attachTraceToAssistant(assistantMessageID, turnID, {
+              id: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              type: 'tool_missing',
+              payload: payload as Record<string, any>,
+              timestamp: new Date().toISOString(),
+            });
+          },
           onDone: (done) => {
             latestSession = done.session;
             setCurrentSession(done.session);
+            if (done.turn_recommendations && done.turn_recommendations.length > 0) {
+              const turnID = done.turn_id || activeTurnID;
+              setMessages((prev) =>
+                prev.map((item) =>
+                  (item.id === assistantMessageID || (turnID && item.turnId === turnID))
+                    ? { ...item, turnId: turnID || item.turnId, recommendations: done.turn_recommendations }
+                    : item,
+                ),
+              );
+            }
             if (done.stream_state === 'partial') {
               setStreamState('timeout');
               setStreamError('工具结果不完整，可重试本轮对话。');
@@ -335,6 +355,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleRetry = async () => {
     if (!lastPrompt) return;
     await sendMessage(lastPrompt);
+  };
+
+  const handleRecommendationFollowup = async (rec: EmbeddedRecommendation) => {
+    const prompt = (rec.followup_prompt || rec.content || '').trim();
+    if (!prompt || loading) return;
+    setFollowupLoadingId(rec.id);
+    try {
+      await sendMessage(prompt);
+    } finally {
+      setFollowupLoadingId('');
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -460,6 +491,42 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                               ),
                             }]}
                           />
+                        </div>
+                      ) : null}
+                      {message.recommendations && message.recommendations.length > 0 ? (
+                        <div className="ai-inline-recommendations">
+                          <Text strong className="ai-inline-recommendations-title">下一步建议</Text>
+                          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                            {message.recommendations.slice(0, 3).map((rec) => (
+                              <Card key={rec.id} size="small" className="ai-inline-rec-card">
+                                <Space className="ai-inline-rec-head">
+                                  <Text strong>{rec.title}</Text>
+                                  <Tag color="blue">{Math.round((rec.relevance || 0) * 100)}%</Tag>
+                                </Space>
+                                <Text type="secondary">{rec.content}</Text>
+                                {rec.reasoning ? (
+                                  <Collapse
+                                    size="small"
+                                    ghost
+                                    items={[{
+                                      key: `inline-reasoning-${message.id}-${rec.id}`,
+                                      label: <Text type="secondary">建议说明</Text>,
+                                      children: <Text type="secondary">{rec.reasoning}</Text>,
+                                    }]}
+                                  />
+                                ) : null}
+                                <div className="ai-inline-rec-actions">
+                                  <Button
+                                    size="small"
+                                    loading={followupLoadingId === rec.id}
+                                    onClick={() => void handleRecommendationFollowup(rec)}
+                                  >
+                                    一键追问
+                                  </Button>
+                                </div>
+                              </Card>
+                            ))}
+                          </Space>
                         </div>
                       ) : null}
                       {renderMarkdown(message.content)}

@@ -8,6 +8,7 @@ export interface AIMessage {
   content: string;
   thinking?: string;
   traces?: ToolTrace[];
+  recommendations?: EmbeddedRecommendation[];
   timestamp: string;
 }
 
@@ -26,10 +27,21 @@ export interface AIRecommendation {
   type: string;
   title: string;
   content: string;
+  followup_prompt?: string;
   reasoning?: string;
   relevance: number;
   action?: string;
   params?: Record<string, any>;
+}
+
+export interface EmbeddedRecommendation {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  followup_prompt?: string;
+  reasoning?: string;
+  relevance: number;
 }
 
 export interface ToolTrace {
@@ -94,6 +106,7 @@ interface SSEDeltaEvent {
 interface SSEDoneEvent {
   session: AISession;
   stream_state?: 'ok' | 'partial' | 'failed';
+  turn_recommendations?: EmbeddedRecommendation[];
   tool_summary?: {
     calls: number;
     results: number;
@@ -129,6 +142,7 @@ export interface AIChatStreamHandlers {
   onToolCall?: (payload: { turn_id?: string; call_id?: string; tool?: string; payload?: Record<string, any>; ts?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }) => void;
   onToolResult?: (payload: { turn_id?: string; call_id?: string; tool?: string; payload?: Record<string, any>; result?: { ok: boolean; data?: any; error?: string; error_code?: string; source?: string; latency_ms?: number }; ts?: string }) => void;
   onApprovalRequired?: (payload: ApprovalTicket & { turn_id?: string; approval_required?: boolean; previewDiff?: string }) => void;
+  onToolIntentUnresolved?: (payload: { turn_id?: string; tool?: string; message?: string }) => void;
   onHeartbeat?: (payload: { turn_id?: string; status?: string }) => void;
 }
 
@@ -312,6 +326,8 @@ export const aiApi = {
         handlers.onApprovalRequired?.(payload as ApprovalTicket & { approval_required?: boolean; previewDiff?: string });
         toolPending = false;
         clearToolTimer();
+      } else if (eventType === 'tool_intent_unresolved') {
+        handlers.onToolIntentUnresolved?.(payload as { turn_id?: string; tool?: string; message?: string });
       } else if (eventType === 'heartbeat') {
         handlers.onHeartbeat?.(payload as { turn_id?: string; status?: string });
         touchActivity();

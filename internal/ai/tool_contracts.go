@@ -276,6 +276,20 @@ type HostInventoryInput struct {
 	Limit   int    `json:"limit,omitempty" jsonschema:"description=max hosts,default=50"`
 }
 
+type ClusterInventoryInput struct {
+	Status  string `json:"status,omitempty" jsonschema:"description=optional cluster status filter"`
+	Keyword string `json:"keyword,omitempty" jsonschema:"description=optional keyword on name/endpoint"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"description=max clusters,default=50"`
+}
+
+type ServiceInventoryInput struct {
+	Keyword     string `json:"keyword,omitempty" jsonschema:"description=optional keyword on service name/owner"`
+	RuntimeType string `json:"runtime_type,omitempty" jsonschema:"description=optional runtime type filter,k8s/compose/helm"`
+	Env         string `json:"env,omitempty" jsonschema:"description=optional environment filter"`
+	Status      string `json:"status,omitempty" jsonschema:"description=optional service status filter"`
+	Limit       int    `json:"limit,omitempty" jsonschema:"description=max services,default=50"`
+}
+
 type HostBatchExecPreviewInput struct {
 	HostIDs []int  `json:"host_ids" jsonschema:"required,description=target host ids"`
 	Command string `json:"command" jsonschema:"required,description=shell command to run"`

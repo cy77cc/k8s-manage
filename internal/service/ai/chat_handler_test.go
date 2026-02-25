@@ -44,3 +44,29 @@ func TestResolveStreamState(t *testing.T) {
 		t.Fatalf("expected failed state, got %s", failed)
 	}
 }
+
+func TestRecommendationPayload(t *testing.T) {
+	in := []recommendationRecord{
+		{ID: "1", Type: "suggestion", Title: "A", Content: "a", Relevance: 0.8, FollowupPrompt: "next a"},
+		{ID: "2", Type: "suggestion", Title: "B", Content: "b", Relevance: 0.7},
+		{ID: "3", Type: "suggestion", Title: "C", Content: "c", Relevance: 0.6},
+		{ID: "4", Type: "suggestion", Title: "D", Content: "d", Relevance: 0.5},
+	}
+	out := recommendationPayload(in)
+	if len(out) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(out))
+	}
+	if out[0]["followup_prompt"] != "next a" {
+		t.Fatalf("expected followup prompt to be kept")
+	}
+}
+
+func TestDetectUnresolvedToolIntent(t *testing.T) {
+	tool := detectUnresolvedToolIntent("我将调用 host_list_inventory 查询主机", "")
+	if tool != "host_list_inventory" {
+		t.Fatalf("expected host_list_inventory, got %q", tool)
+	}
+	if got := detectUnresolvedToolIntent("普通思考文本", "没有工具名"); got != "" {
+		t.Fatalf("expected empty tool, got %q", got)
+	}
+}

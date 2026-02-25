@@ -117,12 +117,13 @@ func (h *handler) recommendations(c *gin.Context) {
 	out := make([]gin.H, 0, len(existing))
 	for _, r := range existing {
 		out = append(out, gin.H{
-			"id":        r.ID,
-			"type":      r.Type,
-			"title":     r.Title,
-			"content":   r.Content,
-			"reasoning": r.Reasoning,
-			"relevance": r.Relevance,
+			"id":              r.ID,
+			"type":            r.Type,
+			"title":           r.Title,
+			"content":         r.Content,
+			"followup_prompt": r.FollowupPrompt,
+			"reasoning":       r.Reasoning,
+			"relevance":       r.Relevance,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": out})
@@ -161,7 +162,7 @@ func (h *handler) actionExecute(c *gin.Context) {
 	}})
 }
 
-func (h *handler) refreshSuggestions(uid uint64, scene, answer string) {
+func (h *handler) refreshSuggestions(uid uint64, scene, answer string) []recommendationRecord {
 	scene = normalizeScene(scene)
 	prompt := "你是 suggestion 智能体。基于下面回答提炼 3 条可执行建议，每条一行，格式为：标题|内容|相关度(0-1)|思考摘要（不超过60字）。回答内容如下：\n" + answer
 	out := []recommendationRecord{}
@@ -189,31 +190,34 @@ func (h *handler) refreshSuggestions(uid uint64, scene, answer string) {
 					reasoning = strings.TrimSpace(parts[3])
 				}
 				out = append(out, recommendationRecord{
-					ID:        "rec-" + strconvFormatInt(time.Now().UnixNano()),
-					UserID:    uid,
-					Scene:     scene,
-					Type:      "suggestion",
-					Title:     strings.TrimSpace(parts[0]),
-					Content:   strings.TrimSpace(parts[1]),
-					Reasoning: reasoning,
-					Relevance: rel,
-					CreatedAt: time.Now(),
+					ID:             "rec-" + strconvFormatInt(time.Now().UnixNano()),
+					UserID:         uid,
+					Scene:          scene,
+					Type:           "suggestion",
+					Title:          strings.TrimSpace(parts[0]),
+					Content:        strings.TrimSpace(parts[1]),
+					FollowupPrompt: strings.TrimSpace(parts[1]),
+					Reasoning:      reasoning,
+					Relevance:      rel,
+					CreatedAt:      time.Now(),
 				})
 			}
 		}
 	}
 	if len(out) == 0 {
 		out = append(out, recommendationRecord{
-			ID:        "rec-" + strconvFormatInt(time.Now().UnixNano()),
-			UserID:    uid,
-			Scene:     scene,
-			Type:      "suggestion",
-			Title:     "先做健康检查",
-			Content:   "优先检查资源/日志，再进行部署或配置变更。",
-			Reasoning: "先确认现状可降低误操作风险，再执行变更更稳妥。",
-			Relevance: 0.7,
-			CreatedAt: time.Now(),
+			ID:             "rec-" + strconvFormatInt(time.Now().UnixNano()),
+			UserID:         uid,
+			Scene:          scene,
+			Type:           "suggestion",
+			Title:          "先做健康检查",
+			Content:        "优先检查资源/日志，再进行部署或配置变更。",
+			FollowupPrompt: "先帮我做一次资源健康检查，然后再给变更建议。",
+			Reasoning:      "先确认现状可降低误操作风险，再执行变更更稳妥。",
+			Relevance:      0.7,
+			CreatedAt:      time.Now(),
 		})
 	}
 	h.store.setRecommendations(uid, scene, out)
+	return out
 }

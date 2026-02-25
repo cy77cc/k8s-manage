@@ -41,7 +41,7 @@ func addLocalTool[I any](tools *[]RegisteredTool, meta ToolMeta, fn func(ctx con
 }
 
 func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
-	tools := make([]RegisteredTool, 0, 13)
+	tools := make([]RegisteredTool, 0, 24)
 
 	if err := addLocalTool(&tools, ToolMeta{Name: "os_get_cpu_mem", Description: "读取 CPU/内存/负载概览。默认 target=localhost。示例: {\"target\":\"10.0.0.8\"}", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"target": "localhost"}}, func(ctx context.Context, input OSCPUMemInput) (ToolResult, error) {
 		return osGetCPUMem(ctx, deps, input)
@@ -110,6 +110,16 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 	}
 	if err := addLocalTool(&tools, ToolMeta{Name: "host_list_inventory", Description: "查询主机资产清单，可按 status/keyword 过滤。", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"limit": 50}}, func(ctx context.Context, input HostInventoryInput) (ToolResult, error) {
 		return hostListInventory(ctx, deps, input)
+	}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(&tools, ToolMeta{Name: "cluster_list_inventory", Description: "查询集群资产清单，可按 status/keyword 过滤。", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"limit": 50}}, func(ctx context.Context, input ClusterInventoryInput) (ToolResult, error) {
+		return clusterListInventory(ctx, deps, input)
+	}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(&tools, ToolMeta{Name: "service_list_inventory", Description: "查询服务资产清单，可按 runtime_type/env/status/keyword 过滤。", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"limit": 50}}, func(ctx context.Context, input ServiceInventoryInput) (ToolResult, error) {
+		return serviceListInventory(ctx, deps, input)
 	}); err != nil {
 		return nil, err
 	}

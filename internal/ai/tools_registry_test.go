@@ -21,6 +21,8 @@ func TestBuildLocalTools_HasSchemaAndRequired(t *testing.T) {
 		"k8s_get_pod_logs",
 		"service_deploy_apply",
 		"host_ssh_exec_readonly",
+		"cluster_list_inventory",
+		"service_list_inventory",
 	}
 	for _, name := range cases {
 		meta, ok := lookup[name]

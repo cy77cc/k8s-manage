@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,8 @@ type streamErrorPayload struct {
 	Message     string `json:"message"`
 	Recoverable bool   `json:"recoverable"`
 }
+
+var toolIntentPattern = regexp.MustCompile(`\b([a-z]+_[a-z0-9_]+)\b`)
 
 type toolEventTracker struct {
 	mu      sync.Mutex
@@ -251,6 +254,14 @@ func (h *handler) chat(c *gin.Context) {
 	}
 
 	summary := tracker.summary()
+	if summary.Calls == 0 {
+		if hint := detectUnresolvedToolIntent(reasoningContent.String(), assistantContent.String()); hint != "" {
+			_ = emit("tool_intent_unresolved", gin.H{
+				"tool":    hint,
+				"message": "检测到工具意图但未触发实际工具调用，可重试本轮或补充更明确参数。",
+			})
+		}
+	}
 	if len(summary.MissingCallIDs) > 0 {
 		toolErr := &streamErrorPayload{
 			Code:        "tool_result_missing",
@@ -288,7 +299,7 @@ func (h *handler) chat(c *gin.Context) {
 		emitFinal("error", gin.H{"message": err.Error()})
 		return
 	}
-	h.refreshSuggestions(uid, scene, content)
+	turnSuggestions := h.refreshSuggestions(uid, scene, content)
 	streamState := resolveStreamState(fatalErr, summary)
 	if fatalErr != nil {
 		_ = emitFinal("error", gin.H{
@@ -299,10 +310,53 @@ func (h *handler) chat(c *gin.Context) {
 		})
 	}
 	emitFinal("done", gin.H{
-		"session":      session,
-		"stream_state": streamState,
-		"tool_summary": summary,
+		"session":              session,
+		"stream_state":         streamState,
+		"tool_summary":         summary,
+		"turn_recommendations": recommendationPayload(turnSuggestions),
 	})
+}
+
+func recommendationPayload(items []recommendationRecord) []gin.H {
+	if len(items) == 0 {
+		return nil
+	}
+	limit := len(items)
+	if limit > 3 {
+		limit = 3
+	}
+	out := make([]gin.H, 0, limit)
+	for i := 0; i < limit; i++ {
+		out = append(out, gin.H{
+			"id":              items[i].ID,
+			"type":            items[i].Type,
+			"title":           items[i].Title,
+			"content":         items[i].Content,
+			"reasoning":       items[i].Reasoning,
+			"relevance":       items[i].Relevance,
+			"followup_prompt": items[i].FollowupPrompt,
+		})
+	}
+	return out
+}
+
+func detectUnresolvedToolIntent(reasoning, content string) string {
+	combined := strings.ToLower(reasoning + "\n" + content)
+	matches := toolIntentPattern.FindAllStringSubmatch(combined, -1)
+	for _, item := range matches {
+		if len(item) < 2 {
+			continue
+		}
+		name := strings.TrimSpace(item[1])
+		if strings.HasPrefix(name, "os_") ||
+			strings.HasPrefix(name, "host_") ||
+			strings.HasPrefix(name, "k8s_") ||
+			strings.HasPrefix(name, "service_") ||
+			strings.HasPrefix(name, "cluster_") {
+			return name
+		}
+	}
+	return ""
 }
 
 func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene string, runtime map[string]any, emit func(event string, payload gin.H) bool, tracker *toolEventTracker) context.Context {

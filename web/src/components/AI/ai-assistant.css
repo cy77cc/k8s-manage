@@ -16,7 +16,7 @@
 }
 
 .ai-assistant-recommendation-wrap {
-  max-height: 240px;
+  max-height: 180px;
   min-height: 120px;
   overflow: auto;
   flex-shrink: 0;
@@ -125,6 +125,35 @@
 .ai-thinking-block,
 .ai-trace-block {
   margin-bottom: 8px;
+}
+
+.ai-inline-recommendations {
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid #eaf0f9;
+  border-radius: 8px;
+  background: #f9fbff;
+}
+
+.ai-inline-recommendations-title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.ai-inline-rec-card.ant-card {
+  border: 1px solid #e8eef7 !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.ai-inline-rec-head {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.ai-inline-rec-actions {
+  margin-top: 8px;
 }
 
 .ai-thinking-header,

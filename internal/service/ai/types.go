@@ -26,15 +26,16 @@ type aiSession struct {
 }
 
 type recommendationRecord struct {
-	ID        string    `json:"id"`
-	UserID    uint64    `json:"userId"`
-	Scene     string    `json:"scene"`
-	Type      string    `json:"type"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	Reasoning string    `json:"reasoning,omitempty"`
-	Relevance float64   `json:"relevance"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID             string    `json:"id"`
+	UserID         uint64    `json:"userId"`
+	Scene          string    `json:"scene"`
+	Type           string    `json:"type"`
+	Title          string    `json:"title"`
+	Content        string    `json:"content"`
+	FollowupPrompt string    `json:"followup_prompt,omitempty"`
+	Reasoning      string    `json:"reasoning,omitempty"`
+	Relevance      float64   `json:"relevance"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 type approvalTicket struct {

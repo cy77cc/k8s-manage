@@ -34,6 +34,8 @@ func resolveToolParams(ctx context.Context, meta ToolMeta, params map[string]any
 	setIfMissing("cluster_id", runtime["cluster_id"], "runtime")
 	setIfMissing("namespace", runtime["namespace"], "runtime")
 	setIfMissing("service_id", runtime["service_id"], "runtime")
+	setIfMissing("env", runtime["env"], "runtime")
+	setIfMissing("runtime_type", runtime["runtime_type"], "runtime")
 
 	// 2) session memory by tool
 	if accessor := ToolMemoryAccessorFromContext(ctx); accessor != nil {

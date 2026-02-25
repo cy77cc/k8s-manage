@@ -19,7 +19,8 @@ const toolCallGuide = `Tool calling rules:
 2) Prefer using runtime context (scene/page/host_id/cluster_id/service_id/namespace) as arguments.
 3) If any required field is missing, ask for it or choose a safe readonly tool first.
 4) For mutating tools, require approval token before execution.
-5) Return concise explanation after each tool result.`
+5) For inventory/list/assets/清单/已添加资源 requests, call inventory tools first (host_list_inventory/cluster_list_inventory/service_list_inventory).
+6) Return concise explanation after each tool result.`
 
 type PlatformAgent struct {
 	Runnable *react.Agent
