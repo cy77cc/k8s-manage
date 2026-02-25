@@ -278,6 +278,46 @@
   - 新增 `internal/model/host_probe.go`（`host_probe_sessions`）。
 - 前端主机向导：
   - `HostOnboardingPage` 改为 3-step：连接信息 -> 探测结果 -> 入库确认。
+
+## 2026-02-25 (AI Tool Calling Hardening: Typed Schema + Param Resolver)
+
+### Scope
+
+- 对齐 Eino Tool Calling 最佳实践，修复工具空参数调用导致失败的问题。
+- 全量本地工具强类型化，并引入参数自动补全与一次重试。
+
+### Completed
+
+- `internal/ai` 工具契约增强：
+  - 本地工具输入从 `map[string]any` 迁移到强类型 struct（含 `jsonschema`）。
+  - `ToolMeta` 扩展：`required/default_hint/examples/schema`。
+  - 新增输入错误码：`missing_param/invalid_param/param_conflict`。
+- 参数自动补全：
+  - 新增 `tool_param_resolver.go`。
+  - 优先级：`runtime context > session memory > safety defaults`。
+  - 仅对白名单参数补全，不覆盖用户显式参数。
+- 重试与可观测性：
+  - `runWithPolicyAndEvent` 支持缺参后一次重试。
+  - SSE tool 事件携带 `param_resolution` 和 `retry`。
+- 会话参数记忆：
+  - `internal/service/ai/store.go` 增加按 `user+scene+tool` 记忆上次成功参数。
+  - `chat_handler` 注入 runtime context + memory accessor 到 tool context。
+- Agent 策略强化：
+  - `platform_agent.go` 增加 tool calling 约束指令，降低空参数调用概率。
+- MCP 工具补充：
+  - 缓存并透出 MCP tool input schema/required（保持代理执行模式）。
+- 文档沉淀：
+  - `docs/cto/ai-tool-contract-hardening.md`
+  - `docs/fullstack/ai-tool-typing-migration.md`
+  - `docs/product/ai-tool-call-ux-rules.md`
+  - `docs/qa/ai-tool-call-regression.md`
+  - `docs/ai/tool-schema-catalog.md`
+  - `docs/ai/tool-error-codes.md`
+
+### Verification
+
+- `go test ./...` 通过。
+- `npm run build` 通过。
   - `hosts API` 新增 `probeHost`、`updateCredentials`，`createHost` 支持 probe token。
 
 ### Verification

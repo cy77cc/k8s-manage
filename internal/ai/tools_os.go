@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -11,9 +10,9 @@ import (
 
 var serviceUnitRegexp = regexp.MustCompile(`^[a-zA-Z0-9_.@-]+$`)
 
-func osGetCPUMem(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_cpu_mem", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		target := toString(input["target"])
+func osGetCPUMem(ctx context.Context, deps PlatformDeps, input OSCPUMemInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_cpu_mem", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSCPUMemInput) (any, string, error) {
+		target := strings.TrimSpace(in.Target)
 		loadavg, _, _ := runOnTarget(ctx, deps, target, "cat", []string{"/proc/loadavg"}, "cat /proc/loadavg")
 		mem, source, err := runOnTarget(ctx, deps, target, "cat", []string{"/proc/meminfo"}, "cat /proc/meminfo")
 		if err != nil {
@@ -24,9 +23,9 @@ func osGetCPUMem(ctx context.Context, deps PlatformDeps, input map[string]any) (
 	})
 }
 
-func osGetDiskFS(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_disk_fs", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		target := toString(input["target"])
+func osGetDiskFS(ctx context.Context, deps PlatformDeps, input OSDiskInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_disk_fs", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSDiskInput) (any, string, error) {
+		target := strings.TrimSpace(in.Target)
 		out, source, err := runOnTarget(ctx, deps, target, "df", []string{"-h"}, "df -h")
 		if err != nil {
 			return nil, source, err
@@ -35,9 +34,9 @@ func osGetDiskFS(ctx context.Context, deps PlatformDeps, input map[string]any) (
 	})
 }
 
-func osGetNetStat(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_net_stat", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		target := toString(input["target"])
+func osGetNetStat(ctx context.Context, deps PlatformDeps, input OSNetInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_net_stat", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSNetInput) (any, string, error) {
+		target := strings.TrimSpace(in.Target)
 		dev, source, err := runOnTarget(ctx, deps, target, "cat", []string{"/proc/net/dev"}, "cat /proc/net/dev")
 		if err != nil {
 			return nil, source, err
@@ -47,10 +46,10 @@ func osGetNetStat(ctx context.Context, deps PlatformDeps, input map[string]any) 
 	})
 }
 
-func osGetProcessTop(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_process_top", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		target := toString(input["target"])
-		limit := toInt(input["limit"])
+func osGetProcessTop(ctx context.Context, deps PlatformDeps, input OSProcessTopInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_process_top", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSProcessTopInput) (any, string, error) {
+		target := strings.TrimSpace(in.Target)
+		limit := in.Limit
 		if limit <= 0 {
 			limit = 10
 		}
@@ -66,14 +65,17 @@ func osGetProcessTop(ctx context.Context, deps PlatformDeps, input map[string]an
 	})
 }
 
-func osGetJournalTail(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_journal_tail", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		target := toString(input["target"])
-		service := strings.TrimSpace(toString(input["service"]))
-		if !serviceUnitRegexp.MatchString(service) {
-			return nil, "validation", errors.New("invalid service name")
+func osGetJournalTail(ctx context.Context, deps PlatformDeps, input OSJournalInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_journal_tail", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSJournalInput) (any, string, error) {
+		target := strings.TrimSpace(in.Target)
+		service := strings.TrimSpace(in.Service)
+		if service == "" {
+			return nil, "validation", NewMissingParam("service", "service is required")
 		}
-		lines := toInt(input["lines"])
+		if !serviceUnitRegexp.MatchString(service) {
+			return nil, "validation", NewInvalidParam("service", "invalid service name")
+		}
+		lines := in.Lines
 		if lines <= 0 {
 			lines = 200
 		}
@@ -90,9 +92,9 @@ func osGetJournalTail(ctx context.Context, deps PlatformDeps, input map[string]a
 	})
 }
 
-func osGetContainerRuntime(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_container_runtime", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		target := toString(input["target"])
+func osGetContainerRuntime(ctx context.Context, deps PlatformDeps, input OSContainerRuntimeInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_container_runtime", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSContainerRuntimeInput) (any, string, error) {
+		target := strings.TrimSpace(in.Target)
 		out, source, err := runOnTarget(ctx, deps, target, "docker", []string{"ps", "--format", "{{.ID}} {{.Image}} {{.Status}}"}, "docker ps --format '{{.ID}} {{.Image}} {{.Status}}'")
 		if err == nil {
 			return map[string]any{"runtime": "docker", "containers": out}, source, nil

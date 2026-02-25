@@ -41,7 +41,7 @@
 | Clusters / K8s | In Progress | list/create/detail + nodes/pods/deployments/services/ingresses/events/logs + deploy preview/apply |
 | Services | In Progress | CRUD + deploy + quota/events/rollback(mvp stub) |
 | RBAC | In Progress | admin 全量放行（含 `*:*`），非 admin 继续走数据库权限 |
-| AI | In Progress | Eino + Ollama(`glm-5:cloud`) + 控制面（capabilities/tools/approvals/executions）+ SSE tool events |
+| AI | In Progress | Eino + Ollama(`glm-5:cloud`) + 控制面（capabilities/tools/approvals/executions）+ SSE tool events + typed tool schema hardening + param resolver/retry |
 
 ## 4. API Coverage Matrix (MVP)
 
@@ -65,3 +65,4 @@
 - RBAC admin 采用临时全量放行策略，保障平台管理页可用性。
 - AI function calling 默认只读放行，变更动作必须审批后执行。
 - AI 工具实现采用 “本地 Eino Tool + mcp-go MCP Tool Proxy” 混合模式。
+- AI tool calling 参数治理：`runtime context > session memory > safety defaults`，缺参仅重试一次。

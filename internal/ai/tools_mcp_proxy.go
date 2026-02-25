@@ -23,6 +23,8 @@ func BuildMCPProxyTools(manager *MCPClientManager) ([]RegisteredTool, error) {
 			Risk:        ToolRiskMedium,
 			Provider:    "mcp",
 			Permission:  "ai:tool:read",
+			Schema:      t.Schema,
+			Required:    t.Required,
 		}
 		toolName := t.Name
 		invoke := func(ctx context.Context, input map[string]any) (ToolResult, error) {

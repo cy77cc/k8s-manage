@@ -2,16 +2,15 @@ package ai
 
 import (
 	"context"
-	"errors"
 
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
 
-func serviceGetDetail(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.get_detail", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		sid := toInt(input["service_id"])
+func serviceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetailInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.get_detail", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in ServiceDetailInput) (any, string, error) {
+		sid := in.ServiceID
 		if sid <= 0 {
-			return nil, "db", errors.New("service_id is required")
+			return nil, "validation", NewMissingParam("service_id", "service_id is required")
 		}
 		var s model.Service
 		if err := deps.DB.First(&s, sid).Error; err != nil {
@@ -21,12 +20,15 @@ func serviceGetDetail(ctx context.Context, deps PlatformDeps, input map[string]a
 	})
 }
 
-func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.deploy_preview", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		sid := toInt(input["service_id"])
-		cid := toInt(input["cluster_id"])
-		if sid <= 0 || cid <= 0 {
-			return nil, "preview", errors.New("service_id and cluster_id are required")
+func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceDeployPreviewInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.deploy_preview", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in ServiceDeployPreviewInput) (any, string, error) {
+		sid := in.ServiceID
+		cid := in.ClusterID
+		if sid <= 0 {
+			return nil, "preview", NewMissingParam("service_id", "service_id is required")
+		}
+		if cid <= 0 {
+			return nil, "preview", NewMissingParam("cluster_id", "cluster_id is required")
 		}
 		var s model.Service
 		if err := deps.DB.First(&s, sid).Error; err != nil {
@@ -36,12 +38,15 @@ func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input map[stri
 	})
 }
 
-func serviceDeployApply(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.deploy_apply", Mode: ToolModeMutating, Risk: ToolRiskHigh, Provider: "local", Permission: "ai:tool:execute"}, input, func() (any, string, error) {
-		sid := toInt(input["service_id"])
-		cid := toInt(input["cluster_id"])
-		if sid <= 0 || cid <= 0 {
-			return nil, "deploy", errors.New("service_id and cluster_id are required")
+func serviceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDeployApplyInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.deploy_apply", Mode: ToolModeMutating, Risk: ToolRiskHigh, Provider: "local", Permission: "ai:tool:execute"}, input, func(in ServiceDeployApplyInput) (any, string, error) {
+		sid := in.ServiceID
+		cid := in.ClusterID
+		if sid <= 0 {
+			return nil, "deploy", NewMissingParam("service_id", "service_id is required")
+		}
+		if cid <= 0 {
+			return nil, "deploy", NewMissingParam("cluster_id", "cluster_id is required")
 		}
 		var svc model.Service
 		if err := deps.DB.First(&svc, sid).Error; err != nil {

@@ -14,6 +14,13 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+const toolCallGuide = `Tool calling rules:
+1) NEVER call a tool with empty {} arguments when the tool has required fields.
+2) Prefer using runtime context (scene/page/host_id/cluster_id/service_id/namespace) as arguments.
+3) If any required field is missing, ask for it or choose a safe readonly tool first.
+4) For mutating tools, require approval token before execution.
+5) Return concise explanation after each tool result.`
+
 type PlatformAgent struct {
 	Runnable *react.Agent
 	Model    model.ToolCallingChatModel
@@ -55,7 +62,8 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: baseTools,
 		},
-		MaxStep: 20,
+		MaxStep:         20,
+		MessageModifier: react.NewPersonaModifier("You are Platform Ops Agent. Use tools safely and with complete parameters.\n" + toolCallGuide),
 	})
 	if err != nil {
 		return nil, err
@@ -66,7 +74,7 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 			Tools: baseTools,
 		},
 		MaxStep:         20,
-		MessageModifier: react.NewPersonaModifier("You are Ops Expert. Focus on host/os diagnostics, stability and safe operations."),
+		MessageModifier: react.NewPersonaModifier("You are Ops Expert. Focus on host/os diagnostics, stability and safe operations.\n" + toolCallGuide),
 	})
 	if err != nil {
 		return nil, err
@@ -77,7 +85,7 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 			Tools: baseTools,
 		},
 		MaxStep:         20,
-		MessageModifier: react.NewPersonaModifier("You are Kubernetes Expert. Focus on cluster health, events, pods and rollout troubleshooting."),
+		MessageModifier: react.NewPersonaModifier("You are Kubernetes Expert. Focus on cluster health, events, pods and rollout troubleshooting.\n" + toolCallGuide),
 	})
 	if err != nil {
 		return nil, err
@@ -88,7 +96,7 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 			Tools: baseTools,
 		},
 		MaxStep:         20,
-		MessageModifier: react.NewPersonaModifier("You are Security/RBAC Expert. Focus on permissions, roles, least privilege and access diagnostics."),
+		MessageModifier: react.NewPersonaModifier("You are Security/RBAC Expert. Focus on permissions, roles, least privilege and access diagnostics.\n" + toolCallGuide),
 	})
 	if err != nil {
 		return nil, err

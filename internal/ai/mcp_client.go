@@ -23,6 +23,8 @@ type MCPConfig struct {
 type MCPToolInfo struct {
 	Name        string
 	Description string
+	Schema      map[string]any
+	Required    []string
 }
 
 type MCPClientManager struct {
@@ -115,9 +117,21 @@ func (m *MCPClientManager) refreshTools(ctx context.Context) error {
 	}
 	out := make([]MCPToolInfo, 0, len(res.Tools))
 	for _, t := range res.Tools {
+		schema := map[string]any{}
+		required := []string{}
+		if t.InputSchema.Type != "" {
+			schema["type"] = t.InputSchema.Type
+			schema["properties"] = t.InputSchema.Properties
+			required = append(required, t.InputSchema.Required...)
+			if len(required) > 0 {
+				schema["required"] = required
+			}
+		}
 		out = append(out, MCPToolInfo{
 			Name:        t.Name,
 			Description: t.Description,
+			Schema:      schema,
+			Required:    required,
 		})
 	}
 	m.mu.Lock()

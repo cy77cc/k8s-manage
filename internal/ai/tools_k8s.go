@@ -2,25 +2,27 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func k8sListResources(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.list_resources", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		cli, source, err := resolveK8sClient(deps, input)
+func k8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.list_resources", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sListInput) (any, string, error) {
+		if strings.TrimSpace(in.Resource) == "" {
+			return nil, "validation", NewMissingParam("resource", "resource is required")
+		}
+		cli, source, err := resolveK8sClient(deps, structToMap(in))
 		if err != nil {
 			return nil, source, err
 		}
-		ns := strings.TrimSpace(toString(input["namespace"]))
+		ns := strings.TrimSpace(in.Namespace)
 		if ns == "" {
 			ns = corev1.NamespaceAll
 		}
-		resource := strings.ToLower(strings.TrimSpace(toString(input["resource"])))
-		limit := toInt(input["limit"])
+		resource := strings.ToLower(strings.TrimSpace(in.Resource))
+		limit := in.Limit
 		if limit <= 0 {
 			limit = 50
 		}
@@ -78,22 +80,22 @@ func k8sListResources(ctx context.Context, deps PlatformDeps, input map[string]a
 			}
 			return out, source, nil
 		default:
-			return nil, source, errors.New("unsupported resource")
+			return nil, source, NewInvalidParam("resource", "unsupported resource")
 		}
 	})
 }
 
-func k8sGetEvents(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.get_events", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		cli, source, err := resolveK8sClient(deps, input)
+func k8sGetEvents(ctx context.Context, deps PlatformDeps, input K8sEventsInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.get_events", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sEventsInput) (any, string, error) {
+		cli, source, err := resolveK8sClient(deps, structToMap(in))
 		if err != nil {
 			return nil, source, err
 		}
-		ns := strings.TrimSpace(toString(input["namespace"]))
+		ns := strings.TrimSpace(in.Namespace)
 		if ns == "" {
 			ns = corev1.NamespaceAll
 		}
-		limit := toInt(input["limit"])
+		limit := in.Limit
 		if limit <= 0 {
 			limit = 50
 		}
@@ -112,25 +114,25 @@ func k8sGetEvents(ctx context.Context, deps PlatformDeps, input map[string]any) 
 	})
 }
 
-func k8sGetPodLogs(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.get_pod_logs", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		cli, source, err := resolveK8sClient(deps, input)
+func k8sGetPodLogs(ctx context.Context, deps PlatformDeps, input K8sPodLogsInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.get_pod_logs", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sPodLogsInput) (any, string, error) {
+		cli, source, err := resolveK8sClient(deps, structToMap(in))
 		if err != nil {
 			return nil, source, err
 		}
-		ns := strings.TrimSpace(toString(input["namespace"]))
+		ns := strings.TrimSpace(in.Namespace)
 		if ns == "" {
 			ns = "default"
 		}
-		pod := strings.TrimSpace(toString(input["pod"]))
+		pod := strings.TrimSpace(in.Pod)
 		if pod == "" {
-			return nil, source, errors.New("pod is required")
+			return nil, source, NewMissingParam("pod", "pod is required")
 		}
-		tailLines := int64(toInt(input["tail_lines"]))
+		tailLines := int64(in.TailLines)
 		if tailLines <= 0 {
 			tailLines = 200
 		}
-		opt := &corev1.PodLogOptions{Container: strings.TrimSpace(toString(input["container"])), TailLines: &tailLines}
+		opt := &corev1.PodLogOptions{Container: strings.TrimSpace(in.Container), TailLines: &tailLines}
 		raw, err := cli.CoreV1().Pods(ns).GetLogs(pod, opt).DoRaw(ctx)
 		if err != nil {
 			return nil, source, err

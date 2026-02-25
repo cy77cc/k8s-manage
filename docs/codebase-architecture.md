@@ -60,6 +60,18 @@
   - Eino 本地工具：`os.*` / `k8s.*` / `service.*` / `host.*`
   - MCP 代理工具：`mcp.default.*`（由 `mcp-go` client 动态发现并注册到 Eino Agent）
 
+### 4.1 Tool Param Resolver Layer (2026-02-25)
+
+- 位置：`internal/ai/tool_param_resolver.go`
+- 作用：在工具真正执行前补齐缺失参数，减少空参数调用失败。
+- 参数来源优先级：
+  1. 聊天 runtime context（scene/page/host_id/cluster_id/...）
+  2. 会话记忆（同用户、同场景、同工具最近成功参数）
+  3. 安全默认值（`target=localhost`, `namespace=default`, `limit=50` 等）
+- 失败恢复：
+  - 若首次返回 `missing_param`，触发一次重试（仅一次）
+  - 保留 `param_resolution` 与 `retry` trace 用于诊断
+
 ## 5. Known Technical Debt
 
 - admin 全量放行为短期可用性策略，需要后续替换为精细权限配置。

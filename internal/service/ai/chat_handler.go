@@ -104,7 +104,7 @@ func (h *handler) chat(c *gin.Context) {
 	}
 
 	approvalToken := strings.TrimSpace(toString(req.Context["approval_token"]))
-	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, emit)
+	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, req.Context, emit)
 	prompt := msg
 	if len(req.Context) > 0 {
 		prompt = msg + "\n\n上下文:\n" + mustJSON(req.Context)
@@ -148,9 +148,9 @@ func (h *handler) chat(c *gin.Context) {
 				toolName = item.ToolCalls[0].Function.Name
 			}
 			_ = emit("tool_call", gin.H{
-				"tool":      toolName,
-				"payload":   gin.H{"tool_calls": item.ToolCalls},
-				"ts":        time.Now().UTC().Format(time.RFC3339Nano),
+				"tool":    toolName,
+				"payload": gin.H{"tool_calls": item.ToolCalls},
+				"ts":      time.Now().UTC().Format(time.RFC3339Nano),
 			})
 		}
 		if item.ReasoningContent != "" {
@@ -191,17 +191,25 @@ func (h *handler) chat(c *gin.Context) {
 	emitFinal("done", gin.H{"session": session})
 }
 
-func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken string, emit func(event string, payload gin.H) bool) context.Context {
+func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene string, runtime map[string]any, emit func(event string, payload gin.H) bool) context.Context {
 	ctx = ai2.WithToolUser(ctx, uid, approvalToken)
+	ctx = ai2.WithToolRuntimeContext(ctx, runtime)
+	ctx = ai2.WithToolMemoryAccessor(ctx, &toolMemoryAccessor{
+		store: h.store,
+		uid:   uid,
+		scene: scene,
+	})
 	ctx = ai2.WithToolPolicyChecker(ctx, h.toolPolicy)
 	ctx = ai2.WithToolEventEmitter(ctx, func(event string, payload any) {
 		switch event {
 		case "tool_call", "tool_result":
 			pm := toPayloadMap(payload)
 			_ = emit(event, gin.H{
-				"tool":      toString(pm["tool"]),
-				"payload":   pm,
-				"ts":        time.Now().UTC().Format(time.RFC3339Nano),
+				"tool":             toString(pm["tool"]),
+				"payload":          pm,
+				"ts":               time.Now().UTC().Format(time.RFC3339Nano),
+				"retry":            pm["retry"],
+				"param_resolution": pm["param_resolution"],
 			})
 		}
 	})

@@ -16,25 +16,56 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-func runWithPolicyAndEvent(ctx context.Context, meta ToolMeta, input map[string]any, do func() (any, string, error)) (ToolResult, error) {
+func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, do func(T) (any, string, error)) (ToolResult, error) {
 	start := time.Now()
-	EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "params": input})
-	if err := CheckToolPolicy(ctx, meta, input); err != nil {
-		res := ToolResult{OK: false, Error: err.Error(), Source: meta.Provider, LatencyMS: time.Since(start).Milliseconds()}
+	originalParams := structToMap(input)
+	resolvedParams, resolution := resolveToolParams(ctx, meta, originalParams, "")
+	runtimeInput, convErr := mapToInput[T](resolvedParams)
+	if convErr != nil {
+		res := ToolResult{OK: false, ErrorCode: "invalid_param", Error: convErr.Error(), Source: meta.Provider, LatencyMS: time.Since(start).Milliseconds()}
+		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res, "param_resolution": resolution, "retry": false})
+		return res, nil
+	}
+	EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "params": resolvedParams, "param_resolution": resolution, "retry": false})
+	if err := CheckToolPolicy(ctx, meta, resolvedParams); err != nil {
+		res := ToolResult{OK: false, ErrorCode: "policy_denied", Error: err.Error(), Source: meta.Provider, LatencyMS: time.Since(start).Milliseconds()}
 		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res})
 		return res, err
 	}
-	data, source, err := do()
+	data, source, err := do(runtimeInput)
+	retried := false
+	if err != nil {
+		if ie, ok := AsToolInputError(err); ok && ie.Code == "missing_param" {
+			retried = true
+			resolvedRetry, resolutionRetry := resolveToolParams(ctx, meta, resolvedParams, ie.Field)
+			if !equalJSONMap(resolvedRetry, resolvedParams) {
+				resolvedParams = resolvedRetry
+				runtimeInput, convErr = mapToInput[T](resolvedParams)
+				if convErr == nil {
+					EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "params": resolvedParams, "param_resolution": resolutionRetry, "retry": true})
+					data, source, err = do(runtimeInput)
+					resolution = resolutionRetry
+				}
+			}
+		}
+	}
 	if source == "" {
 		source = meta.Provider
 	}
 	if err != nil {
-		res := ToolResult{OK: false, Error: err.Error(), Source: source, LatencyMS: time.Since(start).Milliseconds()}
-		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res})
+		errCode := "tool_error"
+		if ie, ok := AsToolInputError(err); ok {
+			errCode = ie.Code
+		}
+		res := ToolResult{OK: false, ErrorCode: errCode, Error: err.Error(), Source: source, LatencyMS: time.Since(start).Milliseconds()}
+		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res, "param_resolution": resolution, "retry": retried})
 		return res, nil
 	}
 	res := ToolResult{OK: true, Data: data, Source: source, LatencyMS: time.Since(start).Milliseconds()}
-	EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res})
+	EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res, "params": resolvedParams, "param_resolution": resolution, "retry": retried})
+	if mem := ToolMemoryAccessorFromContext(ctx); mem != nil && res.OK {
+		mem.SetLastToolParams(meta.Name, resolvedParams)
+	}
 	return res, nil
 }
 
@@ -139,4 +170,34 @@ func toString(v any) string {
 	default:
 		return fmt.Sprintf("%v", x)
 	}
+}
+
+func structToMap(v any) map[string]any {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func mapToInput[T any](input map[string]any) (T, error) {
+	var out T
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func equalJSONMap(a, b map[string]any) bool {
+	ra, _ := json.Marshal(a)
+	rb, _ := json.Marshal(b)
+	return string(ra) == string(rb)
 }

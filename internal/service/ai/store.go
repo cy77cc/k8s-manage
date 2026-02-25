@@ -219,12 +219,53 @@ func recommendationKey(userID uint64, scene string) string {
 	return fmt.Sprintf("%d:%s", userID, normalizeScene(scene))
 }
 
+func toolParamKey(userID uint64, scene, tool string) string {
+	return fmt.Sprintf("%d:%s:%s", userID, normalizeScene(scene), strings.TrimSpace(tool))
+}
+
 func normalizeScene(scene string) string {
 	v := strings.TrimSpace(scene)
 	if v == "" {
 		return "global"
 	}
 	return v
+}
+
+type toolMemoryAccessor struct {
+	store *memoryStore
+	uid   uint64
+	scene string
+}
+
+func (a *toolMemoryAccessor) GetLastToolParams(toolName string) map[string]any {
+	if a == nil || a.store == nil {
+		return nil
+	}
+	a.store.mu.RLock()
+	defer a.store.mu.RUnlock()
+	v := a.store.toolParams[toolParamKey(a.uid, a.scene, toolName)]
+	if len(v) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for k, val := range v {
+		out[k] = val
+	}
+	return out
+}
+
+func (a *toolMemoryAccessor) SetLastToolParams(toolName string, params map[string]any) {
+	if a == nil || a.store == nil || strings.TrimSpace(toolName) == "" || len(params) == 0 {
+		return
+	}
+	key := toolParamKey(a.uid, a.scene, toolName)
+	cp := map[string]any{}
+	for k, v := range params {
+		cp[k] = v
+	}
+	a.store.mu.Lock()
+	a.store.toolParams[key] = cp
+	a.store.mu.Unlock()
 }
 
 func (s *memoryStore) newApproval(uid uint64, metaTool approvalTicket) *approvalTicket {

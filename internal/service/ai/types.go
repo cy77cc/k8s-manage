@@ -76,6 +76,7 @@ type memoryStore struct {
 	approvals       map[string]*approvalTicket
 	executions      map[string]*executionRecord
 	recommendations map[string][]recommendationRecord
+	toolParams      map[string]map[string]any
 }
 
 func newHandler(svcCtx *svc.ServiceContext) *handler {
@@ -86,6 +87,7 @@ func newHandler(svcCtx *svc.ServiceContext) *handler {
 			approvals:       map[string]*approvalTicket{},
 			executions:      map[string]*executionRecord{},
 			recommendations: map[string][]recommendationRecord{},
+			toolParams:      map[string]map[string]any{},
 		},
 	}
 }

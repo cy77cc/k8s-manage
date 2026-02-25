@@ -2,22 +2,24 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
 
-func hostSSHReadonly(ctx context.Context, deps PlatformDeps, input map[string]any) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host.ssh_exec_readonly", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func() (any, string, error) {
-		hostID := toInt(input["host_id"])
-		cmd := strings.TrimSpace(toString(input["command"]))
+func hostSSHReadonly(ctx context.Context, deps PlatformDeps, input HostSSHReadonlyInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host.ssh_exec_readonly", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in HostSSHReadonlyInput) (any, string, error) {
+		hostID := in.HostID
+		cmd := strings.TrimSpace(in.Command)
 		if hostID <= 0 {
-			return nil, "host_ssh", errors.New("host_id is required")
+			return nil, "host_ssh", NewMissingParam("host_id", "host_id is required")
+		}
+		if cmd == "" {
+			return nil, "host_ssh", NewMissingParam("command", "command is required")
 		}
 		if !isReadonlyHostCommand(cmd) {
-			return nil, "host_ssh", errors.New("command not allowed")
+			return nil, "host_ssh", NewInvalidParam("command", "command not allowed")
 		}
 		var node model.Node
 		if err := deps.DB.First(&node, hostID).Error; err != nil {
