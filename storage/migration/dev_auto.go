@@ -50,5 +50,11 @@ func RunDevAutoMigrate(db *gorm.DB) error {
 		&model.CMDBSyncJob{},
 		&model.CMDBSyncRecord{},
 		&model.CMDBAudit{},
+		&model.CICDServiceCIConfig{},
+		&model.CICDServiceCIRun{},
+		&model.CICDDeploymentCDConfig{},
+		&model.CICDRelease{},
+		&model.CICDReleaseApproval{},
+		&model.CICDAuditEvent{},
 	)
 }

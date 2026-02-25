@@ -1,30 +1,156 @@
 import apiService from '../api';
-import type { ApiResponse } from '../api';
+import type { ApiResponse, PaginatedResponse } from '../api';
+
+export type TriggerMode = 'manual' | 'source-event' | 'both';
+export type TriggerType = 'manual' | 'source-event';
+export type ReleaseStatus = 'pending_approval' | 'approved' | 'rejected' | 'executing' | 'succeeded' | 'failed' | 'rolled_back';
+
+export interface ServiceCIConfig {
+  id: number;
+  service_id: number;
+  repo_url: string;
+  branch: string;
+  build_steps: string[];
+  artifact_target: string;
+  trigger_mode: TriggerMode;
+  status: string;
+  updated_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CIRunRecord {
+  id: number;
+  service_id: number;
+  ci_config_id: number;
+  trigger_type: TriggerType;
+  status: string;
+  reason: string;
+  triggered_by: number;
+  triggered_at: string;
+  created_at: string;
+}
+
+export interface DeploymentCDConfig {
+  id: number;
+  deployment_id: number;
+  env: string;
+  strategy: 'rolling' | 'blue-green' | 'canary';
+  strategy_config: Record<string, any>;
+  approval_required: boolean;
+  updated_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReleaseRecord {
+  id: number;
+  service_id: number;
+  deployment_id: number;
+  env: string;
+  version: string;
+  strategy: string;
+  status: ReleaseStatus;
+  triggered_by: number;
+  approved_by: number;
+  approval_comment: string;
+  rollback_from_release_id: number;
+  started_at?: string;
+  finished_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReleaseApproval {
+  id: number;
+  release_id: number;
+  approver_id: number;
+  decision: 'approved' | 'rejected';
+  comment: string;
+  created_at: string;
+}
+
+export interface TimelineEvent {
+  id: number;
+  service_id: number;
+  deployment_id: number;
+  release_id: number;
+  event_type: string;
+  actor_id: number;
+  payload: any;
+  created_at: string;
+}
 
 export const cicdApi = {
-  async createPipeline(payload: {
-    service_name: string;
+  getServiceCIConfig(serviceId: number): Promise<ApiResponse<ServiceCIConfig>> {
+    return apiService.get(`/cicd/services/${serviceId}/ci-config`);
+  },
+
+  putServiceCIConfig(serviceId: number, payload: {
     repo_url: string;
     branch?: string;
-    build_cmd?: string;
-    dockerfile_path?: string;
-    image_repo?: string;
-    cluster_id?: number;
-    namespace?: string;
-  }): Promise<ApiResponse<any>> {
-    return apiService.post('/cicd/pipelines', payload);
+    build_steps?: string[];
+    artifact_target: string;
+    trigger_mode: TriggerMode;
+  }): Promise<ApiResponse<ServiceCIConfig>> {
+    return apiService.put(`/cicd/services/${serviceId}/ci-config`, payload);
   },
-  async getPipeline(id: string): Promise<ApiResponse<any>> {
-    return apiService.get(`/cicd/pipelines/${id}`);
+
+  deleteServiceCIConfig(serviceId: number): Promise<ApiResponse<void>> {
+    return apiService.delete(`/cicd/services/${serviceId}/ci-config`);
   },
-  async runPipeline(id: string): Promise<ApiResponse<any>> {
-    return apiService.post(`/cicd/pipelines/${id}/run`);
+
+  triggerCIRun(serviceId: number, payload: { trigger_type: TriggerType; reason?: string }): Promise<ApiResponse<CIRunRecord>> {
+    return apiService.post(`/cicd/services/${serviceId}/ci-runs/trigger`, payload);
   },
-  async getRunLogs(id: string): Promise<ApiResponse<any[]>> {
-    return apiService.get(`/cicd/runs/${id}/logs`);
+
+  listCIRuns(serviceId: number): Promise<ApiResponse<PaginatedResponse<CIRunRecord>>> {
+    return apiService.get(`/cicd/services/${serviceId}/ci-runs`);
   },
-  async rollback(id: string): Promise<ApiResponse<void>> {
-    return apiService.post(`/cicd/runs/${id}/rollback`);
+
+  getDeploymentCDConfig(deploymentId: number, env?: string): Promise<ApiResponse<DeploymentCDConfig>> {
+    return apiService.get(`/cicd/deployments/${deploymentId}/cd-config`, { params: { env } });
+  },
+
+  putDeploymentCDConfig(deploymentId: number, payload: {
+    env: string;
+    strategy: 'rolling' | 'blue-green' | 'canary';
+    strategy_config?: Record<string, any>;
+    approval_required?: boolean;
+  }): Promise<ApiResponse<DeploymentCDConfig>> {
+    return apiService.put(`/cicd/deployments/${deploymentId}/cd-config`, payload);
+  },
+
+  triggerRelease(payload: {
+    service_id: number;
+    deployment_id: number;
+    env: string;
+    version: string;
+  }): Promise<ApiResponse<ReleaseRecord>> {
+    return apiService.post('/cicd/releases', payload);
+  },
+
+  listReleases(params?: { service_id?: number; deployment_id?: number }): Promise<ApiResponse<PaginatedResponse<ReleaseRecord>>> {
+    return apiService.get('/cicd/releases', { params });
+  },
+
+  approveRelease(id: number, comment?: string): Promise<ApiResponse<ReleaseRecord>> {
+    return apiService.post(`/cicd/releases/${id}/approve`, { comment: comment || '' });
+  },
+
+  rejectRelease(id: number, comment?: string): Promise<ApiResponse<ReleaseRecord>> {
+    return apiService.post(`/cicd/releases/${id}/reject`, { comment: comment || '' });
+  },
+
+  rollbackRelease(id: number, payload: { target_version: string; comment?: string }): Promise<ApiResponse<ReleaseRecord>> {
+    return apiService.post(`/cicd/releases/${id}/rollback`, payload);
+  },
+
+  listApprovals(releaseId: number): Promise<ApiResponse<PaginatedResponse<ReleaseApproval>>> {
+    return apiService.get(`/cicd/releases/${releaseId}/approvals`);
+  },
+
+  getServiceTimeline(serviceId: number): Promise<ApiResponse<PaginatedResponse<TimelineEvent>>> {
+    return apiService.get(`/cicd/services/${serviceId}/timeline`);
   },
 };
-
