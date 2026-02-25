@@ -354,7 +354,7 @@ export const hostApi = {
     return apiService.post(`/hosts/${id}/actions`, { action });
   },
 
-  async sshCheck(id: string): Promise<ApiResponse<void>> {
+  async sshCheck(id: string): Promise<ApiResponse<{ reachable: boolean; message?: string }>> {
     return apiService.post(`/hosts/${id}/ssh/check`);
   },
 
