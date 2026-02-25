@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, Form, Input, Modal, Select, Table, message } from 'antd';
+import { Button, Card, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd';
 import { Api } from '../../api';
 import type { CMDBAsset } from '../../api/modules/cmdb';
 
@@ -7,13 +7,16 @@ const CMDBPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [assets, setAssets] = useState<CMDBAsset[]>([]);
   const [open, setOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [relationCount, setRelationCount] = useState(0);
   const [form] = Form.useForm();
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await Api.cmdb.listAssets();
+      const [res, rel] = await Promise.all([Api.cmdb.listAssets(), Api.cmdb.listRelations()]);
       setAssets(res.data || []);
+      setRelationCount((rel.data || []).length);
     } finally {
       setLoading(false);
     }
@@ -37,10 +40,27 @@ const CMDBPage: React.FC = () => {
     load();
   };
 
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      await Api.cmdb.triggerSync();
+      message.success('已触发 CMDB 同步');
+      await load();
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <Card
       title="CMDB 资产台账"
-      extra={<Button type="primary" onClick={() => setOpen(true)}>新增资产</Button>}
+      extra={
+        <Space>
+          <Tag color="blue">关系数: {relationCount}</Tag>
+          <Button loading={syncing} onClick={syncNow}>同步资产</Button>
+          <Button type="primary" onClick={() => setOpen(true)}>新增资产</Button>
+        </Space>
+      }
     >
       <Table
         rowKey="id"

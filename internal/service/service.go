@@ -9,6 +9,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/service/ai"
 	"github.com/cy77cc/k8s-manage/internal/service/aiops"
 	"github.com/cy77cc/k8s-manage/internal/service/cluster"
+	"github.com/cy77cc/k8s-manage/internal/service/cmdb"
 	"github.com/cy77cc/k8s-manage/internal/service/deployment"
 	"github.com/cy77cc/k8s-manage/internal/service/host"
 	"github.com/cy77cc/k8s-manage/internal/service/monitoring"
@@ -37,6 +38,7 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	cluster.RegisterClusterHandlers(v1, serverCtx)
 	deployment.RegisterDeploymentHandlers(v1, serverCtx)
 	monitoring.RegisterMonitoringHandlers(v1, serverCtx)
+	cmdb.RegisterCMDBHandlers(v1, serverCtx)
 	rbac.RegisterRBACHandlers(v1, serverCtx)
 	ai.RegisterAIHandlers(v1, serverCtx)
 	aiops.RegisterAIOPSHandlers(v1, serverCtx)
