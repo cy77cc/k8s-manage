@@ -7,6 +7,7 @@ export interface AIMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   thinking?: string;
+  traces?: ToolTrace[];
   timestamp: string;
 }
 
@@ -25,9 +26,17 @@ export interface AIRecommendation {
   type: string;
   title: string;
   content: string;
+  reasoning?: string;
   relevance: number;
   action?: string;
   params?: Record<string, any>;
+}
+
+export interface ToolTrace {
+  id: string;
+  type: 'tool_call' | 'tool_result' | 'approval_required';
+  payload: Record<string, any>;
+  timestamp: string;
 }
 
 // AI分析结果数据结构
@@ -74,21 +83,26 @@ export interface AIActionExecuteParams {
 interface SSEMetaEvent {
   sessionId: string;
   createdAt: string;
+  turn_id?: string;
 }
 
 interface SSEDeltaEvent {
   contentChunk: string;
+  turn_id?: string;
 }
 
 interface SSEDoneEvent {
   session: AISession;
+  turn_id?: string;
 }
 
 interface SSEErrorEvent {
   message: string;
+  turn_id?: string;
 }
 interface SSEThinkingEvent {
   contentChunk: string;
+  turn_id?: string;
 }
 
 export interface AIChatStreamHandlers {
@@ -97,9 +111,10 @@ export interface AIChatStreamHandlers {
   onDone?: (payload: SSEDoneEvent) => void;
   onError?: (payload: SSEErrorEvent) => void;
   onThinkingDelta?: (payload: SSEThinkingEvent) => void;
-  onToolCall?: (payload: { tool?: string; params?: Record<string, any>; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }) => void;
-  onToolResult?: (payload: { tool?: string; result?: { ok: boolean; data?: any; error?: string; source?: string; latency_ms?: number } }) => void;
-  onApprovalRequired?: (payload: ApprovalTicket & { approval_required?: boolean; previewDiff?: string }) => void;
+  onToolCall?: (payload: { turn_id?: string; tool?: string; payload?: Record<string, any>; ts?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }) => void;
+  onToolResult?: (payload: { turn_id?: string; tool?: string; payload?: Record<string, any>; result?: { ok: boolean; data?: any; error?: string; source?: string; latency_ms?: number }; ts?: string }) => void;
+  onApprovalRequired?: (payload: ApprovalTicket & { turn_id?: string; approval_required?: boolean; previewDiff?: string }) => void;
+  onHeartbeat?: (payload: { turn_id?: string; status?: string }) => void;
 }
 
 export type RiskLevel = 'low' | 'medium' | 'high';
@@ -157,6 +172,32 @@ export const aiApi = {
     const base = import.meta.env.VITE_API_BASE || '/api/v1';
     const token = localStorage.getItem('token');
     const projectId = localStorage.getItem('projectId');
+    const controller = new AbortController();
+    let timedOut = false;
+    let toolPending = false;
+    let toolTimeoutTimer: number | null = null;
+
+    const clearToolTimer = () => {
+      if (toolTimeoutTimer !== null) {
+        window.clearTimeout(toolTimeoutTimer);
+        toolTimeoutTimer = null;
+      }
+    };
+
+    const armToolTimeout = () => {
+      clearToolTimer();
+      toolTimeoutTimer = window.setTimeout(() => {
+        timedOut = true;
+        handlers.onError?.({ message: '工具调用执行超时，请重试本轮对话。' });
+        controller.abort();
+      }, 25000);
+    };
+
+    const touchActivity = () => {
+      if (toolPending) {
+        armToolTimeout();
+      }
+    };
 
     const response = await fetch(`${base}/ai/chat`, {
       method: 'POST',
@@ -165,6 +206,7 @@ export const aiApi = {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(projectId ? { 'X-Project-ID': projectId } : {}),
       },
+      signal: controller.signal,
       body: JSON.stringify(params),
     });
 
@@ -209,29 +251,52 @@ export const aiApi = {
         handlers.onDelta?.(payload as SSEDeltaEvent);
       } else if (eventType === 'done') {
         handlers.onDone?.(payload as SSEDoneEvent);
+        toolPending = false;
+        clearToolTimer();
       } else if (eventType === 'error') {
         handlers.onError?.(payload as SSEErrorEvent);
+        toolPending = false;
+        clearToolTimer();
       } else if (eventType === 'thinking_delta') {
         handlers.onThinkingDelta?.(payload as SSEThinkingEvent);
+        touchActivity();
       } else if (eventType === 'tool_call') {
         handlers.onToolCall?.(payload as { tool: string; params?: Record<string, any> });
+        toolPending = true;
+        armToolTimeout();
       } else if (eventType === 'tool_result') {
         handlers.onToolResult?.(payload as { tool?: string; result?: { ok: boolean; data?: any; error?: string; source?: string; latency_ms?: number } });
+        toolPending = false;
+        clearToolTimer();
       } else if (eventType === 'approval_required') {
         handlers.onApprovalRequired?.(payload as ApprovalTicket & { approval_required?: boolean; previewDiff?: string });
+        toolPending = false;
+        clearToolTimer();
+      } else if (eventType === 'heartbeat') {
+        handlers.onHeartbeat?.(payload as { turn_id?: string; status?: string });
+        touchActivity();
       }
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
 
-      buffer += decoder.decode(value, { stream: true }).replace(/\r/g, '');
-      const segments = buffer.split('\n\n');
-      buffer = segments.pop() || '';
-      segments.forEach(dispatchEvent);
+        buffer += decoder.decode(value, { stream: true }).replace(/\r/g, '');
+        const segments = buffer.split('\n\n');
+        buffer = segments.pop() || '';
+        segments.forEach(dispatchEvent);
+        touchActivity();
+      }
+    } catch (err) {
+      if (!timedOut) {
+        throw err;
+      }
+    } finally {
+      clearToolTimer();
     }
 
     if (buffer.trim()) {

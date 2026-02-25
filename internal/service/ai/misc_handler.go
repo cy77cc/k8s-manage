@@ -121,6 +121,7 @@ func (h *handler) recommendations(c *gin.Context) {
 			"type":      r.Type,
 			"title":     r.Title,
 			"content":   r.Content,
+			"reasoning": r.Reasoning,
 			"relevance": r.Relevance,
 		})
 	}
@@ -162,7 +163,7 @@ func (h *handler) actionExecute(c *gin.Context) {
 
 func (h *handler) refreshSuggestions(uid uint64, scene, answer string) {
 	scene = normalizeScene(scene)
-	prompt := "你是 suggestion 智能体。基于下面回答提炼 3 条可执行建议，每条一行，格式为：标题|内容|相关度(0-1)。回答内容如下：\n" + answer
+	prompt := "你是 suggestion 智能体。基于下面回答提炼 3 条可执行建议，每条一行，格式为：标题|内容|相关度(0-1)|思考摘要（不超过60字）。回答内容如下：\n" + answer
 	out := []recommendationRecord{}
 	if h.svcCtx.AI != nil {
 		msg, err := h.svcCtx.AI.Generate(context.Background(), []*schema.Message{schema.UserMessage(prompt)})
@@ -173,15 +174,19 @@ func (h *handler) refreshSuggestions(uid uint64, scene, answer string) {
 				if trim == "" {
 					continue
 				}
-				parts := strings.SplitN(trim, "|", 3)
+				parts := strings.SplitN(trim, "|", 4)
 				if len(parts) < 2 {
 					continue
 				}
 				rel := 0.7
-				if len(parts) == 3 {
+				if len(parts) >= 3 {
 					if v, err := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64); err == nil {
 						rel = v
 					}
+				}
+				reasoning := ""
+				if len(parts) == 4 {
+					reasoning = strings.TrimSpace(parts[3])
 				}
 				out = append(out, recommendationRecord{
 					ID:        "rec-" + strconvFormatInt(time.Now().UnixNano()),
@@ -190,6 +195,7 @@ func (h *handler) refreshSuggestions(uid uint64, scene, answer string) {
 					Type:      "suggestion",
 					Title:     strings.TrimSpace(parts[0]),
 					Content:   strings.TrimSpace(parts[1]),
+					Reasoning: reasoning,
 					Relevance: rel,
 					CreatedAt: time.Now(),
 				})
@@ -204,6 +210,7 @@ func (h *handler) refreshSuggestions(uid uint64, scene, answer string) {
 			Type:      "suggestion",
 			Title:     "先做健康检查",
 			Content:   "优先检查资源/日志，再进行部署或配置变更。",
+			Reasoning: "先确认现状可降低误操作风险，再执行变更更稳妥。",
 			Relevance: 0.7,
 			CreatedAt: time.Now(),
 		})

@@ -61,8 +61,8 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = f
           />
         )}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
-          <div style={{ maxHeight: 220, overflow: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0 }}>
+          <div style={{ maxHeight: 220, overflow: 'auto', flexShrink: 0 }}>
             <RecommendationPanel type="suggestion" context={context} refreshSignal={recRefreshSignal} />
           </div>
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>

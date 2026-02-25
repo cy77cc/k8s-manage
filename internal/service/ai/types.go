@@ -32,6 +32,7 @@ type recommendationRecord struct {
 	Type      string    `json:"type"`
 	Title     string    `json:"title"`
 	Content   string    `json:"content"`
+	Reasoning string    `json:"reasoning,omitempty"`
 	Relevance float64   `json:"relevance"`
 	CreatedAt time.Time `json:"createdAt"`
 }

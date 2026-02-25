@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Descriptions, List, Modal, Space, Spin, Tag, Typography, message } from 'antd';
+import { Button, Card, Collapse, Descriptions, List, Modal, Space, Spin, Tag, Typography, message } from 'antd';
 import { AlertOutlined, BookOutlined, BulbOutlined, RocketOutlined } from '@ant-design/icons';
 import { Api } from '../../api';
 import type { AIRecommendation } from '../../api';
@@ -133,7 +133,22 @@ const RecommendationPanel: React.FC<RecommendationPanelProps> = ({ type, context
                       <Tag color="blue">{Math.round((item.relevance || 0) * 100)}%</Tag>
                     </Space>
                   }
-                  description={<Text type="secondary">{item.content}</Text>}
+                  description={(
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      <Text type="secondary">{item.content}</Text>
+                      {item.reasoning ? (
+                        <Collapse
+                          size="small"
+                          ghost
+                          items={[{
+                            key: `reasoning-${item.id}`,
+                            label: <Text type="secondary">建议思考摘要</Text>,
+                            children: <Text type="secondary">{item.reasoning}</Text>,
+                          }]}
+                        />
+                      ) : null}
+                    </Space>
+                  )}
                 />
               </List.Item>
             )}

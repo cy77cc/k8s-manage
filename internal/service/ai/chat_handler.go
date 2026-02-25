@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
@@ -46,6 +47,36 @@ func (h *handler) chat(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": "streaming not supported"}})
 		return
 	}
+	turnID := fmt.Sprintf("turn-%d", time.Now().UnixNano())
+	emit := func(event string, payload gin.H) bool {
+		if payload == nil {
+			payload = gin.H{}
+		}
+		payload["turn_id"] = turnID
+		return writeSSE(c, flusher, event, payload)
+	}
+	var finalOnce sync.Once
+	emitFinal := func(event string, payload gin.H) {
+		finalOnce.Do(func() {
+			_ = emit(event, payload)
+		})
+	}
+	stopHeartbeat := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if !emit("heartbeat", gin.H{"status": "alive"}) {
+					return
+				}
+			case <-stopHeartbeat:
+				return
+			}
+		}
+	}()
+	defer close(stopHeartbeat)
 
 	sid := strings.TrimSpace(req.SessionID)
 	scene := normalizeScene(toString(req.Context["scene"]))
@@ -65,15 +96,15 @@ func (h *handler) chat(c *gin.Context) {
 		"timestamp": userTime,
 	})
 	if err != nil {
-		_ = writeSSE(c, flusher, "error", gin.H{"message": err.Error()})
+		emitFinal("error", gin.H{"message": err.Error()})
 		return
 	}
-	if !writeSSE(c, flusher, "meta", gin.H{"sessionId": session.ID, "createdAt": session.CreatedAt}) {
+	if !emit("meta", gin.H{"sessionId": session.ID, "createdAt": session.CreatedAt}) {
 		return
 	}
 
 	approvalToken := strings.TrimSpace(toString(req.Context["approval_token"]))
-	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, flusher, c)
+	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, emit)
 	prompt := msg
 	if len(req.Context) > 0 {
 		prompt = msg + "\n\n上下文:\n" + mustJSON(req.Context)
@@ -81,13 +112,14 @@ func (h *handler) chat(c *gin.Context) {
 	inputMessages := h.buildConversationMessages(session.Messages, msg, prompt)
 	stream, err := h.svcCtx.AI.Stream(streamCtx, inputMessages)
 	if err != nil {
-		_ = writeSSE(c, flusher, "error", gin.H{"message": err.Error()})
+		emitFinal("error", gin.H{"message": err.Error()})
 		return
 	}
 	defer stream.Close()
 
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
+	var streamErr error
 	for {
 		item, recvErr := stream.Recv()
 		if errors.Is(recvErr, io.EOF) {
@@ -95,32 +127,47 @@ func (h *handler) chat(c *gin.Context) {
 		}
 		if recvErr != nil {
 			if apErr, ok := ai2.IsApprovalRequired(recvErr); ok {
-				_ = writeSSE(c, flusher, "approval_required", gin.H{
+				_ = emit("approval_required", gin.H{
 					"tool":           apErr.Tool,
 					"approval_token": apErr.Token,
 					"expiresAt":      apErr.ExpiresAt,
 					"message":        apErr.Error(),
 				})
+				streamErr = recvErr
 				break
 			}
-			_ = writeSSE(c, flusher, "error", gin.H{"message": recvErr.Error()})
+			streamErr = recvErr
 			break
 		}
 		if item == nil {
 			continue
 		}
 		if len(item.ToolCalls) > 0 {
-			_ = writeSSE(c, flusher, "tool_call", gin.H{"tool_calls": item.ToolCalls})
+			toolName := "unknown"
+			if item.ToolCalls[0].Function.Name != "" {
+				toolName = item.ToolCalls[0].Function.Name
+			}
+			_ = emit("tool_call", gin.H{
+				"tool":      toolName,
+				"payload":   gin.H{"tool_calls": item.ToolCalls},
+				"ts":        time.Now().UTC().Format(time.RFC3339Nano),
+			})
 		}
 		if item.ReasoningContent != "" {
 			reasoningContent.WriteString(item.ReasoningContent)
-			_ = writeSSE(c, flusher, "thinking_delta", gin.H{"contentChunk": item.ReasoningContent})
+			_ = emit("thinking_delta", gin.H{"contentChunk": item.ReasoningContent})
 		}
 		if item.Content != "" {
 			assistantContent.WriteString(item.Content)
-			if !writeSSE(c, flusher, "delta", gin.H{"contentChunk": item.Content}) {
+			if !emit("delta", gin.H{"contentChunk": item.Content}) {
 				return
 			}
+		}
+	}
+	if streamErr != nil && !errors.Is(streamErr, io.EOF) {
+		if _, ok := ai2.IsApprovalRequired(streamErr); !ok {
+			emitFinal("error", gin.H{"message": streamErr.Error()})
+			return
 		}
 	}
 
@@ -137,23 +184,35 @@ func (h *handler) chat(c *gin.Context) {
 		"timestamp": assistantTime,
 	})
 	if err != nil {
-		_ = writeSSE(c, flusher, "error", gin.H{"message": err.Error()})
+		emitFinal("error", gin.H{"message": err.Error()})
 		return
 	}
 	h.refreshSuggestions(uid, scene, content)
-	_ = writeSSE(c, flusher, "done", gin.H{"session": session})
+	emitFinal("done", gin.H{"session": session})
 }
 
-func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken string, flusher http.Flusher, c *gin.Context) context.Context {
+func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken string, emit func(event string, payload gin.H) bool) context.Context {
 	ctx = ai2.WithToolUser(ctx, uid, approvalToken)
 	ctx = ai2.WithToolPolicyChecker(ctx, h.toolPolicy)
 	ctx = ai2.WithToolEventEmitter(ctx, func(event string, payload any) {
 		switch event {
 		case "tool_call", "tool_result":
-			_ = writeSSE(c, flusher, event, payload)
+			pm := toPayloadMap(payload)
+			_ = emit(event, gin.H{
+				"tool":      toString(pm["tool"]),
+				"payload":   pm,
+				"ts":        time.Now().UTC().Format(time.RFC3339Nano),
+			})
 		}
 	})
 	return ctx
+}
+
+func toPayloadMap(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok {
+		return m
+	}
+	return map[string]any{"raw": v}
 }
 
 func mustJSON(v any) string {

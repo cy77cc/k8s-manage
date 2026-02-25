@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Input, Button, List, Avatar, Space, Spin, Typography, Card, Divider, Tag, Collapse } from 'antd';
-import { SendOutlined, MessageOutlined, ToolOutlined } from '@ant-design/icons';
+import { Input, Button, List, Avatar, Space, Spin, Typography, Card, Divider, Tag, Collapse, Alert } from 'antd';
+import { SendOutlined, MessageOutlined, ToolOutlined, BulbOutlined, WarningOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Api } from '../../api';
-import type { AIMessage, AISession } from '../../api';
+import type { AIMessage, AISession, ToolTrace } from '../../api';
 
 const { Text, Paragraph } = Typography;
 
@@ -17,6 +17,9 @@ interface ChatInterfaceProps {
   onSessionUpdate?: (session: AISession) => void;
   className?: string;
 }
+
+type StreamState = 'idle' | 'running' | 'timeout' | 'done' | 'error';
+type LocalMessage = AIMessage & { turnId?: string };
 
 const renderMarkdown = (content: string) => (
   <div style={{ color: '#1f2937', lineHeight: 1.7, fontSize: 14 }}>
@@ -58,10 +61,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   onSessionUpdate,
   className,
 }) => {
-  const [messages, setMessages] = useState<AIMessage[]>([]);
+  const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streamState, setStreamState] = useState<StreamState>('idle');
+  const [streamError, setStreamError] = useState('');
   const [currentSession, setCurrentSession] = useState<AISession | null>(null);
+  const [lastPrompt, setLastPrompt] = useState('');
+  const [traceRawVisible, setTraceRawVisible] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -70,13 +77,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       if (sessionId) {
         const response = await Api.ai.getSessionDetail(sessionId);
-        setMessages(response.data.messages);
+        setMessages(response.data.messages as LocalMessage[]);
         setCurrentSession(response.data);
         return;
       }
       const res = await Api.ai.getCurrentSession(scene);
       if (res.data) {
-        setMessages(res.data.messages || []);
+        setMessages((res.data.messages || []) as LocalMessage[]);
         setCurrentSession(res.data);
       } else {
         setMessages([]);
@@ -95,7 +102,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (shouldAutoScrollRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, loading]);
+  }, [messages, loading, streamState]);
 
   const handleScroll = () => {
     const el = scrollContainerRef.current;
@@ -104,43 +111,53 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     shouldAutoScrollRef.current = nearBottom;
   };
 
-  const appendSystemTrace = (content: string) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `sys-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        role: 'system',
-        content,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+  const attachTraceToAssistant = (assistantID: string, turnID: string | undefined, trace: ToolTrace) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      let idx = next.findIndex((m) => m.role === 'assistant' && turnID && m.turnId === turnID);
+      if (idx < 0) {
+        idx = next.findIndex((m) => m.id === assistantID);
+      }
+      if (idx < 0) return prev;
+      const target = next[idx];
+      next[idx] = {
+        ...target,
+        ...(turnID ? { turnId: turnID } : {}),
+        traces: [...(target.traces || []), trace],
+      };
+      return next;
+    });
   };
 
-  const handleSend = async () => {
-    if (!inputValue.trim() || loading) return;
+  const sendMessage = async (messageText: string) => {
+    if (!messageText.trim() || loading) return;
 
-    const messageText = inputValue.trim();
     const previousSessionID = currentSession?.id;
-
-    const userMessage: AIMessage = {
+    const userMessage: LocalMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
       content: messageText,
       timestamp: new Date().toISOString(),
     };
     const assistantMessageID = `msg-${Date.now()}-assistant`;
-    const assistantPlaceholder: AIMessage = {
+    const assistantPlaceholder: LocalMessage = {
       id: assistantMessageID,
       role: 'assistant',
       content: '',
+      thinking: '',
+      traces: [],
       timestamp: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
     setInputValue('');
     setLoading(true);
+    setStreamState('running');
+    setStreamError('');
+    setLastPrompt(messageText);
 
     let latestSession: AISession | undefined;
+    let activeTurnID = '';
 
     try {
       await Api.ai.chatStream(
@@ -151,6 +168,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         },
         {
           onMeta: (meta) => {
+            activeTurnID = meta.turn_id || activeTurnID;
             setCurrentSession((prev) => {
               if (prev?.id === meta.sessionId) {
                 return prev;
@@ -163,42 +181,67 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 updatedAt: meta.createdAt,
               };
             });
+            if (activeTurnID) {
+              setMessages((prev) =>
+                prev.map((item) => (item.id === assistantMessageID ? { ...item, turnId: activeTurnID } : item)),
+              );
+            }
           },
           onDelta: (delta) => {
+            const turnID = delta.turn_id || activeTurnID;
             setMessages((prev) =>
               prev.map((item) =>
-                item.id === assistantMessageID
-                  ? { ...item, content: `${item.content}${delta.contentChunk}` }
+                (item.id === assistantMessageID || (turnID && item.turnId === turnID))
+                  ? { ...item, turnId: turnID || item.turnId, content: `${item.content}${delta.contentChunk}` }
                   : item,
               ),
             );
           },
           onThinkingDelta: (delta) => {
+            const turnID = delta.turn_id || activeTurnID;
             setMessages((prev) =>
               prev.map((item) =>
-                item.id === assistantMessageID
-                  ? { ...item, thinking: `${item.thinking || ''}${delta.contentChunk}` }
+                (item.id === assistantMessageID || (turnID && item.turnId === turnID))
+                  ? { ...item, turnId: turnID || item.turnId, thinking: `${item.thinking || ''}${delta.contentChunk}` }
                   : item,
               ),
             );
           },
           onToolCall: (payload) => {
-            const toolName = payload.tool || payload.tool_calls?.[0]?.function?.name || 'unknown';
-            appendSystemTrace(`**Tool Call**\n\n\`${toolName}\`\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\``);
+            const turnID = payload.turn_id || activeTurnID;
+            attachTraceToAssistant(assistantMessageID, turnID, {
+              id: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              type: 'tool_call',
+              payload: payload as Record<string, any>,
+              timestamp: new Date().toISOString(),
+            });
           },
           onToolResult: (payload) => {
-            appendSystemTrace(`**Tool Result**\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\``);
+            const turnID = payload.turn_id || activeTurnID;
+            attachTraceToAssistant(assistantMessageID, turnID, {
+              id: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              type: 'tool_result',
+              payload: payload as Record<string, any>,
+              timestamp: new Date().toISOString(),
+            });
           },
           onApprovalRequired: (payload) => {
-            const token = (payload as { approval_token?: string; id?: string }).approval_token || payload.id || '';
-            appendSystemTrace(`**Approval Required**\n\nTool: \`${payload.tool}\`\n\nToken: \`${token}\``);
+            const turnID = payload.turn_id || activeTurnID;
+            attachTraceToAssistant(assistantMessageID, turnID, {
+              id: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              type: 'approval_required',
+              payload: payload as Record<string, any>,
+              timestamp: new Date().toISOString(),
+            });
           },
           onDone: (done) => {
             latestSession = done.session;
             setCurrentSession(done.session);
+            setStreamState('done');
           },
           onError: (err) => {
-            appendSystemTrace(`**Stream Error**\n\n${err.message || 'AI服务暂时不可用'}`);
+            setStreamState(err.message?.includes('超时') ? 'timeout' : 'error');
+            setStreamError(err.message || 'AI服务暂时不可用');
           },
         },
       );
@@ -212,6 +255,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       }
     } catch (error) {
       console.error('发送消息失败:', error);
+      setStreamState('error');
+      setStreamError('AI服务暂时不可用，请稍后再试。');
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantMessageID
@@ -224,10 +269,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const handleSend = async () => {
+    await sendMessage(inputValue.trim());
+  };
+
+  const handleRetry = async () => {
+    if (!lastPrompt) return;
+    await sendMessage(lastPrompt);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
 
@@ -237,6 +291,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <Space>
           <MessageOutlined />
           <Text strong>AI 助手</Text>
+          {streamState === 'running' ? <Tag color="processing">Streaming</Tag> : null}
         </Space>
       }
       className={`ai-chat-interface ${className || ''}`}
@@ -268,33 +323,91 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               <List.Item.Meta
                 avatar={
                   <Avatar
-                    icon={message.role === 'system' ? <ToolOutlined /> : message.role === 'user' ? <SendOutlined /> : <MessageOutlined />}
+                    icon={message.role === 'user' ? <SendOutlined /> : <MessageOutlined />}
                     style={{
-                      backgroundColor:
-                        message.role === 'system' ? '#faad14' : message.role === 'user' ? '#1890ff' : '#52c41a',
+                      backgroundColor: message.role === 'user' ? '#1677ff' : '#52c41a',
                     }}
                   />
                 }
                 title={
                   <Text>
-                    {message.role === 'system' ? '系统轨迹' : message.role === 'user' ? '我' : 'AI 助手'}
-                    {message.role === 'system' && <Tag color="gold" style={{ marginLeft: 8 }}>Tool</Tag>}
+                    {message.role === 'user' ? '我' : 'AI 助手'}
                     <Text type="secondary" style={{ marginLeft: '8px' }}>
                       {new Date(message.timestamp).toLocaleString()}
                     </Text>
                   </Text>
                 }
                 description={
-                  message.role === 'assistant' || message.role === 'system' ? (
-                    <div style={{ margin: 0, background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 12px' }}>
-                      {message.role === 'assistant' && message.thinking ? (
+                  message.role === 'assistant' ? (
+                    <div style={{ margin: 0, background: '#fff', border: '1px solid #f0f0f0', borderRadius: 10, padding: '10px 12px' }}>
+                      {message.thinking ? (
                         <div style={{ marginBottom: 8 }}>
                           <Collapse
                             size="small"
+                            ghost
                             items={[{
                               key: `thinking-${message.id}`,
-                              label: '展开/收起思考过程',
-                              children: <div style={{ margin: 0, background: '#f8fdff', border: '1px solid #e6f7ff', borderRadius: 8, padding: '8px 12px' }}>{renderMarkdown(message.thinking)}</div>,
+                              label: (
+                                <Space>
+                                  <BulbOutlined />
+                                  <Text>思考过程</Text>
+                                  <Tag color="cyan">{message.thinking.length} chars</Tag>
+                                </Space>
+                              ),
+                              children: (
+                                <div style={{ margin: 0, background: '#f7fcff', border: '1px solid #d6efff', borderRadius: 8, padding: '10px 12px' }}>
+                                  {renderMarkdown(message.thinking)}
+                                </div>
+                              ),
+                            }]}
+                          />
+                        </div>
+                      ) : null}
+                      {message.traces && message.traces.length > 0 ? (
+                        <div style={{ marginBottom: 8 }}>
+                          <Collapse
+                            size="small"
+                            ghost
+                            items={[{
+                              key: `trace-${message.id}`,
+                              label: (
+                                <Space>
+                                  <ToolOutlined />
+                                  <Text>工具调用轨迹</Text>
+                                  <Tag color="gold">{message.traces.length}</Tag>
+                                </Space>
+                              ),
+                              children: (
+                                <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                                  {message.traces.map((trace) => {
+                                    const isRawShown = !!traceRawVisible[trace.id];
+                                    const traceStatus = trace.type === 'tool_result'
+                                      ? ((trace.payload?.result?.ok || trace.payload?.payload?.result?.ok) ? 'success' : 'error')
+                                      : (trace.type === 'approval_required' ? 'warning' : 'processing');
+                                    return (
+                                      <Card key={trace.id} size="small" style={{ borderRadius: 8 }}>
+                                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                                          <Space>
+                                            <Tag color={traceStatus === 'success' ? 'green' : traceStatus === 'error' ? 'red' : traceStatus === 'warning' ? 'orange' : 'blue'}>
+                                              {trace.type}
+                                            </Tag>
+                                            <Text strong>{trace.payload?.tool || trace.payload?.payload?.tool || 'unknown-tool'}</Text>
+                                          </Space>
+                                          <Button size="small" type="link" onClick={() => setTraceRawVisible((prev) => ({ ...prev, [trace.id]: !isRawShown }))}>
+                                            {isRawShown ? '隐藏原始JSON' : '显示原始JSON'}
+                                          </Button>
+                                        </Space>
+                                        <Text type="secondary">{new Date(trace.timestamp).toLocaleTimeString()}</Text>
+                                        {isRawShown ? (
+                                          <pre style={{ marginTop: 8, whiteSpace: 'pre-wrap', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: 8 }}>
+                                            {JSON.stringify(trace.payload, null, 2)}
+                                          </pre>
+                                        ) : null}
+                                      </Card>
+                                    );
+                                  })}
+                                </Space>
+                              ),
                             }]}
                           />
                         </div>
@@ -308,7 +421,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           )}
         />
         {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', padding: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '8px 16px' }}>
             <Spin size="small" />
             <Text style={{ marginLeft: '8px' }}>AI 正在思考...</Text>
           </div>
@@ -318,7 +431,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       <Divider style={{ margin: 0 }} />
 
-      <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f0f0' }}>
+      {(streamState === 'timeout' || streamState === 'error') ? (
+        <div style={{ padding: '8px 16px 0' }}>
+          <Alert
+            type={streamState === 'timeout' ? 'warning' : 'error'}
+            showIcon
+            icon={<WarningOutlined />}
+            message={streamState === 'timeout' ? '工具执行可能超时' : '流式对话发生错误'}
+            description={streamError || '你可以重试本轮对话。'}
+            action={<Button size="small" onClick={() => void handleRetry()}>重试本轮</Button>}
+          />
+        </div>
+      ) : null}
+
+      <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f0f0', flexShrink: 0 }}>
         <Input.TextArea
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
@@ -327,17 +453,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           rows={3}
           disabled={loading}
         />
-        <Space style={{ marginTop: '8px', float: 'right' }}>
+        <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
           <Button
             type="primary"
             icon={<SendOutlined />}
-            onClick={handleSend}
+            onClick={() => void handleSend()}
             loading={loading}
             disabled={!inputValue.trim() || loading}
           >
             发送
           </Button>
-        </Space>
+        </div>
       </div>
     </Card>
   );
