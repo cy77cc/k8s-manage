@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Input, Button, List, Avatar, Space, Spin, Typography, Card, Divider, Tag, Collapse, Alert } from 'antd';
+import React, { useEffect, useRef, useState } from 'react';
+import { Input, Button, Avatar, Space, Typography, Card, Tag, Collapse, Alert } from 'antd';
 import { SendOutlined, MessageOutlined, ToolOutlined, BulbOutlined, WarningOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -19,7 +19,8 @@ interface ChatInterfaceProps {
 }
 
 type StreamState = 'idle' | 'running' | 'timeout' | 'done' | 'error';
-type LocalMessage = AIMessage & { turnId?: string };
+type MessagePhase = 'awaiting_first_token' | 'streaming' | 'done' | 'error';
+type LocalMessage = AIMessage & { turnId?: string; phase?: MessagePhase };
 
 const renderMarkdown = (content: string) => (
   <div className="ai-markdown-content">
@@ -64,7 +65,7 @@ const renderMarkdown = (content: string) => (
             );
           }
           return (
-            <code className={className} style={{ background: '#f5f5f5', padding: '2px 4px', borderRadius: 4 }} {...props}>
+            <code className={className} style={{ background: '#f5f6f7', padding: '2px 4px', borderRadius: 4 }} {...props}>
               {children}
             </code>
           );
@@ -93,9 +94,42 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [lastPrompt, setLastPrompt] = useState('');
   const [traceRawVisible, setTraceRawVisible] = useState<Record<string, boolean>>({});
   const [followupLoadingId, setFollowupLoadingId] = useState('');
+  const [activeAssistantMessageId, setActiveAssistantMessageId] = useState('');
+  const [recRevealMap, setRecRevealMap] = useState<Record<string, number>>({});
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
+  const revealTimerRef = useRef<Record<string, number[]>>({});
+
+  const clearRecommendationReveal = (messageId: string) => {
+    const timers = revealTimerRef.current[messageId] || [];
+    timers.forEach((timer) => window.clearTimeout(timer));
+    delete revealTimerRef.current[messageId];
+  };
+
+  const startRecommendationReveal = (messageId: string, total: number) => {
+    clearRecommendationReveal(messageId);
+    if (total <= 0) {
+      setRecRevealMap((prev) => ({ ...prev, [messageId]: 0 }));
+      return;
+    }
+    setRecRevealMap((prev) => ({ ...prev, [messageId]: 0 }));
+    const timers: number[] = [];
+    for (let i = 0; i < total; i++) {
+      const timer = window.setTimeout(() => {
+        setRecRevealMap((prev) => ({ ...prev, [messageId]: i + 1 }));
+      }, 120 * (i + 1));
+      timers.push(timer);
+    }
+    revealTimerRef.current[messageId] = timers;
+  };
+
+  useEffect(() => {
+    return () => {
+      Object.keys(revealTimerRef.current).forEach((key) => clearRecommendationReveal(key));
+    };
+  }, []);
 
   const loadSession = async () => {
     try {
@@ -126,7 +160,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (shouldAutoScrollRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, loading, streamState]);
+  }, [messages, streamState]);
 
   const handleScroll = () => {
     const el = scrollContainerRef.current;
@@ -135,22 +169,41 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     shouldAutoScrollRef.current = nearBottom;
   };
 
-  const attachTraceToAssistant = (assistantID: string, turnID: string | undefined, trace: ToolTrace) => {
+  const patchAssistantMessage = (assistantID: string, turnID: string | undefined, patch: (item: LocalMessage) => LocalMessage) => {
     setMessages((prev) => {
-      const next = [...prev];
-      let idx = next.findIndex((m) => m.role === 'assistant' && turnID && m.turnId === turnID);
-      if (idx < 0) {
-        idx = next.findIndex((m) => m.id === assistantID);
-      }
-      if (idx < 0) return prev;
-      const target = next[idx];
-      next[idx] = {
-        ...target,
-        ...(turnID ? { turnId: turnID } : {}),
-        traces: [...(target.traces || []), trace],
-      };
-      return next;
+      let matched = false;
+      const next = prev.map((item) => {
+        if (item.role !== 'assistant') {
+          return item;
+        }
+        const byTurn = turnID && item.turnId === turnID;
+        const byId = item.id === assistantID;
+        if (!byTurn && !byId) {
+          return item;
+        }
+        matched = true;
+        return patch(item);
+      });
+      return matched ? next : prev;
     });
+  };
+
+  const markStreaming = (assistantID: string, turnID?: string) => {
+    patchAssistantMessage(assistantID, turnID, (item) => {
+      if (item.phase === 'awaiting_first_token' || !item.phase) {
+        return { ...item, phase: 'streaming', turnId: turnID || item.turnId };
+      }
+      return { ...item, turnId: turnID || item.turnId };
+    });
+  };
+
+  const attachTraceToAssistant = (assistantID: string, turnID: string | undefined, trace: ToolTrace) => {
+    patchAssistantMessage(assistantID, turnID, (item) => ({
+      ...item,
+      turnId: turnID || item.turnId,
+      phase: item.phase === 'awaiting_first_token' ? 'streaming' : item.phase,
+      traces: [...(item.traces || []), trace],
+    }));
   };
 
   const sendMessage = async (messageText: string) => {
@@ -171,6 +224,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       thinking: '',
       traces: [],
       timestamp: new Date().toISOString(),
+      phase: 'awaiting_first_token',
     };
 
     setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
@@ -180,6 +234,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setStreamError('');
     setStreamNotice('');
     setLastPrompt(messageText);
+    setActiveAssistantMessageId(assistantMessageID);
 
     let latestSession: AISession | undefined;
     let activeTurnID = '';
@@ -207,30 +262,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               };
             });
             if (activeTurnID) {
-              setMessages((prev) =>
-                prev.map((item) => (item.id === assistantMessageID ? { ...item, turnId: activeTurnID } : item)),
-              );
+              patchAssistantMessage(assistantMessageID, activeTurnID, (item) => ({ ...item, turnId: activeTurnID }));
             }
           },
           onDelta: (delta) => {
             const turnID = delta.turn_id || activeTurnID;
-            setMessages((prev) =>
-              prev.map((item) =>
-                (item.id === assistantMessageID || (turnID && item.turnId === turnID))
-                  ? { ...item, turnId: turnID || item.turnId, content: `${item.content}${delta.contentChunk}` }
-                  : item,
-              ),
-            );
+            markStreaming(assistantMessageID, turnID);
+            patchAssistantMessage(assistantMessageID, turnID, (item) => ({
+              ...item,
+              turnId: turnID || item.turnId,
+              content: `${item.content}${delta.contentChunk}`,
+            }));
           },
           onThinkingDelta: (delta) => {
             const turnID = delta.turn_id || activeTurnID;
-            setMessages((prev) =>
-              prev.map((item) =>
-                (item.id === assistantMessageID || (turnID && item.turnId === turnID))
-                  ? { ...item, turnId: turnID || item.turnId, thinking: `${item.thinking || ''}${delta.contentChunk}` }
-                  : item,
-              ),
-            );
+            markStreaming(assistantMessageID, turnID);
+            patchAssistantMessage(assistantMessageID, turnID, (item) => ({
+              ...item,
+              turnId: turnID || item.turnId,
+              thinking: `${item.thinking || ''}${delta.contentChunk}`,
+            }));
           },
           onToolCall: (payload) => {
             const turnID = payload.turn_id || activeTurnID;
@@ -271,20 +322,24 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           onDone: (done) => {
             latestSession = done.session;
             setCurrentSession(done.session);
+            const turnID = done.turn_id || activeTurnID;
+
             if (done.turn_recommendations && done.turn_recommendations.length > 0) {
-              const turnID = done.turn_id || activeTurnID;
-              setMessages((prev) =>
-                prev.map((item) =>
-                  (item.id === assistantMessageID || (turnID && item.turnId === turnID))
-                    ? { ...item, turnId: turnID || item.turnId, recommendations: done.turn_recommendations }
-                    : item,
-                ),
-              );
+              const topRecommendations = done.turn_recommendations.slice(0, 3);
+              patchAssistantMessage(assistantMessageID, turnID, (item) => ({
+                ...item,
+                turnId: turnID || item.turnId,
+                phase: 'done',
+                recommendations: topRecommendations,
+              }));
+              startRecommendationReveal(assistantMessageID, topRecommendations.length);
+            } else {
+              patchAssistantMessage(assistantMessageID, turnID, (item) => ({ ...item, turnId: turnID || item.turnId, phase: 'done' }));
             }
+
             if (done.stream_state === 'partial') {
               setStreamState('timeout');
               setStreamError('工具结果不完整，可重试本轮对话。');
-              const turnID = done.turn_id || activeTurnID;
               const missing = done.tool_summary?.missing || [];
               const missingCallIDs = done.tool_summary?.missing_call_ids || [];
               if (missing.length > 0) {
@@ -303,12 +358,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               return;
             }
             if (done.stream_state === 'failed') {
+              patchAssistantMessage(assistantMessageID, turnID, (item) => ({ ...item, phase: 'error' }));
               setStreamState('error');
               return;
             }
             setStreamState('done');
           },
           onError: (err) => {
+            const turnID = err.turn_id || activeTurnID;
+            patchAssistantMessage(assistantMessageID, turnID, (item) => ({ ...item, phase: 'error' }));
             if (err.code === 'tool_timeout_soft') {
               setStreamNotice(err.message || '工具执行较慢，正在继续等待结果…');
               setStreamState('running');
@@ -336,15 +394,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       console.error('发送消息失败:', error);
       setStreamState('error');
       setStreamError('AI服务暂时不可用，请稍后再试。');
-      setMessages((prev) =>
-        prev.map((item) =>
-          item.id === assistantMessageID
-            ? { ...item, content: item.content || '抱歉，AI服务暂时不可用，请稍后再试。' }
-            : item,
-        ),
-      );
+      patchAssistantMessage(assistantMessageID, undefined, (item) => ({
+        ...item,
+        phase: 'error',
+        content: item.content || '抱歉，AI服务暂时不可用，请稍后再试。',
+      }));
     } finally {
       setLoading(false);
+      setActiveAssistantMessageId('');
     }
   };
 
@@ -377,13 +434,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   return (
     <Card
-      title={
+      title={(
         <Space>
           <MessageOutlined />
           <Text strong>AI 助手</Text>
           {streamState === 'running' ? <Tag color="processing">Streaming</Tag> : null}
         </Space>
-      }
+      )}
       className={`ai-chat-interface ${className || ''}`}
       style={{ height: '100%' }}
       styles={{
@@ -397,161 +454,159 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       }}
     >
       <div ref={scrollContainerRef} onScroll={handleScroll} className="ai-chat-message-scroll">
-        <List
-          dataSource={messages}
-          renderItem={(message) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={
-                  <Avatar
-                    icon={message.role === 'user' ? <SendOutlined /> : <MessageOutlined />}
-                    style={{
-                      backgroundColor: message.role === 'user' ? '#1677ff' : '#52c41a',
-                    }}
-                  />
-                }
-                title={
-                  <Text>
-                    {message.role === 'user' ? '我' : 'AI 助手'}
-                    <Text type="secondary" style={{ marginLeft: '8px' }}>
-                      {new Date(message.timestamp).toLocaleString()}
-                    </Text>
-                  </Text>
-                }
-                description={
-                  message.role === 'assistant' ? (
-                    <div className="ai-assistant-message-bubble">
-                      {message.thinking ? (
-                        <div className="ai-thinking-block">
-                          <Collapse
-                            size="small"
-                            ghost
-                            items={[{
-                              key: `thinking-${message.id}`,
-                              label: (
-                                <Space className="ai-thinking-header">
-                                  <BulbOutlined />
-                                  <Text className="ai-thinking-title">思考过程</Text>
-                                  <Tag color="cyan">{message.thinking.length} chars</Tag>
-                                </Space>
-                              ),
-                              children: (
-                                <div className="ai-thinking-content">
-                                  {renderMarkdown(message.thinking)}
-                                </div>
-                              ),
-                            }]}
-                          />
-                        </div>
-                      ) : null}
-                      {message.traces && message.traces.length > 0 ? (
-                        <div className="ai-trace-block">
-                          <Collapse
-                            size="small"
-                            ghost
-                            items={[{
-                              key: `trace-${message.id}`,
-                              label: (
-                                <Space className="ai-trace-header">
-                                  <ToolOutlined />
-                                  <Text className="ai-trace-title">工具调用轨迹</Text>
-                                  <Tag color="gold">{message.traces.length}</Tag>
-                                </Space>
-                              ),
-                              children: (
-                                <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                                  {message.traces.map((trace) => {
-                                    const isRawShown = !!traceRawVisible[trace.id];
-                                    const traceStatus = trace.type === 'tool_result'
-                                      ? ((trace.payload?.result?.ok || trace.payload?.payload?.result?.ok) ? 'success' : 'error')
-                                      : (trace.type === 'approval_required' || trace.type === 'tool_missing' ? 'warning' : 'processing');
-                                    return (
-                                      <Card key={trace.id} size="small" className="ai-trace-card">
-                                        <Space className="ai-trace-card-head">
-                                          <Space>
-                                            <Tag color={traceStatus === 'success' ? 'green' : traceStatus === 'error' ? 'red' : traceStatus === 'warning' ? 'orange' : 'blue'}>
-                                              {trace.type}
-                                            </Tag>
-                                            <Text strong>{trace.payload?.tool || trace.payload?.payload?.tool || 'unknown-tool'}</Text>
+        <div className="ai-chat-stream-list">
+          {messages.map((message) => {
+            const isAssistant = message.role === 'assistant';
+            const isUser = message.role === 'user';
+            const visibleRecommendationCount = Math.min(message.recommendations?.length || 0, recRevealMap[message.id] || 0);
+            const visibleRecommendations = (message.recommendations || []).slice(0, visibleRecommendationCount);
+            const showAwaiting = isAssistant && message.phase === 'awaiting_first_token' && !message.content && !(message.thinking || '').trim() && !(message.traces || []).length;
+            const showCursor = isAssistant && message.id === activeAssistantMessageId && message.phase === 'streaming';
+
+            return (
+              <div key={message.id} className={`ai-chat-message-row ${isUser ? 'ai-chat-message-row-user' : 'ai-chat-message-row-assistant'}`}>
+                {isAssistant ? (
+                  <>
+                    <Avatar icon={<MessageOutlined />} className="ai-chat-avatar ai-chat-avatar-assistant" />
+                    <div className="ai-chat-message-main">
+                      <div className="ai-chat-message-meta">
+                        <Text className="ai-chat-message-author">AI 助手</Text>
+                        <Text type="secondary" className="ai-chat-message-time">{new Date(message.timestamp).toLocaleTimeString()}</Text>
+                      </div>
+                      <div className="ai-chat-assistant-content">
+                        {showAwaiting ? (
+                          <div className="ai-first-token-loading" aria-label="等待模型首包">
+                            <span className="ai-first-token-dot" />
+                            <span className="ai-first-token-dot" />
+                            <span className="ai-first-token-dot" />
+                          </div>
+                        ) : null}
+
+                        {message.thinking ? (
+                          <div className="ai-thinking-block">
+                            <Collapse
+                              size="small"
+                              ghost
+                              items={[{
+                                key: `thinking-${message.id}`,
+                                label: (
+                                  <Space className="ai-thinking-header">
+                                    <BulbOutlined />
+                                    <Text className="ai-thinking-title">查看思考过程</Text>
+                                    <Tag color="cyan">{message.thinking.length} chars</Tag>
+                                  </Space>
+                                ),
+                                children: (
+                                  <div className="ai-thinking-content">
+                                    {renderMarkdown(message.thinking)}
+                                  </div>
+                                ),
+                              }]}
+                            />
+                          </div>
+                        ) : null}
+
+                        {message.traces && message.traces.length > 0 ? (
+                          <div className="ai-trace-block">
+                            <Collapse
+                              size="small"
+                              ghost
+                              items={[{
+                                key: `trace-${message.id}`,
+                                label: (
+                                  <Space className="ai-trace-header">
+                                    <ToolOutlined />
+                                    <Text className="ai-trace-title">工具调用轨迹</Text>
+                                    <Tag color="gold">{message.traces.length}</Tag>
+                                  </Space>
+                                ),
+                                children: (
+                                  <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                                    {message.traces.map((trace) => {
+                                      const isRawShown = !!traceRawVisible[trace.id];
+                                      const traceStatus = trace.type === 'tool_result'
+                                        ? ((trace.payload?.result?.ok || trace.payload?.payload?.result?.ok) ? 'success' : 'error')
+                                        : (trace.type === 'approval_required' || trace.type === 'tool_missing' ? 'warning' : 'processing');
+                                      return (
+                                        <Card key={trace.id} size="small" className="ai-trace-card">
+                                          <Space className="ai-trace-card-head">
+                                            <Space>
+                                              <Tag color={traceStatus === 'success' ? 'green' : traceStatus === 'error' ? 'red' : traceStatus === 'warning' ? 'orange' : 'blue'}>
+                                                {trace.type}
+                                              </Tag>
+                                              <Text strong>{trace.payload?.tool || trace.payload?.payload?.tool || 'unknown-tool'}</Text>
+                                            </Space>
+                                            <Button size="small" type="link" onClick={() => setTraceRawVisible((prev) => ({ ...prev, [trace.id]: !isRawShown }))}>
+                                              {isRawShown ? '隐藏原始JSON' : '显示原始JSON'}
+                                            </Button>
                                           </Space>
-                                          <Button size="small" type="link" onClick={() => setTraceRawVisible((prev) => ({ ...prev, [trace.id]: !isRawShown }))}>
-                                            {isRawShown ? '隐藏原始JSON' : '显示原始JSON'}
-                                          </Button>
-                                        </Space>
-                                        <Text type="secondary" className="ai-trace-time">{new Date(trace.timestamp).toLocaleTimeString()}</Text>
-                                        {isRawShown ? (
-                                          <pre className="ai-trace-json">
-                                            {JSON.stringify(trace.payload, null, 2)}
-                                          </pre>
-                                        ) : null}
-                                      </Card>
-                                    );
-                                  })}
-                                </Space>
-                              ),
-                            }]}
-                          />
-                        </div>
-                      ) : null}
-                      {message.recommendations && message.recommendations.length > 0 ? (
-                        <div className="ai-inline-recommendations">
-                          <Text strong className="ai-inline-recommendations-title">下一步建议</Text>
-                          <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                            {message.recommendations.slice(0, 3).map((rec) => (
-                              <Card key={rec.id} size="small" className="ai-inline-rec-card">
-                                <Space className="ai-inline-rec-head">
-                                  <Text strong>{rec.title}</Text>
-                                  <Tag color="blue">{Math.round((rec.relevance || 0) * 100)}%</Tag>
-                                </Space>
-                                <Text type="secondary">{rec.content}</Text>
-                                {rec.reasoning ? (
-                                  <Collapse
-                                    size="small"
-                                    ghost
-                                    items={[{
-                                      key: `inline-reasoning-${message.id}-${rec.id}`,
-                                      label: <Text type="secondary">建议说明</Text>,
-                                      children: <Text type="secondary">{rec.reasoning}</Text>,
-                                    }]}
-                                  />
-                                ) : null}
-                                <div className="ai-inline-rec-actions">
-                                  <Button
-                                    size="small"
-                                    loading={followupLoadingId === rec.id}
-                                    onClick={() => void handleRecommendationFollowup(rec)}
-                                  >
-                                    一键追问
-                                  </Button>
-                                </div>
-                              </Card>
-                            ))}
-                          </Space>
-                        </div>
-                      ) : null}
-                      {renderMarkdown(message.content)}
+                                          <Text type="secondary" className="ai-trace-time">{new Date(trace.timestamp).toLocaleTimeString()}</Text>
+                                          {isRawShown ? (
+                                            <pre className="ai-trace-json">
+                                              {JSON.stringify(trace.payload, null, 2)}
+                                            </pre>
+                                          ) : null}
+                                        </Card>
+                                      );
+                                    })}
+                                  </Space>
+                                ),
+                              }]}
+                            />
+                          </div>
+                        ) : null}
+
+                        {(message.content || '').trim() ? (
+                          <div className="ai-assistant-markdown-wrap">
+                            {renderMarkdown(message.content)}
+                            {showCursor ? <span className="ai-typewriter-cursor" /> : null}
+                          </div>
+                        ) : null}
+
+                        {visibleRecommendations.length > 0 ? (
+                          <div className="ai-recommendation-chips-wrap">
+                            <Text strong className="ai-inline-recommendations-title">下一步建议</Text>
+                            <div className="ai-recommendation-chip-list">
+                              {visibleRecommendations.map((rec, idx) => (
+                                <Button
+                                  key={rec.id}
+                                  className="ai-recommendation-chip"
+                                  loading={followupLoadingId === rec.id}
+                                  onClick={() => void handleRecommendationFollowup(rec)}
+                                  title={rec.content}
+                                  style={{ animationDelay: `${idx * 80}ms` }}
+                                >
+                                  {rec.title || rec.content}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                  ) : <Paragraph className="ai-chat-user-paragraph">{message.content}</Paragraph>
-                }
-              />
-            </List.Item>
-          )}
-        />
-        {loading && (
-          <div className="ai-chat-loading-row">
-            <Spin size="small" />
-            <Text className="ai-chat-loading-text">AI 正在思考...</Text>
-          </div>
-        )}
+                  </>
+                ) : null}
+
+                {isUser ? (
+                  <div className="ai-chat-user-bubble-wrap">
+                    <div className="ai-chat-user-bubble">
+                      <Paragraph className="ai-chat-user-paragraph">{message.content}</Paragraph>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
         {streamNotice ? (
-          <div style={{ padding: '4px 8px' }}>
+          <div className="ai-chat-stream-notice">
             <Alert type="info" showIcon message={streamNotice} />
           </div>
         ) : null}
+
         <div ref={messagesEndRef} />
       </div>
-
-      <Divider style={{ margin: 0 }} />
 
       {(streamState === 'timeout' || streamState === 'error') ? (
         <div style={{ padding: '8px 16px 0' }}>

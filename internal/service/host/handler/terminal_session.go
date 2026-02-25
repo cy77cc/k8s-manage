@@ -81,12 +81,16 @@ func (h *Handler) CreateTerminalSession(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": gin.H{"message": "host not found"}})
 		return
 	}
-	privateKey, err := h.loadNodePrivateKey(c, node)
+	privateKey, passphrase, err := h.loadNodePrivateKey(c, node)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
 	}
-	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	password := strings.TrimSpace(node.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return

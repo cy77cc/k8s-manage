@@ -904,11 +904,15 @@ func (l *Logic) applyComposeByTarget(ctx context.Context, targetID uint, release
 	if err := l.svcCtx.DB.WithContext(ctx).First(&node, links[0].HostID).Error; err != nil {
 		return "", err
 	}
-	privateKey, err := l.loadNodeSSHPrivateKey(ctx, &node)
+	privateKey, passphrase, err := l.loadNodeSSHPrivateKey(ctx, &node)
 	if err != nil {
 		return "", err
 	}
-	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	password := strings.TrimSpace(node.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 	if err != nil {
 		return "", err
 	}
@@ -920,24 +924,29 @@ func (l *Logic) applyComposeByTarget(ctx context.Context, targetID uint, release
 	return sshclient.RunCommand(cli, cmd)
 }
 
-func (l *Logic) loadNodeSSHPrivateKey(ctx context.Context, node *model.Node) (string, error) {
+func (l *Logic) loadNodeSSHPrivateKey(ctx context.Context, node *model.Node) (string, string, error) {
 	if node == nil || node.SSHKeyID == nil {
-		return "", nil
+		return "", "", nil
 	}
 	var key model.SSHKey
 	if err := l.svcCtx.DB.WithContext(ctx).
-		Select("id", "private_key", "encrypted").
+		Select("id", "private_key", "passphrase", "encrypted").
 		Where("id = ?", uint64(*node.SSHKeyID)).
 		First(&key).Error; err != nil {
-		return "", err
+		return "", "", err
 	}
+	passphrase := strings.TrimSpace(key.Passphrase)
 	if !key.Encrypted {
-		return strings.TrimSpace(key.PrivateKey), nil
+		return strings.TrimSpace(key.PrivateKey), passphrase, nil
 	}
 	if strings.TrimSpace(config.CFG.Security.EncryptionKey) == "" {
-		return "", fmt.Errorf("security.encryption_key is required")
+		return "", "", fmt.Errorf("security.encryption_key is required")
 	}
-	return utils.DecryptText(strings.TrimSpace(key.PrivateKey), config.CFG.Security.EncryptionKey)
+	privateKey, err := utils.DecryptText(strings.TrimSpace(key.PrivateKey), config.CFG.Security.EncryptionKey)
+	if err != nil {
+		return "", "", err
+	}
+	return privateKey, passphrase, nil
 }
 
 func ensureStandardConfig(cfg *StandardServiceConfig) *StandardServiceConfig {

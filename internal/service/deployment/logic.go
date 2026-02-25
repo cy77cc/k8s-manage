@@ -217,14 +217,18 @@ func (l *Logic) ApplyClusterBootstrap(ctx context.Context, uid uint64, req Clust
 		_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
 		return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status}, err
 	}
-	privateKey, err := l.loadNodePrivateKey(ctx, control)
+	privateKey, passphrase, err := l.loadNodePrivateKey(ctx, control)
 	if err != nil {
 		task.Status = "failed"
 		task.ErrorMessage = err.Error()
 		_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
 		return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status}, err
 	}
-	cli, err := sshclient.NewSSHClient(control.SSHUser, control.SSHPassword, control.IP, control.Port, privateKey)
+	password := strings.TrimSpace(control.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(control.SSHUser, password, control.IP, control.Port, privateKey, passphrase)
 	if err != nil {
 		task.Status = "failed"
 		task.ErrorMessage = err.Error()
@@ -533,11 +537,15 @@ func (l *Logic) applyComposeRelease(ctx context.Context, target *model.Deploymen
 	if err != nil {
 		return "", err
 	}
-	privateKey, err := l.loadNodePrivateKey(ctx, node)
+	privateKey, passphrase, err := l.loadNodePrivateKey(ctx, node)
 	if err != nil {
 		return "", err
 	}
-	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	password := strings.TrimSpace(node.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 	if err != nil {
 		return "", err
 	}
@@ -572,26 +580,27 @@ func (l *Logic) pickComposeNode(ctx context.Context, targetID uint) (*model.Node
 	return &node, nil
 }
 
-func (l *Logic) loadNodePrivateKey(ctx context.Context, node *model.Node) (string, error) {
+func (l *Logic) loadNodePrivateKey(ctx context.Context, node *model.Node) (string, string, error) {
 	if node == nil || node.SSHKeyID == nil {
-		return "", nil
+		return "", "", nil
 	}
 	var key model.SSHKey
 	if err := l.svcCtx.DB.WithContext(ctx).
-		Select("id", "private_key", "encrypted").
+		Select("id", "private_key", "passphrase", "encrypted").
 		Where("id = ?", uint64(*node.SSHKeyID)).
 		First(&key).Error; err != nil {
-		return "", err
+		return "", "", err
 	}
+	passphrase := strings.TrimSpace(key.Passphrase)
 	if !key.Encrypted {
-		return strings.TrimSpace(key.PrivateKey), nil
+		return strings.TrimSpace(key.PrivateKey), passphrase, nil
 	}
 	if strings.TrimSpace(config.CFG.Security.EncryptionKey) == "" {
-		return "", fmt.Errorf("security.encryption_key is required")
+		return "", "", fmt.Errorf("security.encryption_key is required")
 	}
 	plain, err := utils.DecryptText(strings.TrimSpace(key.PrivateKey), config.CFG.Security.EncryptionKey)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return plain, nil
+	return plain, passphrase, nil
 }

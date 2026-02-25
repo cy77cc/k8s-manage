@@ -71,6 +71,7 @@ func hostListInventory(ctx context.Context, deps PlatformDeps, input HostInvento
 				"ip":         node.IP,
 				"hostname":   node.Hostname,
 				"status":     node.Status,
+				"auth_type":  detectNodeAuthType(&node),
 				"ssh_user":   node.SSHUser,
 				"port":       node.Port,
 				"cpu_cores":  node.CpuCores,
@@ -210,11 +211,15 @@ func hostBatchStatusUpdate(ctx context.Context, deps PlatformDeps, input HostBat
 }
 
 func executeHostCommand(deps PlatformDeps, node *model.Node, command string) (string, error) {
-	privateKey, err := loadNodePrivateKey(deps, node)
+	privateKey, passphrase, err := loadNodePrivateKey(deps, node)
 	if err != nil {
 		return "", err
 	}
-	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	password := strings.TrimSpace(node.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 	if err != nil {
 		return "", err
 	}
@@ -222,19 +227,24 @@ func executeHostCommand(deps PlatformDeps, node *model.Node, command string) (st
 	return sshclient.RunCommand(cli, command)
 }
 
-func loadNodePrivateKey(deps PlatformDeps, node *model.Node) (string, error) {
+func loadNodePrivateKey(deps PlatformDeps, node *model.Node) (string, string, error) {
 	if deps.DB == nil || node == nil || node.SSHKeyID == nil {
-		return "", nil
+		return "", "", nil
 	}
 	var key model.SSHKey
-	if err := deps.DB.Select("id", "private_key", "encrypted").Where("id = ?", uint64(*node.SSHKeyID)).First(&key).Error; err != nil {
-		return "", err
+	if err := deps.DB.Select("id", "private_key", "passphrase", "encrypted").Where("id = ?", uint64(*node.SSHKeyID)).First(&key).Error; err != nil {
+		return "", "", err
 	}
 	pk := strings.TrimSpace(key.PrivateKey)
+	pp := strings.TrimSpace(key.Passphrase)
 	if !key.Encrypted {
-		return pk, nil
+		return pk, pp, nil
 	}
-	return utils.DecryptText(pk, config.CFG.Security.EncryptionKey)
+	decrypted, err := utils.DecryptText(pk, config.CFG.Security.EncryptionKey)
+	if err != nil {
+		return "", "", err
+	}
+	return decrypted, pp, nil
 }
 
 func normalizeHostIDs(raw []int) ([]uint64, error) {
@@ -356,4 +366,17 @@ func isReadonlyHostCommand(cmd string) bool {
 	default:
 		return false
 	}
+}
+
+func detectNodeAuthType(node *model.Node) string {
+	if node == nil {
+		return "unknown"
+	}
+	if node.SSHKeyID != nil && uint64(*node.SSHKeyID) > 0 {
+		return "key"
+	}
+	if strings.TrimSpace(node.SSHPassword) != "" {
+		return "password"
+	}
+	return "unknown"
 }

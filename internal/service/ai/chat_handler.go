@@ -195,8 +195,14 @@ func (h *handler) chat(c *gin.Context) {
 	tracker := newToolEventTracker()
 	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, req.Context, emit, tracker)
 	prompt := msg
+	if directive := buildToolExecutionDirective(msg, scene); directive != "" {
+		prompt = directive + "\n\n用户问题:\n" + msg
+	}
 	if len(req.Context) > 0 {
 		prompt = msg + "\n\n上下文:\n" + mustJSON(req.Context)
+		if directive := buildToolExecutionDirective(msg, scene); directive != "" {
+			prompt = directive + "\n\n用户问题:\n" + msg + "\n\n上下文:\n" + mustJSON(req.Context)
+		}
 	}
 	inputMessages := h.buildConversationMessages(session.Messages, msg, prompt)
 	stream, err := h.svcCtx.AI.Stream(streamCtx, inputMessages)
@@ -357,6 +363,42 @@ func detectUnresolvedToolIntent(reasoning, content string) string {
 		}
 	}
 	return ""
+}
+
+func buildToolExecutionDirective(message, scene string) string {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	if msg == "" {
+		return ""
+	}
+	isInventoryOrDiag := strings.Contains(msg, "查看") ||
+		strings.Contains(msg, "查询") ||
+		strings.Contains(msg, "清单") ||
+		strings.Contains(msg, "资源") ||
+		strings.Contains(msg, "服务器") ||
+		strings.Contains(msg, "主机") ||
+		strings.Contains(msg, "cpu") ||
+		strings.Contains(msg, "内存") ||
+		strings.Contains(msg, "磁盘") ||
+		strings.Contains(msg, "硬盘") ||
+		strings.Contains(msg, "disk") ||
+		strings.Contains(msg, "memory")
+	if !isInventoryOrDiag {
+		return ""
+	}
+	sceneLower := strings.ToLower(scene)
+	if sceneLower != "" && sceneLower != "global" && !strings.Contains(sceneLower, "host") && !strings.Contains(sceneLower, "scene:hosts") {
+		return ""
+	}
+	return `执行要求（必须遵守）:
+1) 这是资源查询/诊断请求，必须先调用至少一个只读工具，再给出结论。
+2) 不允许仅输出“我将调用某工具”的计划性文字。
+3) 当用户提到具体主机名称（如“香港云服务器”）时，必须按顺序执行：
+   - 先调用 host_list_inventory(keyword=<主机名关键词>) 获取准确主机信息与 ID。
+   - 再调用 host_ssh_exec_readonly(host_id=<命中的ID>, command="df -h") 查询磁盘使用。
+4) 若第 2 步出现 SSH 认证失败，必须在结论中明确给出：
+   - 已命中的主机 ID/名称/IP
+   - 失败原因为认证失败
+   - 建议下一步（更新凭据或检查 ssh_key_id/password）。`
 }
 
 func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene string, runtime map[string]any, emit func(event string, payload gin.H) bool, tracker *toolEventTracker) context.Context {

@@ -92,11 +92,11 @@ func (s *HostService) VerifySSHKey(ctx context.Context, id uint64, req SSHKeyVer
 	if strings.TrimSpace(req.IP) == "" {
 		return nil, errors.New("ip is required")
 	}
-	privateKey, err := s.loadPrivateKey(ctx, &id)
+	privateKey, passphrase, err := s.loadPrivateKey(ctx, &id)
 	if err != nil {
 		return nil, err
 	}
-	cli, err := sshclient.NewSSHClient(req.Username, "", req.IP, req.Port, privateKey)
+	cli, err := sshclient.NewSSHClient(req.Username, "", req.IP, req.Port, privateKey, passphrase)
 	if err != nil {
 		return map[string]any{"reachable": false, "message": err.Error()}, nil
 	}

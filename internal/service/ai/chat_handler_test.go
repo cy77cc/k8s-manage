@@ -70,3 +70,15 @@ func TestDetectUnresolvedToolIntent(t *testing.T) {
 		t.Fatalf("expected empty tool, got %q", got)
 	}
 }
+
+func TestBuildToolExecutionDirective(t *testing.T) {
+	if got := buildToolExecutionDirective("查看香港云服务器硬盘使用情况", "scene:hosts"); got == "" {
+		t.Fatalf("expected directive for host diagnostic query")
+	}
+	if got := buildToolExecutionDirective("帮我写一段周报", "scene:hosts"); got != "" {
+		t.Fatalf("expected empty directive for non-diagnostic query")
+	}
+	if got := buildToolExecutionDirective("查看服务资源", "scene:services"); got != "" {
+		t.Fatalf("expected empty directive for non-host scene")
+	}
+}

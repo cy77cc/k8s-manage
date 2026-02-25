@@ -22,12 +22,16 @@ func (h *Handler) SSHCheck(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": gin.H{"message": "host not found"}})
 		return
 	}
-	privateKey, err := h.loadNodePrivateKey(c, node)
+	privateKey, passphrase, err := h.loadNodePrivateKey(c, node)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"reachable": false, "message": err.Error()}})
 		return
 	}
-	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	password := strings.TrimSpace(node.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"reachable": false, "message": err.Error()}})
 		return
@@ -53,12 +57,16 @@ func (h *Handler) SSHExec(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": gin.H{"message": "host not found"}})
 		return
 	}
-	privateKey, err := h.loadNodePrivateKey(c, node)
+	privateKey, passphrase, err := h.loadNodePrivateKey(c, node)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"stdout": "", "stderr": err.Error(), "exit_code": 1}})
 		return
 	}
-	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	password := strings.TrimSpace(node.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"stdout": "", "stderr": err.Error(), "exit_code": 1}})
 		return
@@ -88,12 +96,16 @@ func (h *Handler) BatchExec(c *gin.Context) {
 			results[fmt.Sprintf("%d", id)] = gin.H{"stdout": "", "stderr": "host not found", "exit_code": 1}
 			continue
 		}
-		privateKey, err := h.loadNodePrivateKey(c, node)
+		privateKey, passphrase, err := h.loadNodePrivateKey(c, node)
 		if err != nil {
 			results[fmt.Sprintf("%d", id)] = gin.H{"stdout": "", "stderr": err.Error(), "exit_code": 1}
 			continue
 		}
-		cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+		password := strings.TrimSpace(node.SSHPassword)
+		if strings.TrimSpace(privateKey) != "" {
+			password = ""
+		}
+		cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 		if err != nil {
 			results[fmt.Sprintf("%d", id)] = gin.H{"stdout": "", "stderr": err.Error(), "exit_code": 1}
 			continue
@@ -109,19 +121,24 @@ func (h *Handler) BatchExec(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": results})
 }
 
-func (h *Handler) loadNodePrivateKey(c *gin.Context, node *model.Node) (string, error) {
+func (h *Handler) loadNodePrivateKey(c *gin.Context, node *model.Node) (string, string, error) {
 	if node == nil || node.SSHKeyID == nil {
-		return "", nil
+		return "", "", nil
 	}
 	var key model.SSHKey
 	if err := h.svcCtx.DB.WithContext(c.Request.Context()).
-		Select("id", "private_key", "encrypted").
+		Select("id", "private_key", "passphrase", "encrypted").
 		Where("id = ?", uint64(*node.SSHKeyID)).
 		First(&key).Error; err != nil {
-		return "", err
+		return "", "", err
 	}
+	passphrase := strings.TrimSpace(key.Passphrase)
 	if !key.Encrypted {
-		return strings.TrimSpace(key.PrivateKey), nil
+		return strings.TrimSpace(key.PrivateKey), passphrase, nil
 	}
-	return utils.DecryptText(strings.TrimSpace(key.PrivateKey), config.CFG.Security.EncryptionKey)
+	privateKey, err := utils.DecryptText(strings.TrimSpace(key.PrivateKey), config.CFG.Security.EncryptionKey)
+	if err != nil {
+		return "", "", err
+	}
+	return privateKey, passphrase, nil
 }

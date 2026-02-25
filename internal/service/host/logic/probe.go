@@ -89,29 +89,38 @@ func mapProbeError(err error) (string, string) {
 	}
 }
 
-func (s *HostService) loadPrivateKey(ctx context.Context, sshKeyID *uint64) (string, error) {
+func (s *HostService) loadPrivateKey(ctx context.Context, sshKeyID *uint64) (string, string, error) {
 	if sshKeyID == nil {
-		return "", nil
+		return "", "", nil
 	}
 	var key model.SSHKey
-	if err := s.svcCtx.DB.WithContext(ctx).Select("id", "private_key", "encrypted").Where("id = ?", *sshKeyID).First(&key).Error; err != nil {
-		return "", err
+	if err := s.svcCtx.DB.WithContext(ctx).Select("id", "private_key", "passphrase", "encrypted").Where("id = ?", *sshKeyID).First(&key).Error; err != nil {
+		return "", "", err
 	}
+	passphrase := strings.TrimSpace(key.Passphrase)
 	if key.Encrypted {
-		return utils.DecryptText(key.PrivateKey, config.CFG.Security.EncryptionKey)
+		privateKey, err := utils.DecryptText(key.PrivateKey, config.CFG.Security.EncryptionKey)
+		if err != nil {
+			return "", "", err
+		}
+		return privateKey, passphrase, nil
 	}
-	return key.PrivateKey, nil
+	return key.PrivateKey, passphrase, nil
 }
 
 func (s *HostService) probeFacts(ctx context.Context, req ProbeReq) (ProbeFacts, []string, string, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
 	defer cancel()
 
-	privateKey, err := s.loadPrivateKey(probeCtx, req.SSHKeyID)
+	privateKey, passphrase, err := s.loadPrivateKey(probeCtx, req.SSHKeyID)
 	if err != nil {
 		return ProbeFacts{}, nil, "", err
 	}
-	cli, err := sshclient.NewSSHClient(req.Username, req.Password, req.IP, req.Port, privateKey)
+	password := req.Password
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(req.Username, password, req.IP, req.Port, privateKey, passphrase)
 	if err != nil {
 		return ProbeFacts{}, nil, privateKey, err
 	}

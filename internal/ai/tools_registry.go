@@ -48,7 +48,7 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 	}); err != nil {
 		return nil, err
 	}
-	if err := addLocalTool(&tools, ToolMeta{Name: "os_get_disk_fs", Description: "读取磁盘与文件系统占用。默认 target=localhost。", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"target": "localhost"}}, func(ctx context.Context, input OSDiskInput) (ToolResult, error) {
+	if err := addLocalTool(&tools, ToolMeta{Name: "os_get_disk_fs", Description: "读取磁盘与文件系统占用。默认 target=localhost；target 支持主机 ID/IP/主机名（如 香港云服务器）。", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"target": "localhost"}}, func(ctx context.Context, input OSDiskInput) (ToolResult, error) {
 		return osGetDiskFS(ctx, deps, input)
 	}); err != nil {
 		return nil, err

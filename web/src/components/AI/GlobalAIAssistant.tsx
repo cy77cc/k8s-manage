@@ -3,7 +3,6 @@ import { Button, Drawer, Segmented, Space, Typography } from 'antd';
 import { MessageOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import ChatInterface from './ChatInterface';
-import RecommendationPanel from './RecommendationPanel';
 import './ai-assistant.css';
 
 const { Text } = Typography;
@@ -20,10 +19,6 @@ const sceneFromPath = (pathname: string): string => {
 const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = false }) => {
   const [open, setOpen] = React.useState(false);
   const [scope, setScope] = React.useState<'scene' | 'global'>('scene');
-  const [recRefreshSignal, setRecRefreshSignal] = React.useState(0);
-  const [recommendationLoading, setRecommendationLoading] = React.useState(false);
-  const [isRefreshingRecommendations, setIsRefreshingRecommendations] = React.useState(false);
-  const recLoadedRef = React.useRef(false);
   const location = useLocation();
   const drawerWidth = React.useMemo(() => {
     if (window.innerWidth < 768) return '100vw';
@@ -31,12 +26,6 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = f
   }, []);
   const pageScene = React.useMemo(() => sceneFromPath(location.pathname), [location.pathname]);
   const currentScene = scope === 'global' ? 'global' : pageScene;
-
-  const context = React.useMemo(() => ({
-    page: location.pathname,
-    scene: currentScene,
-    projectId: localStorage.getItem('projectId'),
-  }), [location.pathname, currentScene]);
 
   return (
     <>
@@ -70,37 +59,10 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = f
         )}
       >
         <div className="ai-assistant-layout">
-          <div className="ai-assistant-recommendation-wrap">
-            {recommendationLoading ? (
-              <div className="ai-recommendation-loading-banner">
-                <div className="ai-recommendation-loading-strip" />
-                <Text type="secondary" className="ai-recommendation-loading-text">
-                  {isRefreshingRecommendations ? '建议更新中...' : '建议加载中...'}
-                </Text>
-              </div>
-            ) : null}
-            <RecommendationPanel
-              type="suggestion"
-              context={context}
-              refreshSignal={recRefreshSignal}
-              className="ai-recommendation-panel"
-              onLoadingChange={(loading) => {
-                setRecommendationLoading(loading);
-                if (loading) {
-                  setIsRefreshingRecommendations(recLoadedRef.current);
-                } else {
-                  recLoadedRef.current = true;
-                  setIsRefreshingRecommendations(false);
-                }
-              }}
-            />
-          </div>
           <div className="ai-assistant-chat-wrap">
             <ChatInterface
               className="ai-chat-interface"
               scene={currentScene}
-              onSessionCreate={() => setRecRefreshSignal((v) => v + 1)}
-              onSessionUpdate={() => setRecRefreshSignal((v) => v + 1)}
             />
           </div>
         </div>

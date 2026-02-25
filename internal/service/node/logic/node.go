@@ -107,7 +107,7 @@ func (l *NodeLogic) CreateNode(ctx context.Context, req v1.CreateNodeReq) (v1.No
 		privateKey = SSHKey.PrivateKey
 	}
 
-	cli, err := client.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	cli, err := client.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey, "")
 	if err != nil {
 		return v1.NodeResp{}, err
 	}

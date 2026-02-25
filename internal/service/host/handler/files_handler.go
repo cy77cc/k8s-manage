@@ -33,11 +33,15 @@ func (h *Handler) withSFTP(c *gin.Context, hostID uint64, fn func(*sftp.Client) 
 	if err != nil {
 		return errors.New("host not found")
 	}
-	privateKey, err := h.loadNodePrivateKey(c, node)
+	privateKey, passphrase, err := h.loadNodePrivateKey(c, node)
 	if err != nil {
 		return err
 	}
-	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	password := strings.TrimSpace(node.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 	if err != nil {
 		return err
 	}

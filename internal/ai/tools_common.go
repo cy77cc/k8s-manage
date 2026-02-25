@@ -200,7 +200,15 @@ func runOnTarget(ctx context.Context, deps PlatformDeps, target, localName strin
 		out, err := runLocalCommand(ctx, 6*time.Second, localName, localArgs...)
 		return out, "local", err
 	}
-	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, "")
+	privateKey, passphrase, err := loadNodePrivateKey(deps, node)
+	if err != nil {
+		return "", "remote_ssh_credential", err
+	}
+	password := strings.TrimSpace(node.SSHPassword)
+	if strings.TrimSpace(privateKey) != "" {
+		password = ""
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
 	if err != nil {
 		return "", "remote_ssh", err
 	}
