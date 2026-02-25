@@ -24,6 +24,7 @@ export interface PaginatedResponse<T> {
 // API服务类
 class ApiService {
   private instance: AxiosInstance;
+  private refreshPromise: Promise<boolean> | null = null;
 
   constructor() {
     this.instance = axios.create({
@@ -57,8 +58,14 @@ class ApiService {
     this.instance.interceptors.response.use(
       (response: AxiosResponse<any>) => {
         const payload = response.data;
+        const originalConfig = response.config as AxiosRequestConfig & { _retry?: boolean };
+        const requestURL = String(originalConfig.url || '');
         // 兼容后端统一结构：{ code, msg/message, data, total }
         if (typeof payload?.code === 'number') {
+          if ((payload.code === 4005 || payload.code === 4006) && !requestURL.includes('/auth/refresh') && !originalConfig._retry) {
+            originalConfig._retry = true;
+            return this.tryRefreshAndRetry(originalConfig);
+          }
           if (payload.code !== 1000 && payload.code !== 200) {
             return Promise.reject(new Error(payload.msg || payload.message || '请求失败'));
           }
@@ -79,6 +86,12 @@ class ApiService {
         return response;
       },
       (error) => {
+        const originalConfig = (error.config || {}) as AxiosRequestConfig & { _retry?: boolean };
+        const requestURL = String(originalConfig.url || '');
+        if (error.response?.status === 401 && !requestURL.includes('/auth/refresh') && !originalConfig._retry) {
+          originalConfig._retry = true;
+          return this.tryRefreshAndRetry(originalConfig);
+        }
         const message = error.response?.data?.message || error.response?.data?.error?.message || error.message || '网络错误';
         return Promise.reject(new Error(message));
       }
@@ -107,6 +120,56 @@ class ApiService {
   async delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
     const response = await this.instance.delete<ApiResponse<T>>(url, config);
     return response.data;
+  }
+
+  private async tryRefreshAndRetry(config: AxiosRequestConfig): Promise<AxiosResponse<any>> {
+    const refreshed = await this.refreshAccessToken();
+    if (!refreshed) {
+      return Promise.reject(new Error('登录已过期，请重新登录'));
+    }
+    const nextConfig: AxiosRequestConfig = {
+      ...config,
+      headers: {
+        ...(config.headers || {}),
+        Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+      },
+    };
+    return this.instance.request<ApiResponse<any>>(nextConfig);
+  }
+
+  private async refreshAccessToken(): Promise<boolean> {
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) {
+      return false;
+    }
+
+    this.refreshPromise = (async () => {
+      try {
+        const response = await this.instance.post<ApiResponse<any>>('/auth/refresh', { refreshToken });
+        const payload = response.data;
+        const token = payload?.data?.accessToken || payload?.data?.token;
+        const nextRefreshToken = payload?.data?.refreshToken;
+        if (!token) {
+          return false;
+        }
+        localStorage.setItem('token', token);
+        if (nextRefreshToken) {
+          localStorage.setItem('refreshToken', nextRefreshToken);
+        }
+        return true;
+      } catch {
+        localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
+        return false;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
   }
 }
 

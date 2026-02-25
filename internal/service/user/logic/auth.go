@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	v1 "github.com/cy77cc/k8s-manage/api/user/v1"
@@ -25,12 +26,8 @@ func (l *UserLogic) Login(ctx context.Context, req v1.LoginReq) (v1.TokenResp, e
 		return v1.TokenResp{}, fmt.Errorf("failed to query user: %w", err)
 	}
 
-	// 2. Verify password (mock implementation)
-	// In production, use bcrypt.CompareHashAndPassword
-
-	encryptPassword, _ := utils.EncryptPassword(req.Password)
-
-	if user.PasswordHash != encryptPassword {
+	// 2. Verify password
+	if !utils.VerifyPassword(req.Password, user.PasswordHash) {
 		return v1.TokenResp{}, xcode.NewErrCode(xcode.PasswordError)
 	}
 
@@ -57,12 +54,23 @@ func (l *UserLogic) Login(ctx context.Context, req v1.LoginReq) (v1.TokenResp, e
 		// Here we'll just log/ignore for now as we don't have logger injected yet
 	}
 
+	roles, permissions, _ := l.loadRolesAndPermissions(ctx, uint64(user.ID))
 	return v1.TokenResp{
 		AccessToken:  token,
 		RefreshToken: refreshToken,
 		Expires:      time.Now().Add(config.CFG.JWT.Expire).Unix(), // Should match config
 		Uid:          uint64(user.ID),
-		Roles:        []string{}, // TODO: Fetch roles
+		Roles:        roles,
+		User: &v1.AuthUser{
+			Id:          uint64(user.ID),
+			Username:    user.Username,
+			Name:        user.Username,
+			Email:       user.Email,
+			Status:      "active",
+			Roles:       roles,
+			Permissions: permissions,
+		},
+		Permissions: permissions,
 	}, nil
 }
 
@@ -78,11 +86,9 @@ func (l *UserLogic) Register(ctx context.Context, req v1.UserCreateReq) (v1.Toke
 	}
 
 	// 2. Create User
-	// In production, use bcrypt.GenerateFromPassword
-
-	encryptPwd, err := utils.EncryptPassword(req.Password)
+	encryptPwd, err := utils.HashPassword(req.Password)
 	if err != nil {
-		return v1.TokenResp{}, err
+		return v1.TokenResp{}, fmt.Errorf("failed to hash password: %w", err)
 	}
 
 	newUser := &model.User{
@@ -93,7 +99,18 @@ func (l *UserLogic) Register(ctx context.Context, req v1.UserCreateReq) (v1.Toke
 		UpdateTime:   time.Now().Unix(),
 	}
 
-	if err := l.userDAO.Create(ctx, newUser); err != nil {
+	if err := l.svcCtx.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(newUser).Error; err != nil {
+			return err
+		}
+		var viewerRole model.Role
+		if err := tx.Where("LOWER(code) = ?", "viewer").First(&viewerRole).Error; err == nil {
+			if err := tx.Create(&model.UserRole{UserID: int64(newUser.ID), RoleID: int64(viewerRole.ID)}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return v1.TokenResp{}, fmt.Errorf("failed to create user: %w", err)
 	}
 
@@ -112,12 +129,23 @@ func (l *UserLogic) Register(ctx context.Context, req v1.UserCreateReq) (v1.Toke
 		return v1.TokenResp{}, xcode.NewErrCode(xcode.CacheError)
 	}
 
+	roles, permissions, _ := l.loadRolesAndPermissions(ctx, uint64(newUser.ID))
 	return v1.TokenResp{
 		AccessToken:  token,
 		RefreshToken: refreshToken,
-		Expires:      time.Now().Add(time.Hour * 24).Unix(),
+		Expires:      time.Now().Add(config.CFG.JWT.Expire).Unix(),
 		Uid:          uint64(newUser.ID),
-		Roles:        []string{},
+		Roles:        roles,
+		User: &v1.AuthUser{
+			Id:          uint64(newUser.ID),
+			Username:    newUser.Username,
+			Name:        newUser.Username,
+			Email:       newUser.Email,
+			Status:      "active",
+			Roles:       roles,
+			Permissions: permissions,
+		},
+		Permissions: permissions,
 	}, nil
 }
 
@@ -155,19 +183,84 @@ func (l *UserLogic) Refresh(ctx context.Context, req v1.RefreshReq) (v1.TokenRes
 		return v1.TokenResp{}, xcode.NewErrCode(xcode.CacheError)
 	}
 
+	roles, permissions, _ := l.loadRolesAndPermissions(ctx, uint64(claims.Uid))
 	return v1.TokenResp{
 		AccessToken:  newToken,
 		RefreshToken: newRefreshToken,
-		Expires:      time.Now().Add(time.Hour * 24).Unix(),
+		Expires:      time.Now().Add(config.CFG.JWT.Expire).Unix(),
 		Uid:          uint64(claims.Uid),
-		Roles:        []string{},
+		Roles:        roles,
+		Permissions:  permissions,
 	}, nil
 }
 
 // 登出
 func (l *UserLogic) Logout(ctx context.Context, req v1.LogoutReq) error {
-	// In a stateless JWT system, logout usually means blacklisting the token.
-	// For now, we just return success as we haven't implemented blacklist.
-	// 用白名单机制
+	if strings.TrimSpace(req.RefreshToken) == "" {
+		return nil
+	}
 	return xcode.FromError(l.whiteListDao.DeleteToken(ctx, req.RefreshToken))
+}
+
+func (l *UserLogic) loadRolesAndPermissions(ctx context.Context, userID uint64) ([]string, []string, error) {
+	roleRows := make([]struct {
+		Code string `gorm:"column:code"`
+	}, 0)
+	if err := l.svcCtx.DB.WithContext(ctx).
+		Table("roles").
+		Select("roles.code").
+		Joins("JOIN user_roles ON user_roles.role_id = roles.id").
+		Where("user_roles.user_id = ?", userID).
+		Scan(&roleRows).Error; err != nil {
+		return nil, nil, err
+	}
+	roles := make([]string, 0, len(roleRows))
+	roleSet := make(map[string]struct{}, len(roleRows))
+	for _, row := range roleRows {
+		code := strings.TrimSpace(row.Code)
+		if code == "" {
+			continue
+		}
+		if _, ok := roleSet[code]; ok {
+			continue
+		}
+		roleSet[code] = struct{}{}
+		roles = append(roles, code)
+	}
+
+	permRows := make([]struct {
+		Code string `gorm:"column:code"`
+	}, 0)
+	if err := l.svcCtx.DB.WithContext(ctx).
+		Table("permissions").
+		Select("permissions.code").
+		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
+		Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").
+		Where("user_roles.user_id = ?", userID).
+		Scan(&permRows).Error; err != nil {
+		return roles, nil, err
+	}
+	permissions := make([]string, 0, len(permRows)+1)
+	permSet := make(map[string]struct{}, len(permRows)+1)
+	for _, row := range permRows {
+		code := strings.TrimSpace(row.Code)
+		if code == "" {
+			continue
+		}
+		if _, ok := permSet[code]; ok {
+			continue
+		}
+		permSet[code] = struct{}{}
+		permissions = append(permissions, code)
+	}
+	for _, roleCode := range roles {
+		if strings.EqualFold(roleCode, "admin") {
+			if _, ok := permSet["*:*"]; !ok {
+				permissions = append(permissions, "*:*")
+			}
+			break
+		}
+	}
+
+	return roles, permissions, nil
 }

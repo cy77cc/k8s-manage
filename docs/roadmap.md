@@ -36,11 +36,11 @@
 | Module | Status | Notes |
 | --- | --- | --- |
 | Frontend Embed Serving | Done | `web/dist` embed + SPA fallback |
-| Auth | In Progress | login/register/refresh/logout + `auth/me` |
+| Auth | In Progress | login/register/refresh/logout + `auth/me`，已补全 roles/permissions 回填与 refreshToken 流程 |
 | Hosts | In Progress | CRUD + action + ssh exec + batch + onboarding token flow + cloud/kvm/credentials mvp |
 | Clusters / K8s | In Progress | list/create/detail + nodes/pods/deployments/services/ingresses/events/logs + deploy preview/apply |
 | Services | In Progress | CRUD + deploy + quota/events/rollback(mvp stub) |
-| RBAC | In Progress | admin 全量放行（含 `*:*`），非 admin 继续走数据库权限 |
+| RBAC | In Progress | admin 全量放行（含 `*:*`）+ users/roles/permissions 列表统一 `data.list/total` + 关联写入事务化 |
 | AI | In Progress | Eino + Ollama(`glm-5:cloud`) + 控制面（capabilities/tools/approvals/executions）+ SSE tool events + typed tool schema hardening + param resolver/retry |
 
 ## 4. API Coverage Matrix (MVP)

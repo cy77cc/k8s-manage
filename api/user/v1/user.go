@@ -118,11 +118,23 @@ type RoleUpdateReq struct {
 }
 
 type TokenResp struct {
-	AccessToken  string   `json:"accessToken"`  // 访问令牌
-	RefreshToken string   `json:"refreshToken"` // 刷新令牌
-	Expires      int64    `json:"expires"`      // 过期时间（秒）
-	Uid          uint64   `json:"uid"`          // 用户ID
-	Roles        []string `json:"roles"`        // 用户角色列表
+	AccessToken  string    `json:"accessToken"`  // 访问令牌
+	RefreshToken string    `json:"refreshToken"` // 刷新令牌
+	Expires      int64     `json:"expires"`      // 过期时间（秒）
+	Uid          uint64    `json:"uid"`          // 用户ID
+	Roles        []string  `json:"roles"`        // 用户角色列表
+	User         *AuthUser `json:"user,omitempty"`
+	Permissions  []string  `json:"permissions,omitempty"`
+}
+
+type AuthUser struct {
+	Id          uint64   `json:"id"`
+	Username    string   `json:"username"`
+	Name        string   `json:"name"`
+	Email       string   `json:"email"`
+	Status      string   `json:"status"`
+	Roles       []string `json:"roles"`
+	Permissions []string `json:"permissions"`
 }
 
 type UserCreateReq struct {

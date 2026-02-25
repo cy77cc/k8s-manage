@@ -389,3 +389,47 @@
 1. 接入阿里云/腾讯云 SDK 的真实实例查询与导入。
 2. 将 KVM 流程切换到 libvirt 执行器并补充任务状态机。
 3. 为密钥管理和云导入补充后端集成测试与 RBAC 细粒度权限码。
+
+## 2026-02-25 (User/Auth/RBAC Contract Completion)
+
+### Scope
+
+- 按既定方案补全用户与认证能力，重点修复 auth/rbac 与前端设置页对接断点。
+
+### Completed
+
+- Auth 后端：
+  - `Login/Register/Refresh` 回填 `roles` 与 `permissions`。
+  - `auth/me` 返回完整用户信息（含角色与权限）。
+  - `logout` 支持空入参容忍。
+- 密码安全：
+  - 新增 `internal/utils/password.go`，统一使用 `bcrypt` hash。
+  - 登录校验支持 `bcrypt` + 旧 hash 兼容校验。
+  - RBAC 创建/更新用户密码改为 `bcrypt`。
+- RBAC 后端：
+  - `users/roles/permissions` 列表接口统一返回 `data.list + data.total`。
+  - 用户与角色关联（`user_roles`）及角色与权限关联（`role_permissions`）改为事务化写入。
+  - `GetUser/GetRole` 回填真实 `roles/permissions`。
+- 前端对接：
+  - `authApi` 新增 `refreshToken` 映射与 `logout()` 调用。
+  - `AuthContext` 登录/注册存储 `refreshToken`，退出时请求后端再清理会话。
+- 迁移：
+  - 新增 `storage/migrations/20260225_000004_user_rbac_baseline.sql`，补齐用户/RBAC基线表结构与基础种子。
+- 文档：
+  - 新增 `docs/fullstack/user-auth-rbac-contract.md`。
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 待本轮执行。
+
+### Known Gaps / Risks
+
+- 新增基线迁移使用 `UNIX_TIMESTAMP()`，当前以 MySQL 为默认目标；跨方言部署前需补充方言兼容迁移。
+- 登录旧密码兼容当前仅校验，不自动回写升级为 bcrypt。
+
+### Next Actions
+
+1. 增加 auth/rbac 接口集成测试（含返回结构断言）。
+2. 增加旧密码登录后自动 rehash 的可选开关。
+3. 清理 `internal/service/user/handler/{roles,permissions,rbac}.go` 空壳文件或补齐实现。

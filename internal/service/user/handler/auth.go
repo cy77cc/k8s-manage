@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"errors"
+	"io"
+
 	v1 "github.com/cy77cc/k8s-manage/api/user/v1"
 	"github.com/cy77cc/k8s-manage/internal/response"
 	userLogic "github.com/cy77cc/k8s-manage/internal/service/user/logic"
@@ -95,8 +98,8 @@ func (u *UserHandler) Refresh(c *gin.Context) {
 // @Router /auth/logout [post]
 func (u *UserHandler) Logout(c *gin.Context) {
 	var req v1.LogoutReq
-	err := c.ShouldBind(&req)
-	if err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil && !errors.Is(err, io.EOF) {
 		response.Response(c, nil, xcode.NewErrCode(xcode.ErrInvalidParam))
 		return
 	}

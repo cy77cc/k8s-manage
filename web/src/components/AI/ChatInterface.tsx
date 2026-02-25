@@ -26,6 +26,28 @@ const renderMarkdown = (content: string) => (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
+        table({ children }) {
+          return (
+            <div className="ai-markdown-table-wrap">
+              <table className="ai-markdown-table">{children}</table>
+            </div>
+          );
+        },
+        thead({ children }) {
+          return <thead className="ai-markdown-thead">{children}</thead>;
+        },
+        tbody({ children }) {
+          return <tbody className="ai-markdown-tbody">{children}</tbody>;
+        },
+        tr({ children }) {
+          return <tr className="ai-markdown-tr">{children}</tr>;
+        },
+        th({ children }) {
+          return <th className="ai-markdown-th">{children}</th>;
+        },
+        td({ children }) {
+          return <td className="ai-markdown-td">{children}</td>;
+        },
         code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '');
           const codeText = String(children).replace(/\n$/, '');

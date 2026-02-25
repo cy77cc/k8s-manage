@@ -25,6 +25,7 @@ export interface RegisterParams {
 
 export interface AuthPayload {
   token: string;
+  refreshToken?: string;
   user: AuthUser;
   permissions: string[];
 }
@@ -33,6 +34,7 @@ export const authApi = {
   async login(data: LoginParams): Promise<ApiResponse<AuthPayload>> {
     const res = await apiService.post<any>('/auth/login', data);
     const token = res.data?.token || res.data?.accessToken || '';
+    const refreshToken = res.data?.refreshToken || '';
     const fallbackUser: AuthUser = {
       id: Number(res.data?.uid || 0),
       username: data.username,
@@ -52,6 +54,7 @@ export const authApi = {
       ...res,
       data: {
         token,
+        refreshToken,
         user,
         permissions: res.data?.permissions || user.permissions || [],
       },
@@ -61,6 +64,7 @@ export const authApi = {
   async register(data: RegisterParams): Promise<ApiResponse<AuthPayload>> {
     const res = await apiService.post<any>('/auth/register', data);
     const token = res.data?.token || res.data?.accessToken || '';
+    const refreshToken = res.data?.refreshToken || '';
     const user: AuthUser = {
       id: Number(res.data?.uid || 0),
       username: data.username,
@@ -74,6 +78,7 @@ export const authApi = {
       ...res,
       data: {
         token,
+        refreshToken,
         user,
         permissions: res.data?.permissions || [],
       },
@@ -94,5 +99,9 @@ export const authApi = {
         permissions: res.data?.permissions || [],
       },
     };
+  },
+
+  async logout(refreshToken?: string): Promise<ApiResponse<void>> {
+    return apiService.post('/auth/logout', refreshToken ? { refreshToken } : {});
   },
 };

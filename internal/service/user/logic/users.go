@@ -63,13 +63,18 @@ func (l *UserLogic) GetMe(ctx context.Context, uid any) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
+	roles, permissions, err := l.loadRolesAndPermissions(ctx, uint64(user.ID))
+	if err != nil {
+		roles = []string{}
+		permissions = []string{}
+	}
 	return map[string]any{
 		"id":          user.ID,
 		"username":    user.Username,
 		"name":        user.Username,
 		"email":       user.Email,
 		"status":      "active",
-		"roles":       []string{},
-		"permissions": []string{},
+		"roles":       roles,
+		"permissions": permissions,
 	}, nil
 }

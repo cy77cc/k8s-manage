@@ -37,6 +37,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const clearSession = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
     localStorage.removeItem('permissions');
     setToken(null);
@@ -58,15 +59,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (payload: LoginParams) => {
     const res = await authApi.login(payload);
+    if (res.data.refreshToken) {
+      localStorage.setItem('refreshToken', res.data.refreshToken);
+    }
     persistSession(res.data.token, res.data.user, res.data.permissions);
   };
 
   const register = async (payload: RegisterParams) => {
     const res = await authApi.register(payload);
+    if (res.data.refreshToken) {
+      localStorage.setItem('refreshToken', res.data.refreshToken);
+    }
     persistSession(res.data.token, res.data.user, res.data.permissions);
   };
 
   const logout = () => {
+    const refreshToken = localStorage.getItem('refreshToken') || undefined;
+    void authApi.logout(refreshToken).catch(() => undefined);
     clearSession();
   };
 
