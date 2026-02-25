@@ -39,7 +39,7 @@
 | Auth | In Progress | login/register/refresh/logout + `auth/me`，已补全 roles/permissions 回填与 refreshToken 流程 |
 | Hosts | In Progress | CRUD + action + ssh exec + batch + onboarding token flow + cloud/kvm/credentials mvp |
 | Clusters / K8s | In Progress | Phase-1新增 namespaces/bindings、rollouts(argo)、hpa、quota/limit-range、prod审批门禁 |
-| Services | In Progress | 新增 `standard/custom` 配置模式、`k8s/compose` 实时渲染预览、Helm 导入/渲染/部署首期支持、`service:*` 权限码落地 |
+| Services | In Progress | Service Studio(双栏) + template vars(`{{var}}`) + revisions + env variable sets + deploy target + release records + k8s deploy preview/apply |
 | RBAC | In Progress | admin 全量放行（含 `*:*`）+ users/roles/permissions 列表统一 `data.list/total` + 关联写入事务化 |
 | AI | In Progress | Eino + Ollama(`glm-5:cloud`) + 控制面（capabilities/tools/approvals/executions）+ SSE tool events + typed tool schema hardening + param resolver/retry |
 

@@ -1,9 +1,9 @@
 import React from 'react';
-import { Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Typography, message } from 'antd';
-import { ArrowLeftOutlined, SwapOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Tabs, Tag, Typography, message } from 'antd';
+import { ArrowLeftOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { Api } from '../../api';
-import type { LabelKV, StandardServiceConfig } from '../../api/modules/services';
+import type { LabelKV, StandardServiceConfig, TemplateVar } from '../../api/modules/services';
 
 const { Text } = Typography;
 
@@ -12,19 +12,15 @@ const ServiceProvisionPage: React.FC = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = React.useState(false);
   const [previewing, setPreviewing] = React.useState(false);
-  const [previewYAML, setPreviewYAML] = React.useState('');
-  const [diagnostics, setDiagnostics] = React.useState<Array<{ level: string; code: string; message: string }>>([]);
+  const [activeTarget, setActiveTarget] = React.useState<'k8s' | 'compose' | 'helm'>('k8s');
+  const [previewByTarget, setPreviewByTarget] = React.useState<Record<string, string>>({});
+  const [diagnosticsByTarget, setDiagnosticsByTarget] = React.useState<Record<string, Array<{ level: string; code: string; message: string }>>>({});
+  const [detectedVars, setDetectedVars] = React.useState<TemplateVar[]>([]);
+  const [unresolvedVars, setUnresolvedVars] = React.useState<string[]>([]);
+  const [varValues, setVarValues] = React.useState<Record<string, string>>({});
 
   const mode = Form.useWatch('config_mode', form) || 'standard';
-  const target = Form.useWatch('render_target', form) || 'k8s';
-  const watchName = Form.useWatch('name', form);
-  const watchImage = Form.useWatch('image', form);
-  const watchReplicas = Form.useWatch('replicas', form);
-  const watchServicePort = Form.useWatch('service_port', form);
-  const watchContainerPort = Form.useWatch('container_port', form);
-  const watchCPU = Form.useWatch('cpu', form);
-  const watchMemory = Form.useWatch('memory', form);
-  const watchCustomYAML = Form.useWatch('custom_yaml', form);
+  const valuesSnapshot = Form.useWatch([], form);
 
   const toLabels = (raw: string[]): LabelKV[] =>
     (raw || [])
@@ -55,37 +51,46 @@ const ServiceProvisionPage: React.FC = () => {
     },
   });
 
-  const refreshPreview = async () => {
+  const refreshPreview = React.useCallback(async () => {
     const values = form.getFieldsValue(true);
     if (!values.name) {
       return;
     }
     try {
       setPreviewing(true);
-      const res = await Api.services.preview({
-        mode: values.config_mode,
-        target: values.render_target,
-        service_name: values.name,
-        service_type: values.service_type,
-        standard_config: values.config_mode === 'standard' ? buildStandardConfig(values) : undefined,
-        custom_yaml: values.config_mode === 'custom' ? values.custom_yaml : undefined,
-      });
-      setPreviewYAML(res.data.rendered_yaml || '');
-      setDiagnostics(res.data.diagnostics || []);
+      const targets: Array<'k8s' | 'compose'> = ['k8s', 'compose'];
+      const nextPreview: Record<string, string> = {};
+      const nextDiag: Record<string, Array<{ level: string; code: string; message: string }>> = {};
+      for (const t of targets) {
+        const res = await Api.services.preview({
+          mode: values.config_mode,
+          target: t,
+          service_name: values.name,
+          service_type: values.service_type,
+          standard_config: values.config_mode === 'standard' ? buildStandardConfig(values) : undefined,
+          custom_yaml: values.config_mode === 'custom' ? values.custom_yaml : undefined,
+          variables: varValues,
+        });
+        nextPreview[t] = res.data.resolved_yaml || res.data.rendered_yaml || '';
+        nextDiag[t] = res.data.diagnostics || [];
+        setDetectedVars(res.data.detected_vars || []);
+        setUnresolvedVars(res.data.unresolved_vars || []);
+      }
+      setPreviewByTarget(nextPreview);
+      setDiagnosticsByTarget(nextDiag);
     } catch (err) {
-      setPreviewYAML('');
       message.error(err instanceof Error ? err.message : '预览失败');
     } finally {
       setPreviewing(false);
     }
-  };
+  }, [form, varValues]);
 
   React.useEffect(() => {
     const timer = setTimeout(() => {
       void refreshPreview();
-    }, 350);
+    }, 300);
     return () => clearTimeout(timer);
-  }, [mode, target, watchName, watchImage, watchReplicas, watchServicePort, watchContainerPort, watchCPU, watchMemory, watchCustomYAML]);
+  }, [valuesSnapshot, refreshPreview]);
 
   const transformToCustom = async () => {
     const values = await form.validateFields(['name', 'service_type', 'render_target', 'image']);
@@ -97,14 +102,14 @@ const ServiceProvisionPage: React.FC = () => {
       service_type: values.service_type,
     });
     form.setFieldsValue({ config_mode: 'custom', custom_yaml: res.data.custom_yaml });
-    setPreviewYAML(res.data.custom_yaml);
+    setDetectedVars(res.data.detected_vars || []);
     message.success('已转换为自定义 YAML');
   };
 
   const onFinish = async (values: any) => {
     setLoading(true);
     try {
-      await Api.services.create({
+      const created = await Api.services.create({
         project_id: Number(values.project_id || localStorage.getItem('projectId') || 1),
         team_id: Number(values.team_id || localStorage.getItem('teamId') || 1),
         name: values.name,
@@ -121,8 +126,15 @@ const ServiceProvisionPage: React.FC = () => {
         source_template_version: 'v1',
         status: 'draft',
       });
+      if (Object.keys(varValues).length > 0 && values.env) {
+        await Api.services.upsertVariableValues(String(created.data.id), {
+          env: values.env,
+          values: varValues,
+          secret_keys: [],
+        });
+      }
       message.success('服务创建成功');
-      navigate('/services');
+      navigate(`/services/${created.data.id}`);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '创建失败');
     } finally {
@@ -131,7 +143,7 @@ const ServiceProvisionPage: React.FC = () => {
   };
 
   return (
-    <Card title="创建服务" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/services')}>返回</Button>}>
+    <Card title="服务工作台（Studio）" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/services')}>返回</Button>}>
       <Form
         form={form}
         layout="vertical"
@@ -154,62 +166,97 @@ const ServiceProvisionPage: React.FC = () => {
         }}
       >
         <Row gutter={16}>
-          <Col span={12}><Form.Item label="项目ID" name="project_id" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-          <Col span={12}><Form.Item label="团队ID" name="team_id" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-        </Row>
-        <Row gutter={16}>
-          <Col span={12}><Form.Item label="服务名" name="name" rules={[{ required: true }]}><Input placeholder="user-service" /></Form.Item></Col>
-          <Col span={12}><Form.Item label="负责人" name="owner" rules={[{ required: true }]}><Input /></Form.Item></Col>
-        </Row>
-        <Row gutter={16}>
-          <Col span={6}><Form.Item label="环境" name="env"><Select options={[{ value: 'development' }, { value: 'staging' }, { value: 'production' }]} /></Form.Item></Col>
-          <Col span={6}><Form.Item label="运行时" name="runtime_type"><Select options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} /></Form.Item></Col>
-          <Col span={6}><Form.Item label="配置模式" name="config_mode"><Select options={[{ value: 'standard', label: '通用配置' }, { value: 'custom', label: '自定义配置' }]} /></Form.Item></Col>
-          <Col span={6}><Form.Item label="渲染目标" name="render_target"><Select options={[{ value: 'k8s' }, { value: 'compose' }]} /></Form.Item></Col>
-        </Row>
-        <Row gutter={16}>
-          <Col span={8}><Form.Item label="服务分类" name="service_kind"><Input placeholder="web/backend/job" /></Form.Item></Col>
-          <Col span={8}><Form.Item label="服务类型" name="service_type"><Select options={[{ value: 'stateless' }, { value: 'stateful' }]} /></Form.Item></Col>
-          <Col span={8}><Form.Item label="标签(key=value)" name="labels"><Select mode="tags" placeholder="app=user,tier=backend" /></Form.Item></Col>
-        </Row>
+          <Col span={12}>
+            <Card size="small" title="编辑区">
+              <Row gutter={12}>
+                <Col span={12}><Form.Item label="项目ID" name="project_id" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+                <Col span={12}><Form.Item label="团队ID" name="team_id" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+              </Row>
+              <Row gutter={12}>
+                <Col span={12}><Form.Item label="服务名" name="name" rules={[{ required: true }]}><Input placeholder="user-service" /></Form.Item></Col>
+                <Col span={12}><Form.Item label="负责人" name="owner" rules={[{ required: true }]}><Input /></Form.Item></Col>
+              </Row>
+              <Row gutter={12}>
+                <Col span={8}><Form.Item label="环境" name="env"><Select options={[{ value: 'development' }, { value: 'staging' }, { value: 'production' }]} /></Form.Item></Col>
+                <Col span={8}><Form.Item label="运行时" name="runtime_type"><Select options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} /></Form.Item></Col>
+                <Col span={8}><Form.Item label="配置模式" name="config_mode"><Select options={[{ value: 'standard', label: '通用配置' }, { value: 'custom', label: '自定义配置' }]} /></Form.Item></Col>
+              </Row>
+              <Row gutter={12}>
+                <Col span={8}><Form.Item label="服务分类" name="service_kind"><Input placeholder="web/backend/job" /></Form.Item></Col>
+                <Col span={8}><Form.Item label="服务类型" name="service_type"><Select options={[{ value: 'stateless' }, { value: 'stateful' }]} /></Form.Item></Col>
+                <Col span={8}><Form.Item label="标签(key=value)" name="labels"><Select mode="tags" placeholder="app=user,tier=backend" /></Form.Item></Col>
+              </Row>
 
-        {mode === 'standard' ? (
-          <>
-            <Row gutter={16}>
-              <Col span={12}><Form.Item label="镜像" name="image" rules={[{ required: true }]}><Input placeholder="ghcr.io/org/app:v1" /></Form.Item></Col>
-              <Col span={6}><Form.Item label="副本" name="replicas"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-              <Col span={6}><Form.Item label="环境变量(KEY=VALUE)" name="envs"><Select mode="tags" /></Form.Item></Col>
-            </Row>
-            <Row gutter={16}>
-              <Col span={6}><Form.Item label="Service Port" name="service_port"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-              <Col span={6}><Form.Item label="Container Port" name="container_port"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-              <Col span={6}><Form.Item label="CPU" name="cpu"><Input placeholder="500m" /></Form.Item></Col>
-              <Col span={6}><Form.Item label="Memory" name="memory"><Input placeholder="512Mi" /></Form.Item></Col>
-            </Row>
-            <Button icon={<SwapOutlined />} onClick={transformToCustom}>通用配置转自定义 YAML</Button>
-          </>
-        ) : (
-          <Form.Item label="自定义 YAML" name="custom_yaml" rules={[{ required: true, message: '请输入 YAML' }]}>
-            <Input.TextArea rows={14} placeholder="apiVersion: apps/v1\nkind: Deployment\n..." />
-          </Form.Item>
-        )}
+              {mode === 'standard' ? (
+                <>
+                  <Row gutter={12}>
+                    <Col span={12}><Form.Item label="镜像" name="image" rules={[{ required: true }]}><Input placeholder="ghcr.io/org/app:v1" /></Form.Item></Col>
+                    <Col span={6}><Form.Item label="副本" name="replicas"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+                    <Col span={6}><Form.Item label="环境变量(KEY=VALUE)" name="envs"><Select mode="tags" /></Form.Item></Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={6}><Form.Item label="Service Port" name="service_port"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+                    <Col span={6}><Form.Item label="Container Port" name="container_port"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+                    <Col span={6}><Form.Item label="CPU" name="cpu"><Input placeholder="500m" /></Form.Item></Col>
+                    <Col span={6}><Form.Item label="Memory" name="memory"><Input placeholder="512Mi" /></Form.Item></Col>
+                  </Row>
+                  <Button icon={<SwapOutlined />} onClick={transformToCustom}>通用配置转自定义 YAML</Button>
+                </>
+              ) : (
+                <Form.Item label="自定义 YAML" name="custom_yaml" rules={[{ required: true, message: '请输入 YAML' }]}>
+                  <Input.TextArea rows={14} placeholder="apiVersion: apps/v1\nkind: Deployment\n..." />
+                </Form.Item>
+              )}
 
-        <Card size="small" title={previewing ? '实时预览（渲染中）' : '实时预览（渲染结果）'} style={{ marginTop: 16 }}>
-          <pre style={{ maxHeight: 320, overflow: 'auto', marginBottom: 8 }}>{previewYAML || '# 暂无预览'}</pre>
-          {diagnostics.length > 0 ? (
-            <Space direction="vertical" size={2}>
-              {diagnostics.map((d, idx) => (
-                <Text key={`${d.code}-${idx}`} type={d.level === 'error' ? 'danger' : 'secondary'}>
-                  [{d.level}] {d.message}
-                </Text>
-              ))}
-            </Space>
-          ) : null}
-        </Card>
+              <Card size="small" title="模板变量（部署时注入）" style={{ marginTop: 12 }}>
+                {detectedVars.length === 0 ? <Text type="secondary">未检测到模板变量（{'{{var}}'}）</Text> : null}
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  {detectedVars.map((item) => (
+                    <Input
+                      key={item.name}
+                      addonBefore={<span>{item.name}{item.required ? <Tag color="red" style={{ marginLeft: 8 }}>required</Tag> : null}</span>}
+                      placeholder={item.default || '变量值'}
+                      value={varValues[item.name] || ''}
+                      onChange={(e) => setVarValues((prev) => ({ ...prev, [item.name]: e.target.value }))}
+                    />
+                  ))}
+                </Space>
+                {unresolvedVars.length > 0 ? (
+                  <Alert type="warning" showIcon style={{ marginTop: 8 }} message={`未解析变量: ${unresolvedVars.join(', ')}`} />
+                ) : null}
+              </Card>
 
-        <div style={{ marginTop: 16 }}>
-          <Button type="primary" htmlType="submit" loading={loading}>创建服务</Button>
-        </div>
+              <div style={{ marginTop: 16 }}>
+                <Space>
+                  <Button type="primary" icon={<SaveOutlined />} htmlType="submit" loading={loading}>创建服务</Button>
+                  <Button onClick={() => void refreshPreview()} loading={previewing}>刷新预览</Button>
+                </Space>
+              </div>
+            </Card>
+          </Col>
+          <Col span={12}>
+            <Card size="small" title={previewing ? '实时渲染（更新中）' : '实时渲染（右侧预览）'}>
+              <Tabs
+                activeKey={activeTarget}
+                onChange={(k) => setActiveTarget(k as 'k8s' | 'compose' | 'helm')}
+                items={[
+                  { key: 'k8s', label: 'K8s YAML', children: <pre style={{ maxHeight: 640, overflow: 'auto' }}>{previewByTarget.k8s || '# 暂无输出'}</pre> },
+                  { key: 'compose', label: 'Compose YAML', children: <pre style={{ maxHeight: 640, overflow: 'auto' }}>{previewByTarget.compose || '# 暂无输出'}</pre> },
+                  { key: 'helm', label: 'Helm', children: <pre style={{ maxHeight: 640, overflow: 'auto' }}>{previewByTarget.k8s || '# Helm 首期复用 K8s 渲染预览'}</pre> },
+                ]}
+              />
+              {(diagnosticsByTarget[activeTarget] || []).length > 0 ? (
+                <Space direction="vertical" size={2}>
+                  {(diagnosticsByTarget[activeTarget] || []).map((d, idx) => (
+                    <Text key={`${d.code}-${idx}`} type={d.level === 'error' ? 'danger' : 'secondary'}>
+                      [{d.level}] {d.message}
+                    </Text>
+                  ))}
+                </Space>
+              ) : null}
+            </Card>
+          </Col>
+        </Row>
       </Form>
     </Card>
   );

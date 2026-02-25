@@ -592,3 +592,56 @@
 
 1. 给 `chat_handler` 增加集成级 SSE 事件序列测试（包含 heartbeat + tool 流）。
 2. 为前端 trace 增加“按 turn_id 聚合摘要”视图，减少长对话轨迹噪音。
+
+## 2026-02-25 (Service Studio Phase-1: Overleaf UI + Template Vars + Cluster-linked Deploy)
+
+### Scope
+
+- 按“服务管理重构计划 Phase-1”完成服务工作台核心闭环：双栏 Studio、模板变量、版本与发布联动、默认部署目标。
+
+### Completed
+
+- 迁移与模型：
+  - 新增 migration：`storage/migrations/20260225_000007_service_studio_and_release.sql`
+  - 新增模型：`ServiceRevision`, `ServiceVariableSet`, `ServiceDeployTarget`, `ServiceReleaseRecord`
+  - 扩展 `services`：`last_revision_id`, `default_target_id`, `template_engine_version`
+- 后端 service API 增强：
+  - 新增：
+    - `POST /services/variables/extract`
+    - `GET /services/:id/variables/schema`
+    - `GET/PUT /services/:id/variables/values`
+    - `GET/POST /services/:id/revisions`
+    - `PUT /services/:id/deploy-target`
+    - `GET /services/:id/releases`
+    - `POST /services/:id/deploy/preview`
+  - 增强：
+    - `POST /services/render/preview` 支持 `variables/validate_only`，返回 `resolved_yaml/unresolved_vars/detected_vars`
+    - `POST /services/:id/deploy` 支持 env/namespace/variables，返回 `release_record_id`
+- 模板变量引擎：
+  - 语法：`{{var}}` 与 `{{var|default:value}}`
+  - 变量提取、注入、未解析变量检测（unresolved）落地。
+- 前端：
+  - `ServiceProvisionPage` 重构为 Overleaf 风格双栏 Studio（左编辑右渲染，多 target 预览）。
+  - 增加模板变量面板（实时输入变量值并影响预览）。
+  - `ServiceDetailPage` 增加：
+    - deploy target 配置（cluster/namespace）
+    - env variable set 管理
+    - deploy preview/apply
+    - revisions & release records 标签页
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+### Known Gaps / Risks
+
+- compose 部署仍是占位 accepted 状态，尚未接入主机执行器。
+- deploy preflight 当前为轻量校验（target+变量解析），未包含完整资源冲突探测。
+- helm 部署沿用现有 MVP 路径，尚未完成 Helm SDK 全链路治理。
+
+### Next Actions
+
+1. 在 deploy preview 增加 cluster namespace existence 与资源冲突检查。
+2. 为服务变量 secret_keys 接入脱敏存储（至少 AES 加密存储）。
+3. 增加 service studio 的接口级与 e2e 用例（revisions/variables/releases）。

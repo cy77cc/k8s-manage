@@ -52,6 +52,8 @@ type RenderPreviewReq struct {
 	CustomYAML     string                 `json:"custom_yaml"`
 	ServiceName    string                 `json:"service_name"`
 	ServiceType    string                 `json:"service_type"` // stateless/stateful
+	Variables      map[string]string      `json:"variables"`
+	ValidateOnly   bool                   `json:"validate_only"`
 }
 
 type RenderDiagnostic struct {
@@ -62,7 +64,11 @@ type RenderDiagnostic struct {
 
 type RenderPreviewResp struct {
 	RenderedYAML     string             `json:"rendered_yaml"`
+	ResolvedYAML     string             `json:"resolved_yaml,omitempty"`
 	Diagnostics      []RenderDiagnostic `json:"diagnostics"`
+	UnresolvedVars   []string           `json:"unresolved_vars,omitempty"`
+	DetectedVars     []TemplateVar      `json:"detected_vars,omitempty"`
+	ASTSummary       map[string]any     `json:"ast_summary,omitempty"`
 	NormalizedConfig any                `json:"normalized_config,omitempty"`
 }
 
@@ -74,8 +80,9 @@ type TransformReq struct {
 }
 
 type TransformResp struct {
-	CustomYAML string `json:"custom_yaml"`
-	SourceHash string `json:"source_hash"`
+	CustomYAML   string        `json:"custom_yaml"`
+	SourceHash   string        `json:"source_hash"`
+	DetectedVars []TemplateVar `json:"detected_vars,omitempty"`
 }
 
 type ServiceCreateReq struct {
@@ -107,22 +114,25 @@ type ServiceCreateReq struct {
 }
 
 type ServiceListItem struct {
-	ID             uint                   `json:"id"`
-	ProjectID      uint                   `json:"project_id"`
-	TeamID         uint                   `json:"team_id"`
-	Name           string                 `json:"name"`
-	Env            string                 `json:"env"`
-	Owner          string                 `json:"owner"`
-	RuntimeType    string                 `json:"runtime_type"`
-	ConfigMode     string                 `json:"config_mode"`
-	ServiceKind    string                 `json:"service_kind"`
-	Status         string                 `json:"status"`
-	Labels         []LabelKV              `json:"labels"`
-	StandardConfig *StandardServiceConfig `json:"standard_config,omitempty"`
-	CustomYAML     string                 `json:"custom_yaml,omitempty"`
-	RenderedYAML   string                 `json:"rendered_yaml,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	ID                    uint                   `json:"id"`
+	ProjectID             uint                   `json:"project_id"`
+	TeamID                uint                   `json:"team_id"`
+	Name                  string                 `json:"name"`
+	Env                   string                 `json:"env"`
+	Owner                 string                 `json:"owner"`
+	RuntimeType           string                 `json:"runtime_type"`
+	ConfigMode            string                 `json:"config_mode"`
+	ServiceKind           string                 `json:"service_kind"`
+	Status                string                 `json:"status"`
+	Labels                []LabelKV              `json:"labels"`
+	StandardConfig        *StandardServiceConfig `json:"standard_config,omitempty"`
+	CustomYAML            string                 `json:"custom_yaml,omitempty"`
+	RenderedYAML          string                 `json:"rendered_yaml,omitempty"`
+	LastRevisionID        uint                   `json:"last_revision_id"`
+	DefaultTargetID       uint                   `json:"default_target_id"`
+	TemplateEngineVersion string                 `json:"template_engine_version,omitempty"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
 }
 
 type HelmImportReq struct {
@@ -143,7 +153,107 @@ type HelmRenderReq struct {
 }
 
 type DeployReq struct {
-	ClusterID     uint   `json:"cluster_id"`
-	DeployTarget  string `json:"deploy_target"` // k8s/compose/helm
-	ApprovalToken string `json:"approval_token"`
+	ClusterID     uint              `json:"cluster_id"`
+	Namespace     string            `json:"namespace"`
+	Env           string            `json:"env"`
+	VariablesRef  string            `json:"variables_ref"`
+	Variables     map[string]string `json:"variables"`
+	DeployTarget  string            `json:"deploy_target"` // k8s/compose/helm
+	ApprovalToken string            `json:"approval_token"`
+}
+
+type TemplateVar struct {
+	Name        string `json:"name"`
+	Required    bool   `json:"required"`
+	Default     string `json:"default,omitempty"`
+	Description string `json:"description,omitempty"`
+	SourcePath  string `json:"source_path,omitempty"`
+}
+
+type VariableExtractReq struct {
+	StandardConfig *StandardServiceConfig `json:"standard_config"`
+	CustomYAML     string                 `json:"custom_yaml"`
+	RenderTarget   string                 `json:"render_target"`
+	ServiceName    string                 `json:"service_name"`
+	ServiceType    string                 `json:"service_type"`
+}
+
+type VariableExtractResp struct {
+	Vars []TemplateVar `json:"vars"`
+}
+
+type VariableValuesUpsertReq struct {
+	Env        string            `json:"env"`
+	Values     map[string]string `json:"values"`
+	SecretKeys []string          `json:"secret_keys"`
+}
+
+type VariableValuesResp struct {
+	ServiceID  uint              `json:"service_id"`
+	Env        string            `json:"env"`
+	Values     map[string]string `json:"values"`
+	SecretKeys []string          `json:"secret_keys,omitempty"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+}
+
+type ServiceRevisionItem struct {
+	ID             uint          `json:"id"`
+	ServiceID      uint          `json:"service_id"`
+	RevisionNo     uint          `json:"revision_no"`
+	ConfigMode     string        `json:"config_mode"`
+	RenderTarget   string        `json:"render_target"`
+	VariableSchema []TemplateVar `json:"variable_schema,omitempty"`
+	CreatedBy      uint          `json:"created_by"`
+	CreatedAt      time.Time     `json:"created_at"`
+}
+
+type RevisionCreateReq struct {
+	ServiceID      uint                   `json:"service_id"`
+	ConfigMode     string                 `json:"config_mode"`
+	RenderTarget   string                 `json:"render_target"`
+	StandardConfig *StandardServiceConfig `json:"standard_config"`
+	CustomYAML     string                 `json:"custom_yaml"`
+	VariableSchema []TemplateVar          `json:"variable_schema"`
+}
+
+type DeployTargetUpsertReq struct {
+	ClusterID    uint           `json:"cluster_id"`
+	Namespace    string         `json:"namespace"`
+	DeployTarget string         `json:"deploy_target"`
+	Policy       map[string]any `json:"policy"`
+}
+
+type DeployTargetResp struct {
+	ID           uint           `json:"id"`
+	ServiceID    uint           `json:"service_id"`
+	ClusterID    uint           `json:"cluster_id"`
+	Namespace    string         `json:"namespace"`
+	DeployTarget string         `json:"deploy_target"`
+	Policy       map[string]any `json:"policy,omitempty"`
+	IsDefault    bool           `json:"is_default"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
+type DeployPreviewResp struct {
+	ResolvedYAML string             `json:"resolved_yaml"`
+	Checks       []RenderDiagnostic `json:"checks"`
+	Warnings     []RenderDiagnostic `json:"warnings"`
+	Target       DeployTargetResp   `json:"target"`
+}
+
+type DeployResp struct {
+	ReleaseRecordID uint `json:"release_record_id"`
+}
+
+type ReleaseRecordItem struct {
+	ID           uint      `json:"id"`
+	ServiceID    uint      `json:"service_id"`
+	RevisionID   uint      `json:"revision_id"`
+	ClusterID    uint      `json:"cluster_id"`
+	Namespace    string    `json:"namespace"`
+	Env          string    `json:"env"`
+	DeployTarget string    `json:"deploy_target"`
+	Status       string    `json:"status"`
+	Error        string    `json:"error,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }

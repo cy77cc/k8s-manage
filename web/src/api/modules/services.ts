@@ -44,8 +44,62 @@ export interface ServiceItem {
   standardConfig?: StandardServiceConfig;
   customYaml?: string;
   renderedYaml?: string;
+  lastRevisionId?: string;
+  defaultTargetId?: string;
+  templateEngineVersion?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface TemplateVar {
+  name: string;
+  required: boolean;
+  default?: string;
+  description?: string;
+  source_path?: string;
+}
+
+export interface VariableValueSet {
+  service_id: number;
+  env: string;
+  values: Record<string, string>;
+  secret_keys?: string[];
+  updated_at?: string;
+}
+
+export interface ServiceRevision {
+  id: number;
+  service_id: number;
+  revision_no: number;
+  config_mode: ServiceConfigMode;
+  render_target: 'k8s' | 'compose' | 'helm';
+  variable_schema?: TemplateVar[];
+  created_by: number;
+  created_at: string;
+}
+
+export interface ServiceDeployTarget {
+  id: number;
+  service_id: number;
+  cluster_id: number;
+  namespace: string;
+  deploy_target: ServiceRuntimeType;
+  policy?: Record<string, any>;
+  is_default: boolean;
+  updated_at: string;
+}
+
+export interface ServiceReleaseRecord {
+  id: number;
+  service_id: number;
+  revision_id: number;
+  cluster_id: number;
+  namespace: string;
+  env: string;
+  deploy_target: ServiceRuntimeType;
+  status: string;
+  error?: string;
+  created_at: string;
 }
 
 export interface ServiceEvent {
@@ -100,10 +154,16 @@ export interface RenderPreviewReq {
   service_type: 'stateless' | 'stateful';
   standard_config?: StandardServiceConfig;
   custom_yaml?: string;
+  variables?: Record<string, string>;
+  validate_only?: boolean;
 }
 
 export interface RenderPreviewResp {
   rendered_yaml: string;
+  resolved_yaml?: string;
+  unresolved_vars?: string[];
+  detected_vars?: TemplateVar[];
+  ast_summary?: Record<string, any>;
   diagnostics: Array<{ level: string; code: string; message: string }>;
   normalized_config?: StandardServiceConfig;
 }
@@ -123,6 +183,9 @@ const mapService = (item: any): ServiceItem => ({
   standardConfig: item.standard_config,
   customYaml: item.custom_yaml,
   renderedYaml: item.rendered_yaml || item.yaml_content,
+  lastRevisionId: item.last_revision_id ? String(item.last_revision_id) : '',
+  defaultTargetId: item.default_target_id ? String(item.default_target_id) : '',
+  templateEngineVersion: item.template_engine_version || 'v1',
   createdAt: item.created_at,
   updatedAt: item.updated_at,
 });
@@ -132,7 +195,7 @@ export const serviceApi = {
     return apiService.post('/services/render/preview', data);
   },
 
-  async transform(data: { standard_config: StandardServiceConfig; target: 'k8s' | 'compose'; service_name: string; service_type: 'stateless' | 'stateful' }): Promise<ApiResponse<{ custom_yaml: string; source_hash: string }>> {
+  async transform(data: { standard_config: StandardServiceConfig; target: 'k8s' | 'compose'; service_name: string; service_type: 'stateless' | 'stateful' }): Promise<ApiResponse<{ custom_yaml: string; source_hash: string; detected_vars?: TemplateVar[] }>> {
     return apiService.post('/services/transform', data);
   },
 
@@ -180,8 +243,44 @@ export const serviceApi = {
     return apiService.delete(`/services/${id}`);
   },
 
-  async deploy(id: string, payload?: { deploy_target?: ServiceRuntimeType; cluster_id?: number; approval_token?: string }): Promise<ApiResponse<void>> {
+  async deploy(id: string, payload?: { deploy_target?: ServiceRuntimeType; cluster_id?: number; namespace?: string; env?: string; variables?: Record<string, string>; approval_token?: string }): Promise<ApiResponse<{ release_record_id: number }>> {
     return apiService.post(`/services/${id}/deploy`, payload || {});
+  },
+
+  async deployPreview(id: string, payload: { env?: string; cluster_id?: number; namespace?: string; deploy_target?: ServiceRuntimeType; variables?: Record<string, string> }): Promise<ApiResponse<{ resolved_yaml: string; checks: Array<{ level: string; code: string; message: string }>; warnings: Array<{ level: string; code: string; message: string }>; target: ServiceDeployTarget }>> {
+    return apiService.post(`/services/${id}/deploy/preview`, payload);
+  },
+
+  async extractVariables(payload: { standard_config?: StandardServiceConfig; custom_yaml?: string; render_target: 'k8s' | 'compose'; service_name?: string; service_type?: 'stateless' | 'stateful' }): Promise<ApiResponse<{ vars: TemplateVar[] }>> {
+    return apiService.post('/services/variables/extract', payload);
+  },
+
+  async getVariableSchema(id: string): Promise<ApiResponse<{ vars: TemplateVar[] }>> {
+    return apiService.get(`/services/${id}/variables/schema`);
+  },
+
+  async getVariableValues(id: string, env: string): Promise<ApiResponse<VariableValueSet>> {
+    return apiService.get(`/services/${id}/variables/values`, { params: { env } });
+  },
+
+  async upsertVariableValues(id: string, payload: { env: string; values: Record<string, string>; secret_keys?: string[] }): Promise<ApiResponse<VariableValueSet>> {
+    return apiService.put(`/services/${id}/variables/values`, payload);
+  },
+
+  async listRevisions(id: string): Promise<ApiResponse<PaginatedResponse<ServiceRevision>>> {
+    return apiService.get(`/services/${id}/revisions`);
+  },
+
+  async createRevision(id: string, payload: { config_mode: ServiceConfigMode; render_target: 'k8s' | 'compose'; standard_config?: StandardServiceConfig; custom_yaml?: string; variable_schema?: TemplateVar[] }): Promise<ApiResponse<ServiceRevision>> {
+    return apiService.post(`/services/${id}/revisions`, payload);
+  },
+
+  async upsertDeployTarget(id: string, payload: { cluster_id: number; namespace: string; deploy_target: ServiceRuntimeType; policy?: Record<string, any> }): Promise<ApiResponse<ServiceDeployTarget>> {
+    return apiService.put(`/services/${id}/deploy-target`, payload);
+  },
+
+  async listReleases(id: string): Promise<ApiResponse<PaginatedResponse<ServiceReleaseRecord>>> {
+    return apiService.get(`/services/${id}/releases`);
   },
 
   async rollback(id: string): Promise<ApiResponse<void>> {

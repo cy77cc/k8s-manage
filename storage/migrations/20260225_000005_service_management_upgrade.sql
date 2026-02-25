@@ -1,4 +1,24 @@
 -- +migrate Up
+CREATE TABLE IF NOT EXISTS services (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  project_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(64) NOT NULL,
+  type VARCHAR(32) NOT NULL,
+  image VARCHAR(256) NOT NULL,
+  replicas INT NOT NULL DEFAULT 1,
+  service_port INT NOT NULL DEFAULT 0,
+  container_port INT NOT NULL DEFAULT 0,
+  node_port INT NOT NULL DEFAULT 0,
+  env_vars LONGTEXT,
+  resources LONGTEXT,
+  yaml_content LONGTEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_services_project_id (project_id),
+  INDEX idx_services_name (name),
+  INDEX idx_services_type (type)
+);
+
 CREATE TABLE IF NOT EXISTS service_helm_releases (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   service_id BIGINT UNSIGNED NOT NULL,

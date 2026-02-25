@@ -177,15 +177,37 @@ func (h *Handler) Deploy(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
 		return
 	}
-	if strings.EqualFold(item.Env, "production") && !h.hasPermission(c, "service:approve") {
+	env := defaultIfEmpty(req.Env, item.Env)
+	if strings.EqualFold(env, "production") && !h.hasPermission(c, "service:approve") {
 		c.JSON(http.StatusForbidden, gin.H{"code": 2004, "msg": "production deploy requires service:approve"})
 		return
 	}
-	if err := h.logic.Deploy(c.Request.Context(), uint(id), req); err != nil {
+	uid, _ := c.Get("uid")
+	recordID, err := h.logic.Deploy(c.Request.Context(), uint(id), toUint(uid), req)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": nil})
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": DeployResp{ReleaseRecordID: recordID}})
+}
+
+func (h *Handler) DeployPreview(c *gin.Context) {
+	if !h.authorize(c, "service", "deploy") {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": "invalid id"})
+		return
+	}
+	var req DeployReq
+	_ = c.ShouldBindJSON(&req)
+	resp, err := h.logic.DeployPreview(c.Request.Context(), uint(id), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
 }
 
 func (h *Handler) HelmImport(c *gin.Context) {
@@ -265,6 +287,160 @@ func (h *Handler) Quota(c *gin.Context) {
 		"cpuUsed":     1200,
 		"memoryUsed":  2048,
 	}})
+}
+
+func (h *Handler) ExtractVariables(c *gin.Context) {
+	if !h.authorize(c, "service", "write") {
+		return
+	}
+	var req VariableExtractReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	resp, err := h.logic.ExtractVariables(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) GetVariableSchema(c *gin.Context) {
+	if !h.authorize(c, "service", "read") {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": "invalid id"})
+		return
+	}
+	resp, err := h.logic.GetVariableSchema(c.Request.Context(), uint(id))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"vars": resp}})
+}
+
+func (h *Handler) GetVariableValues(c *gin.Context) {
+	if !h.authorize(c, "service", "read") {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": "invalid id"})
+		return
+	}
+	resp, err := h.logic.GetVariableValues(c.Request.Context(), uint(id), c.Query("env"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) UpsertVariableValues(c *gin.Context) {
+	if !h.authorize(c, "service", "write") {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": "invalid id"})
+		return
+	}
+	var req VariableValuesUpsertReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	uid, _ := c.Get("uid")
+	resp, err := h.logic.UpsertVariableValues(c.Request.Context(), uint(id), toUint(uid), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) ListRevisions(c *gin.Context) {
+	if !h.authorize(c, "service", "read") {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": "invalid id"})
+		return
+	}
+	resp, err := h.logic.ListRevisions(c.Request.Context(), uint(id))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"list": resp, "total": len(resp)}})
+}
+
+func (h *Handler) CreateRevision(c *gin.Context) {
+	if !h.authorize(c, "service", "write") {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": "invalid id"})
+		return
+	}
+	var req RevisionCreateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	uid, _ := c.Get("uid")
+	resp, err := h.logic.CreateRevision(c.Request.Context(), uint(id), toUint(uid), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) UpsertDeployTarget(c *gin.Context) {
+	if !h.authorize(c, "service", "write") {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": "invalid id"})
+		return
+	}
+	var req DeployTargetUpsertReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	uid, _ := c.Get("uid")
+	resp, err := h.logic.UpsertDeployTarget(c.Request.Context(), uint(id), toUint(uid), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) ListReleaseRecords(c *gin.Context) {
+	if !h.authorize(c, "service", "read") {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": "invalid id"})
+		return
+	}
+	resp, err := h.logic.ListReleaseRecords(c.Request.Context(), uint(id))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"list": resp, "total": len(resp)}})
 }
 
 func (h *Handler) authorize(c *gin.Context, resource, action string) bool {

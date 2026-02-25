@@ -16,6 +16,7 @@ import (
 	projectlogic "github.com/cy77cc/k8s-manage/internal/service/project/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 )
 
 type Logic struct {
@@ -25,11 +26,29 @@ type Logic struct {
 func NewLogic(svcCtx *svc.ServiceContext) *Logic { return &Logic{svcCtx: svcCtx} }
 
 func (l *Logic) Preview(req RenderPreviewReq) (RenderPreviewResp, error) {
+	req.Variables = normalizeStringMap(req.Variables)
 	if req.Mode == "custom" {
 		diagnostics := validateCustomYAML(req.Target, req.CustomYAML)
-		return RenderPreviewResp{RenderedYAML: req.CustomYAML, Diagnostics: diagnostics}, nil
+		resolved, unresolved := resolveTemplateVars(req.CustomYAML, req.Variables, nil)
+		return RenderPreviewResp{
+			RenderedYAML:   req.CustomYAML,
+			ResolvedYAML:   resolved,
+			Diagnostics:    diagnostics,
+			UnresolvedVars: unresolved,
+			DetectedVars:   detectTemplateVars(req.CustomYAML),
+		}, nil
 	}
-	return renderFromStandard(req.ServiceName, req.ServiceType, req.Target, req.StandardConfig)
+	resp, err := renderFromStandard(req.ServiceName, req.ServiceType, req.Target, req.StandardConfig)
+	if err != nil {
+		return RenderPreviewResp{}, err
+	}
+	resp.DetectedVars = detectTemplateVars(resp.RenderedYAML)
+	resp.ResolvedYAML, resp.UnresolvedVars = resolveTemplateVars(resp.RenderedYAML, req.Variables, nil)
+	resp.ASTSummary = map[string]any{
+		"target": req.Target,
+		"docs":   strings.Count(resp.RenderedYAML, "\n---\n") + 1,
+	}
+	return resp, nil
 }
 
 func (l *Logic) Transform(req TransformReq) (TransformResp, error) {
@@ -37,7 +56,11 @@ func (l *Logic) Transform(req TransformReq) (TransformResp, error) {
 	if err != nil {
 		return TransformResp{}, err
 	}
-	return TransformResp{CustomYAML: res.RenderedYAML, SourceHash: sourceHash(res.RenderedYAML)}, nil
+	return TransformResp{
+		CustomYAML:   res.RenderedYAML,
+		SourceHash:   sourceHash(res.RenderedYAML),
+		DetectedVars: detectTemplateVars(res.RenderedYAML),
+	}, nil
 }
 
 func (l *Logic) Create(ctx context.Context, uid uint64, req ServiceCreateReq) (ServiceListItem, error) {
@@ -49,31 +72,35 @@ func (l *Logic) Create(ctx context.Context, uid uint64, req ServiceCreateReq) (S
 	labelsJSON, _ := json.Marshal(normalized.Labels)
 	standardJSON, _ := json.Marshal(cfg)
 	service := &model.Service{
-		ProjectID:     normalized.ProjectID,
-		TeamID:        normalized.TeamID,
-		OwnerUserID:   uint(uid),
-		Owner:         normalized.Owner,
-		Env:           normalized.Env,
-		RuntimeType:   normalized.RuntimeType,
-		ConfigMode:    normalized.ConfigMode,
-		ServiceKind:   normalized.ServiceKind,
-		RenderTarget:  normalized.RenderTarget,
-		LabelsJSON:    string(labelsJSON),
-		StandardJSON:  string(standardJSON),
-		CustomYAML:    normalized.CustomYAML,
-		TemplateVer:   defaultIfEmpty(normalized.SourceTemplateV, "v1"),
-		Status:        defaultIfEmpty(normalized.Status, "draft"),
-		Name:          normalized.Name,
-		Type:          normalized.ServiceType,
-		Image:         cfg.Image,
-		Replicas:      cfg.Replicas,
-		ServicePort:   cfg.Ports[0].ServicePort,
-		ContainerPort: cfg.Ports[0].ContainerPort,
-		EnvVars:       buildLegacyEnvs(cfg),
-		Resources:     buildLegacyResources(cfg),
-		YamlContent:   rendered,
+		ProjectID:             normalized.ProjectID,
+		TeamID:                normalized.TeamID,
+		OwnerUserID:           uint(uid),
+		Owner:                 normalized.Owner,
+		Env:                   normalized.Env,
+		RuntimeType:           normalized.RuntimeType,
+		ConfigMode:            normalized.ConfigMode,
+		ServiceKind:           normalized.ServiceKind,
+		RenderTarget:          normalized.RenderTarget,
+		LabelsJSON:            string(labelsJSON),
+		StandardJSON:          string(standardJSON),
+		CustomYAML:            normalized.CustomYAML,
+		TemplateVer:           defaultIfEmpty(normalized.SourceTemplateV, "v1"),
+		TemplateEngineVersion: "v1",
+		Status:                defaultIfEmpty(normalized.Status, "draft"),
+		Name:                  normalized.Name,
+		Type:                  normalized.ServiceType,
+		Image:                 cfg.Image,
+		Replicas:              cfg.Replicas,
+		ServicePort:           cfg.Ports[0].ServicePort,
+		ContainerPort:         cfg.Ports[0].ContainerPort,
+		EnvVars:               buildLegacyEnvs(cfg),
+		Resources:             buildLegacyResources(cfg),
+		YamlContent:           rendered,
 	}
 	if err := l.svcCtx.DB.WithContext(ctx).Create(service).Error; err != nil {
+		return ServiceListItem{}, err
+	}
+	if _, err := l.createRevisionRecord(ctx, service, uint(uid), nil); err != nil {
 		return ServiceListItem{}, err
 	}
 	return toServiceListItem(service), nil
@@ -155,6 +182,9 @@ func (l *Logic) Update(ctx context.Context, id uint, req ServiceCreateReq) (Serv
 	if err := l.svcCtx.DB.WithContext(ctx).Save(&existing).Error; err != nil {
 		return ServiceListItem{}, err
 	}
+	if _, err := l.createRevisionRecord(ctx, &existing, existing.OwnerUserID, nil); err != nil {
+		return ServiceListItem{}, err
+	}
 	return toServiceListItem(&existing), nil
 }
 
@@ -213,33 +243,103 @@ func (l *Logic) Delete(ctx context.Context, id uint) error {
 	return l.svcCtx.DB.WithContext(ctx).Delete(&model.Service{}, id).Error
 }
 
-func (l *Logic) Deploy(ctx context.Context, id uint, req DeployReq) error {
+func (l *Logic) DeployPreview(ctx context.Context, id uint, req DeployReq) (DeployPreviewResp, error) {
 	var service model.Service
 	if err := l.svcCtx.DB.WithContext(ctx).First(&service, id).Error; err != nil {
-		return err
+		return DeployPreviewResp{}, err
 	}
-	target := defaultIfEmpty(req.DeployTarget, service.RuntimeType)
+	target, err := l.resolveDeployTarget(ctx, id, req)
+	if err != nil {
+		return DeployPreviewResp{}, err
+	}
+	resolved, unresolved, err := l.resolveServiceTemplate(ctx, &service, req.Env, req.Variables)
+	if err != nil {
+		return DeployPreviewResp{}, err
+	}
+	checks := []RenderDiagnostic{
+		{Level: "info", Code: "cluster_selected", Message: fmt.Sprintf("cluster=%d namespace=%s", target.ClusterID, target.Namespace)},
+	}
+	warnings := make([]RenderDiagnostic, 0)
+	if len(unresolved) > 0 {
+		warnings = append(warnings, RenderDiagnostic{Level: "warning", Code: "unresolved_vars", Message: strings.Join(unresolved, ",")})
+	}
+	return DeployPreviewResp{
+		ResolvedYAML: resolved,
+		Checks:       checks,
+		Warnings:     warnings,
+		Target:       target,
+	}, nil
+}
+
+func (l *Logic) Deploy(ctx context.Context, id uint, operator uint64, req DeployReq) (uint, error) {
+	var service model.Service
+	if err := l.svcCtx.DB.WithContext(ctx).First(&service, id).Error; err != nil {
+		return 0, err
+	}
+	targetResp, err := l.resolveDeployTarget(ctx, id, req)
+	if err != nil {
+		return 0, err
+	}
+	target := defaultIfEmpty(req.DeployTarget, targetResp.DeployTarget)
+	resolved, unresolved, err := l.resolveServiceTemplate(ctx, &service, req.Env, req.Variables)
+	if err != nil {
+		return 0, err
+	}
+	if len(unresolved) > 0 {
+		return 0, fmt.Errorf("unresolved template vars: %s", strings.Join(unresolved, ","))
+	}
+
+	rec := &model.ServiceReleaseRecord{
+		ServiceID:         id,
+		RevisionID:        service.LastRevisionID,
+		ClusterID:         targetResp.ClusterID,
+		Namespace:         targetResp.Namespace,
+		Env:               defaultIfEmpty(req.Env, service.Env),
+		DeployTarget:      target,
+		Status:            "running",
+		RenderedYAML:      resolved,
+		VariablesSnapshot: mustJSON(req.Variables),
+		Operator:          uint(operator),
+	}
+	if err := l.svcCtx.DB.WithContext(ctx).Create(rec).Error; err != nil {
+		return 0, err
+	}
+
 	switch target {
 	case "compose":
-		return nil // MVP: only mark deploy action accepted
+		rec.Status = "accepted"
+		_ = l.svcCtx.DB.WithContext(ctx).Save(rec).Error
+		return rec.ID, nil // MVP placeholder
 	case "helm":
-		return l.deployHelm(ctx, id)
+		if err := l.deployHelm(ctx, id); err != nil {
+			rec.Status = "failed"
+			rec.Error = err.Error()
+			_ = l.svcCtx.DB.WithContext(ctx).Save(rec).Error
+			return rec.ID, err
+		}
+		rec.Status = "succeeded"
+		_ = l.svcCtx.DB.WithContext(ctx).Save(rec).Error
+		return rec.ID, nil
 	default:
-		if req.ClusterID == 0 {
-			req.ClusterID = 1
-		}
 		var cluster model.Cluster
-		if err := l.svcCtx.DB.WithContext(ctx).First(&cluster, req.ClusterID).Error; err != nil {
-			return err
+		if err := l.svcCtx.DB.WithContext(ctx).First(&cluster, targetResp.ClusterID).Error; err != nil {
+			rec.Status = "failed"
+			rec.Error = err.Error()
+			_ = l.svcCtx.DB.WithContext(ctx).Save(rec).Error
+			return rec.ID, err
 		}
-		content := service.YamlContent
-		if strings.TrimSpace(content) == "" {
-			content = service.CustomYAML
+		if strings.TrimSpace(resolved) == "" {
+			return rec.ID, fmt.Errorf("empty rendered yaml")
 		}
-		if strings.TrimSpace(content) == "" {
-			return fmt.Errorf("empty rendered yaml")
+		if err := projectlogic.DeployToCluster(ctx, &cluster, resolved); err != nil {
+			rec.Status = "failed"
+			rec.Error = err.Error()
+			_ = l.svcCtx.DB.WithContext(ctx).Save(rec).Error
+			return rec.ID, err
 		}
-		return projectlogic.DeployToCluster(ctx, &cluster, content)
+		rec.Status = "succeeded"
+		_ = l.svcCtx.DB.WithContext(ctx).Save(rec).Error
+		return rec.ID, nil
 	}
 }
 
@@ -314,6 +414,324 @@ func (l *Logic) deployHelm(ctx context.Context, serviceID uint) error {
 	}
 	release.Status = "deployed"
 	return l.svcCtx.DB.WithContext(ctx).Save(&release).Error
+}
+
+func (l *Logic) createRevisionRecord(ctx context.Context, service *model.Service, createdBy uint, override []TemplateVar) (*model.ServiceRevision, error) {
+	var maxRevision uint
+	_ = l.svcCtx.DB.WithContext(ctx).Model(&model.ServiceRevision{}).Where("service_id = ?", service.ID).Select("COALESCE(MAX(revision_no),0)").Scan(&maxRevision).Error
+	schema := override
+	if len(schema) == 0 {
+		schema = detectTemplateVars(defaultIfEmpty(service.CustomYAML, service.YamlContent))
+	}
+	schemaJSON := mustJSON(schema)
+	rev := &model.ServiceRevision{
+		ServiceID:      service.ID,
+		RevisionNo:     maxRevision + 1,
+		ConfigMode:     service.ConfigMode,
+		RenderTarget:   service.RenderTarget,
+		StandardConfig: service.StandardJSON,
+		CustomYAML:     service.CustomYAML,
+		VariableSchema: schemaJSON,
+		CreatedBy:      createdBy,
+	}
+	if err := l.svcCtx.DB.WithContext(ctx).Create(rev).Error; err != nil {
+		return nil, err
+	}
+	service.LastRevisionID = rev.ID
+	if err := l.svcCtx.DB.WithContext(ctx).Model(service).Updates(map[string]any{
+		"last_revision_id":        rev.ID,
+		"template_engine_version": defaultIfEmpty(service.TemplateEngineVersion, "v1"),
+	}).Error; err != nil {
+		return nil, err
+	}
+	return rev, nil
+}
+
+func toDeployTargetResp(t *model.ServiceDeployTarget) DeployTargetResp {
+	resp := DeployTargetResp{
+		ID:           t.ID,
+		ServiceID:    t.ServiceID,
+		ClusterID:    t.ClusterID,
+		Namespace:    t.Namespace,
+		DeployTarget: t.DeployTarget,
+		IsDefault:    t.IsDefault,
+		UpdatedAt:    t.UpdatedAt,
+	}
+	if strings.TrimSpace(t.PolicyJSON) != "" {
+		_ = json.Unmarshal([]byte(t.PolicyJSON), &resp.Policy)
+	}
+	return resp
+}
+
+func (l *Logic) resolveDeployTarget(ctx context.Context, serviceID uint, req DeployReq) (DeployTargetResp, error) {
+	if req.ClusterID > 0 {
+		return DeployTargetResp{
+			ServiceID:    serviceID,
+			ClusterID:    req.ClusterID,
+			Namespace:    defaultIfEmpty(req.Namespace, "default"),
+			DeployTarget: defaultIfEmpty(req.DeployTarget, "k8s"),
+			IsDefault:    false,
+		}, nil
+	}
+	var row model.ServiceDeployTarget
+	if err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ? AND is_default = 1", serviceID).First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DeployTargetResp{}, fmt.Errorf("deploy target not configured")
+		}
+		return DeployTargetResp{}, err
+	}
+	resp := toDeployTargetResp(&row)
+	if strings.TrimSpace(req.Namespace) != "" {
+		resp.Namespace = req.Namespace
+	}
+	if strings.TrimSpace(req.DeployTarget) != "" {
+		resp.DeployTarget = req.DeployTarget
+	}
+	return resp, nil
+}
+
+func (l *Logic) resolveServiceTemplate(ctx context.Context, service *model.Service, env string, reqValues map[string]string) (string, []string, error) {
+	content := defaultIfEmpty(service.CustomYAML, service.YamlContent)
+	if strings.TrimSpace(content) == "" {
+		return "", nil, fmt.Errorf("empty service template")
+	}
+	envValues := map[string]string{}
+	var set model.ServiceVariableSet
+	err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ? AND env = ?", service.ID, defaultIfEmpty(env, service.Env)).First(&set).Error
+	if err == nil && strings.TrimSpace(set.ValuesJSON) != "" {
+		_ = json.Unmarshal([]byte(set.ValuesJSON), &envValues)
+	}
+	resolved, unresolved := resolveTemplateVars(content, normalizeStringMap(reqValues), normalizeStringMap(envValues))
+	return resolved, unresolved, nil
+}
+
+func mustJSON(v any) string {
+	raw, _ := json.Marshal(v)
+	return string(raw)
+}
+
+func normalizeStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		out[k] = strings.TrimSpace(v)
+	}
+	return out
+}
+
+func (l *Logic) ExtractVariables(ctx context.Context, req VariableExtractReq) (VariableExtractResp, error) {
+	if strings.TrimSpace(req.CustomYAML) != "" {
+		return VariableExtractResp{Vars: detectTemplateVars(req.CustomYAML)}, nil
+	}
+	resp, err := renderFromStandard(req.ServiceName, req.ServiceType, req.RenderTarget, req.StandardConfig)
+	if err != nil {
+		return VariableExtractResp{}, err
+	}
+	return VariableExtractResp{Vars: detectTemplateVars(resp.RenderedYAML)}, nil
+}
+
+func (l *Logic) GetVariableSchema(ctx context.Context, serviceID uint) ([]TemplateVar, error) {
+	var rev model.ServiceRevision
+	if err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ?", serviceID).Order("revision_no DESC").First(&rev).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			var service model.Service
+			if err := l.svcCtx.DB.WithContext(ctx).First(&service, serviceID).Error; err != nil {
+				return nil, err
+			}
+			content := defaultIfEmpty(service.CustomYAML, service.YamlContent)
+			return detectTemplateVars(content), nil
+		}
+		return nil, err
+	}
+	var vars []TemplateVar
+	if strings.TrimSpace(rev.VariableSchema) != "" {
+		_ = json.Unmarshal([]byte(rev.VariableSchema), &vars)
+	}
+	return vars, nil
+}
+
+func (l *Logic) GetVariableValues(ctx context.Context, serviceID uint, env string) (VariableValuesResp, error) {
+	var set model.ServiceVariableSet
+	err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ? AND env = ?", serviceID, defaultIfEmpty(env, "staging")).First(&set).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return VariableValuesResp{ServiceID: serviceID, Env: defaultIfEmpty(env, "staging"), Values: map[string]string{}}, nil
+		}
+		return VariableValuesResp{}, err
+	}
+	out := VariableValuesResp{
+		ServiceID: serviceID,
+		Env:       set.Env,
+		Values:    map[string]string{},
+		UpdatedAt: set.UpdatedAt,
+	}
+	_ = json.Unmarshal([]byte(set.ValuesJSON), &out.Values)
+	_ = json.Unmarshal([]byte(set.SecretKeys), &out.SecretKeys)
+	return out, nil
+}
+
+func (l *Logic) UpsertVariableValues(ctx context.Context, serviceID uint, uid uint64, req VariableValuesUpsertReq) (VariableValuesResp, error) {
+	env := defaultIfEmpty(req.Env, "staging")
+	req.Values = normalizeStringMap(req.Values)
+	valuesJSON := mustJSON(req.Values)
+	secretJSON := mustJSON(req.SecretKeys)
+	var set model.ServiceVariableSet
+	err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ? AND env = ?", serviceID, env).First(&set).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return VariableValuesResp{}, err
+		}
+		set = model.ServiceVariableSet{
+			ServiceID:  serviceID,
+			Env:        env,
+			ValuesJSON: valuesJSON,
+			SecretKeys: secretJSON,
+			UpdatedBy:  uint(uid),
+		}
+		if err := l.svcCtx.DB.WithContext(ctx).Create(&set).Error; err != nil {
+			return VariableValuesResp{}, err
+		}
+	} else {
+		set.ValuesJSON = valuesJSON
+		set.SecretKeys = secretJSON
+		set.UpdatedBy = uint(uid)
+		if err := l.svcCtx.DB.WithContext(ctx).Save(&set).Error; err != nil {
+			return VariableValuesResp{}, err
+		}
+	}
+	return l.GetVariableValues(ctx, serviceID, env)
+}
+
+func (l *Logic) ListRevisions(ctx context.Context, serviceID uint) ([]ServiceRevisionItem, error) {
+	var rows []model.ServiceRevision
+	if err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ?", serviceID).Order("revision_no DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ServiceRevisionItem, 0, len(rows))
+	for i := range rows {
+		item := ServiceRevisionItem{
+			ID:           rows[i].ID,
+			ServiceID:    rows[i].ServiceID,
+			RevisionNo:   rows[i].RevisionNo,
+			ConfigMode:   rows[i].ConfigMode,
+			RenderTarget: rows[i].RenderTarget,
+			CreatedBy:    rows[i].CreatedBy,
+			CreatedAt:    rows[i].CreatedAt,
+		}
+		if strings.TrimSpace(rows[i].VariableSchema) != "" {
+			_ = json.Unmarshal([]byte(rows[i].VariableSchema), &item.VariableSchema)
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (l *Logic) CreateRevision(ctx context.Context, serviceID uint, uid uint64, req RevisionCreateReq) (ServiceRevisionItem, error) {
+	var service model.Service
+	if err := l.svcCtx.DB.WithContext(ctx).First(&service, serviceID).Error; err != nil {
+		return ServiceRevisionItem{}, err
+	}
+	if strings.TrimSpace(req.ConfigMode) != "" {
+		service.ConfigMode = req.ConfigMode
+	}
+	if strings.TrimSpace(req.RenderTarget) != "" {
+		service.RenderTarget = req.RenderTarget
+	}
+	if req.StandardConfig != nil {
+		b, _ := json.Marshal(req.StandardConfig)
+		service.StandardJSON = string(b)
+	}
+	if strings.TrimSpace(req.CustomYAML) != "" {
+		service.CustomYAML = req.CustomYAML
+		service.YamlContent = req.CustomYAML
+	}
+	rev, err := l.createRevisionRecord(ctx, &service, uint(uid), req.VariableSchema)
+	if err != nil {
+		return ServiceRevisionItem{}, err
+	}
+	out := ServiceRevisionItem{
+		ID:           rev.ID,
+		ServiceID:    rev.ServiceID,
+		RevisionNo:   rev.RevisionNo,
+		ConfigMode:   rev.ConfigMode,
+		RenderTarget: rev.RenderTarget,
+		CreatedBy:    rev.CreatedBy,
+		CreatedAt:    rev.CreatedAt,
+	}
+	if strings.TrimSpace(rev.VariableSchema) != "" {
+		_ = json.Unmarshal([]byte(rev.VariableSchema), &out.VariableSchema)
+	}
+	return out, nil
+}
+
+func (l *Logic) UpsertDeployTarget(ctx context.Context, serviceID uint, uid uint64, req DeployTargetUpsertReq) (DeployTargetResp, error) {
+	if req.ClusterID == 0 {
+		return DeployTargetResp{}, fmt.Errorf("cluster_id is required")
+	}
+	ns := defaultIfEmpty(req.Namespace, "default")
+	deployTarget := defaultIfEmpty(req.DeployTarget, "k8s")
+	policyJSON := mustJSON(req.Policy)
+	var row model.ServiceDeployTarget
+	err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ? AND is_default = 1", serviceID).First(&row).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return DeployTargetResp{}, err
+		}
+		row = model.ServiceDeployTarget{
+			ServiceID:    serviceID,
+			ClusterID:    req.ClusterID,
+			Namespace:    ns,
+			DeployTarget: deployTarget,
+			PolicyJSON:   policyJSON,
+			IsDefault:    true,
+			UpdatedBy:    uint(uid),
+		}
+		if err := l.svcCtx.DB.WithContext(ctx).Create(&row).Error; err != nil {
+			return DeployTargetResp{}, err
+		}
+	} else {
+		row.ClusterID = req.ClusterID
+		row.Namespace = ns
+		row.DeployTarget = deployTarget
+		row.PolicyJSON = policyJSON
+		row.UpdatedBy = uint(uid)
+		if err := l.svcCtx.DB.WithContext(ctx).Save(&row).Error; err != nil {
+			return DeployTargetResp{}, err
+		}
+	}
+	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.Service{}).Where("id = ?", serviceID).Update("default_target_id", row.ID).Error; err != nil {
+		return DeployTargetResp{}, err
+	}
+	return toDeployTargetResp(&row), nil
+}
+
+func (l *Logic) ListReleaseRecords(ctx context.Context, serviceID uint) ([]ReleaseRecordItem, error) {
+	var rows []model.ServiceReleaseRecord
+	if err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ?", serviceID).Order("id DESC").Limit(50).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ReleaseRecordItem, 0, len(rows))
+	for i := range rows {
+		out = append(out, ReleaseRecordItem{
+			ID:           rows[i].ID,
+			ServiceID:    rows[i].ServiceID,
+			RevisionID:   rows[i].RevisionID,
+			ClusterID:    rows[i].ClusterID,
+			Namespace:    rows[i].Namespace,
+			Env:          rows[i].Env,
+			DeployTarget: rows[i].DeployTarget,
+			Status:       rows[i].Status,
+			Error:        rows[i].Error,
+			CreatedAt:    rows[i].CreatedAt,
+		})
+	}
+	return out, nil
 }
 
 func validateCustomYAML(target, content string) []RenderDiagnostic {
@@ -461,20 +879,23 @@ func ensureStandardConfig(cfg *StandardServiceConfig) *StandardServiceConfig {
 
 func toServiceListItem(s *model.Service) ServiceListItem {
 	out := ServiceListItem{
-		ID:           s.ID,
-		ProjectID:    s.ProjectID,
-		TeamID:       s.TeamID,
-		Name:         s.Name,
-		Env:          s.Env,
-		Owner:        s.Owner,
-		RuntimeType:  s.RuntimeType,
-		ConfigMode:   s.ConfigMode,
-		ServiceKind:  s.ServiceKind,
-		Status:       s.Status,
-		CustomYAML:   s.CustomYAML,
-		RenderedYAML: s.YamlContent,
-		CreatedAt:    s.CreatedAt,
-		UpdatedAt:    s.UpdatedAt,
+		ID:                    s.ID,
+		ProjectID:             s.ProjectID,
+		TeamID:                s.TeamID,
+		Name:                  s.Name,
+		Env:                   s.Env,
+		Owner:                 s.Owner,
+		RuntimeType:           s.RuntimeType,
+		ConfigMode:            s.ConfigMode,
+		ServiceKind:           s.ServiceKind,
+		Status:                s.Status,
+		LastRevisionID:        s.LastRevisionID,
+		DefaultTargetID:       s.DefaultTargetID,
+		TemplateEngineVersion: s.TemplateEngineVersion,
+		CustomYAML:            s.CustomYAML,
+		RenderedYAML:          s.YamlContent,
+		CreatedAt:             s.CreatedAt,
+		UpdatedAt:             s.UpdatedAt,
 	}
 	if strings.TrimSpace(s.LabelsJSON) != "" {
 		_ = json.Unmarshal([]byte(s.LabelsJSON), &out.Labels)
