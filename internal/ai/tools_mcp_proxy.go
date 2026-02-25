@@ -29,14 +29,23 @@ func BuildMCPProxyTools(manager *MCPClientManager) ([]RegisteredTool, error) {
 		toolName := t.Name
 		invoke := func(ctx context.Context, input map[string]any) (ToolResult, error) {
 			start := time.Now()
-			EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "params": input})
+			callID := nextToolCallID()
+			EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "call_id": callID, "params": input})
 			if err := CheckToolPolicy(ctx, meta, input); err != nil {
-				return ToolResult{OK: false, Error: err.Error(), Source: "mcp", LatencyMS: time.Since(start).Milliseconds()}, err
+				res := ToolResult{OK: false, ErrorCode: "policy_denied", Error: err.Error(), Source: "mcp", LatencyMS: time.Since(start).Milliseconds()}
+				EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res})
+				return res, err
 			}
-			res, err := manager.CallTool(ctx, toolName, input)
+			callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			res, err := manager.CallTool(callCtx, toolName, input)
 			if err != nil {
-				result := ToolResult{OK: false, Error: err.Error(), Source: "mcp", LatencyMS: time.Since(start).Milliseconds()}
-				EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": result})
+				code := "tool_error"
+				if callCtx.Err() == context.DeadlineExceeded {
+					code = "tool_timeout"
+				}
+				result := ToolResult{OK: false, ErrorCode: code, Error: err.Error(), Source: "mcp", LatencyMS: time.Since(start).Milliseconds()}
+				EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": result})
 				return result, nil
 			}
 			texts := make([]string, 0, len(res.Content))
@@ -47,9 +56,10 @@ func BuildMCPProxyTools(manager *MCPClientManager) ([]RegisteredTool, error) {
 			}
 			result := ToolResult{OK: !res.IsError, Data: map[string]any{"text": strings.Join(texts, "\n"), "raw": res}, Source: "mcp", LatencyMS: time.Since(start).Milliseconds()}
 			if res.IsError {
+				result.ErrorCode = "tool_error"
 				result.Error = strings.Join(texts, "\n")
 			}
-			EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": result})
+			EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": result})
 			return result, nil
 		}
 		tl, err := utils.InferTool[map[string]any, ToolResult](meta.Name, meta.Description, invoke)

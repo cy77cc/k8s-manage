@@ -98,6 +98,7 @@ interface SSEDoneEvent {
     calls: number;
     results: number;
     missing?: string[];
+    missing_call_ids?: string[];
   };
   turn_id?: string;
 }
@@ -110,6 +111,7 @@ interface SSEErrorEvent {
     calls: number;
     results: number;
     missing?: string[];
+    missing_call_ids?: string[];
   };
   turn_id?: string;
 }
@@ -124,8 +126,8 @@ export interface AIChatStreamHandlers {
   onDone?: (payload: SSEDoneEvent) => void;
   onError?: (payload: SSEErrorEvent) => void;
   onThinkingDelta?: (payload: SSEThinkingEvent) => void;
-  onToolCall?: (payload: { turn_id?: string; tool?: string; payload?: Record<string, any>; ts?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }) => void;
-  onToolResult?: (payload: { turn_id?: string; tool?: string; payload?: Record<string, any>; result?: { ok: boolean; data?: any; error?: string; source?: string; latency_ms?: number }; ts?: string }) => void;
+  onToolCall?: (payload: { turn_id?: string; call_id?: string; tool?: string; payload?: Record<string, any>; ts?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }) => void;
+  onToolResult?: (payload: { turn_id?: string; call_id?: string; tool?: string; payload?: Record<string, any>; result?: { ok: boolean; data?: any; error?: string; error_code?: string; source?: string; latency_ms?: number }; ts?: string }) => void;
   onApprovalRequired?: (payload: ApprovalTicket & { turn_id?: string; approval_required?: boolean; previewDiff?: string }) => void;
   onHeartbeat?: (payload: { turn_id?: string; status?: string }) => void;
 }

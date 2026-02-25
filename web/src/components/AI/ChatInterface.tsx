@@ -266,6 +266,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               setStreamError('工具结果不完整，可重试本轮对话。');
               const turnID = done.turn_id || activeTurnID;
               const missing = done.tool_summary?.missing || [];
+              const missingCallIDs = done.tool_summary?.missing_call_ids || [];
               if (missing.length > 0) {
                 attachTraceToAssistant(assistantMessageID, turnID, {
                   id: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -273,6 +274,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   payload: {
                     tool: 'runtime',
                     missing,
+                    missing_call_ids: missingCallIDs,
                     summary: done.tool_summary,
                   },
                   timestamp: new Date().toISOString(),

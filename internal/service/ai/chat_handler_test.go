@@ -4,10 +4,10 @@ import "testing"
 
 func TestToolEventTrackerSummary(t *testing.T) {
 	tracker := newToolEventTracker()
-	tracker.noteCall("os.get_cpu_mem")
-	tracker.noteCall("os.get_cpu_mem")
-	tracker.noteCall("k8s.get_events")
-	tracker.noteResult("os.get_cpu_mem")
+	tracker.noteCall("c1", "os.get_cpu_mem")
+	tracker.noteCall("c2", "os.get_cpu_mem")
+	tracker.noteCall("c3", "k8s.get_events")
+	tracker.noteResult("c1", "os.get_cpu_mem")
 
 	summary := tracker.summary()
 	if summary.Calls != 3 {
@@ -19,6 +19,9 @@ func TestToolEventTrackerSummary(t *testing.T) {
 	if len(summary.Missing) != 2 {
 		t.Fatalf("expected 2 missing results, got %d", len(summary.Missing))
 	}
+	if len(summary.MissingCallIDs) != 2 {
+		t.Fatalf("expected 2 missing call ids, got %d", len(summary.MissingCallIDs))
+	}
 }
 
 func TestResolveStreamState(t *testing.T) {
@@ -27,7 +30,7 @@ func TestResolveStreamState(t *testing.T) {
 		t.Fatalf("expected ok state, got %s", ok)
 	}
 
-	partial := resolveStreamState(nil, toolSummary{Missing: []string{"os.get_cpu_mem"}})
+	partial := resolveStreamState(nil, toolSummary{MissingCallIDs: []string{"c1"}})
 	if partial != "partial" {
 		t.Fatalf("expected partial state, got %s", partial)
 	}

@@ -108,6 +108,26 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 	}); err != nil {
 		return nil, err
 	}
+	if err := addLocalTool(&tools, ToolMeta{Name: "host.list_inventory", Description: "查询主机资产清单，可按 status/keyword 过滤。", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"limit": 50}}, func(ctx context.Context, input HostInventoryInput) (ToolResult, error) {
+		return hostListInventory(ctx, deps, input)
+	}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(&tools, ToolMeta{Name: "host.batch_exec_preview", Description: "批量命令执行预检查，返回目标主机与风险评估。", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read", Required: []string{"host_ids", "command"}}, func(ctx context.Context, input HostBatchExecPreviewInput) (ToolResult, error) {
+		return hostBatchExecPreview(ctx, deps, input)
+	}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(&tools, ToolMeta{Name: "host.batch_exec_apply", Description: "批量执行主机命令（需审批），禁止危险命令。", Mode: ToolModeMutating, Risk: ToolRiskHigh, Provider: "local", Permission: "ai:tool:execute", Required: []string{"host_ids", "command"}}, func(ctx context.Context, input HostBatchExecApplyInput) (ToolResult, error) {
+		return hostBatchExecApply(ctx, deps, input)
+	}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(&tools, ToolMeta{Name: "host.batch_status_update", Description: "批量更新主机状态（online/offline/maintenance，需审批）。", Mode: ToolModeMutating, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:execute", Required: []string{"host_ids", "action"}}, func(ctx context.Context, input HostBatchStatusInput) (ToolResult, error) {
+		return hostBatchStatusUpdate(ctx, deps, input)
+	}); err != nil {
+		return nil, err
+	}
 
 	return tools, nil
 }

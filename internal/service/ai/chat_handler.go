@@ -16,9 +16,10 @@ import (
 )
 
 type toolSummary struct {
-	Calls   int      `json:"calls"`
-	Results int      `json:"results"`
-	Missing []string `json:"missing"`
+	Calls          int      `json:"calls"`
+	Results        int      `json:"results"`
+	Missing        []string `json:"missing"`
+	MissingCallIDs []string `json:"missing_call_ids,omitempty"`
 }
 
 type streamErrorPayload struct {
@@ -31,28 +32,41 @@ type toolEventTracker struct {
 	mu      sync.Mutex
 	calls   map[string]int
 	results map[string]int
+	callIDs map[string]string
+	doneIDs map[string]struct{}
 }
 
 func newToolEventTracker() *toolEventTracker {
 	return &toolEventTracker{
 		calls:   map[string]int{},
 		results: map[string]int{},
+		callIDs: map[string]string{},
+		doneIDs: map[string]struct{}{},
 	}
 }
 
-func (t *toolEventTracker) noteCall(tool string) {
+func (t *toolEventTracker) noteCall(callID, tool string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	name := strings.TrimSpace(tool)
 	if name == "" {
 		name = "unknown"
 	}
+	cid := strings.TrimSpace(callID)
+	if cid == "" {
+		cid = fmt.Sprintf("legacy-%s-%d", name, t.calls[name]+1)
+	}
+	t.callIDs[cid] = name
 	t.calls[name]++
 }
 
-func (t *toolEventTracker) noteResult(tool string) {
+func (t *toolEventTracker) noteResult(callID, tool string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	cid := strings.TrimSpace(callID)
+	if cid != "" {
+		t.doneIDs[cid] = struct{}{}
+	}
 	name := strings.TrimSpace(tool)
 	if name == "" {
 		name = "unknown"
@@ -70,10 +84,22 @@ func (t *toolEventTracker) summary() toolSummary {
 	for _, count := range t.results {
 		out.Results += count
 	}
-	for tool, callCount := range t.calls {
-		missing := callCount - t.results[tool]
-		for i := 0; i < missing; i++ {
+	hasCallID := len(t.callIDs) > 0
+	for callID, tool := range t.callIDs {
+		if _, ok := t.doneIDs[callID]; ok {
+			continue
+		}
+		out.MissingCallIDs = append(out.MissingCallIDs, callID)
+		if tool != "" {
 			out.Missing = append(out.Missing, tool)
+		}
+	}
+	if !hasCallID {
+		for tool, callCount := range t.calls {
+			missing := callCount - t.results[tool]
+			for i := 0; i < missing; i++ {
+				out.Missing = append(out.Missing, tool)
+			}
 		}
 	}
 	return out
@@ -83,7 +109,7 @@ func resolveStreamState(fatalErr *streamErrorPayload, summary toolSummary) strin
 	if fatalErr != nil {
 		return "failed"
 	}
-	if len(summary.Missing) > 0 {
+	if len(summary.MissingCallIDs) > 0 || len(summary.Missing) > 0 {
 		return "partial"
 	}
 	return "ok"
@@ -225,10 +251,10 @@ func (h *handler) chat(c *gin.Context) {
 	}
 
 	summary := tracker.summary()
-	if len(summary.Missing) > 0 {
+	if len(summary.MissingCallIDs) > 0 {
 		toolErr := &streamErrorPayload{
 			Code:        "tool_result_missing",
-			Message:     fmt.Sprintf("tool result missing for %d call(s)", len(summary.Missing)),
+			Message:     fmt.Sprintf("tool result missing for %d call(s)", len(summary.MissingCallIDs)),
 			Recoverable: true,
 		}
 		_ = emitFinal("error", gin.H{
@@ -244,7 +270,7 @@ func (h *handler) chat(c *gin.Context) {
 		switch {
 		case fatalErr != nil:
 			content = fmt.Sprintf("本轮执行未完整结束：%s", fatalErr.Message)
-		case len(summary.Missing) > 0:
+		case len(summary.MissingCallIDs) > 0:
 			content = "本轮工具调用结果不完整。"
 		default:
 			content = "无输出。"
@@ -293,14 +319,16 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 		case "tool_call", "tool_result":
 			pm := toPayloadMap(payload)
 			toolName := strings.TrimSpace(toString(pm["tool"]))
+			callID := strings.TrimSpace(toString(pm["call_id"]))
 			switch event {
 			case "tool_call":
-				tracker.noteCall(toolName)
+				tracker.noteCall(callID, toolName)
 			case "tool_result":
-				tracker.noteResult(toolName)
+				tracker.noteResult(callID, toolName)
 			}
 			_ = emit(event, gin.H{
 				"tool":             toolName,
+				"call_id":          callID,
 				"payload":          pm,
 				"ts":               time.Now().UTC().Format(time.RFC3339Nano),
 				"retry":            pm["retry"],

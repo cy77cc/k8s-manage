@@ -1,9 +1,68 @@
 import React from 'react';
-import { Alert, Button, Card, Col, Descriptions, Form, Input, InputNumber, Row, Select, Space, Table, Tabs, Tag, message } from 'antd';
-import { ArrowLeftOutlined, CloudUploadOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Row,
+  Select,
+  Space,
+  Table,
+  Tabs,
+  Tag,
+  message,
+} from 'antd';
+import { ArrowLeftOutlined, CloudUploadOutlined, EditOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Api } from '../../api';
-import type { ServiceEvent, ServiceItem, ServiceReleaseRecord, ServiceRevision, TemplateVar, VariableValueSet } from '../../api/modules/services';
+import type {
+  LabelKV,
+  ServiceCreateParams,
+  ServiceEvent,
+  ServiceItem,
+  ServiceReleaseRecord,
+  ServiceRevision,
+  StandardServiceConfig,
+  TemplateVar,
+  VariableValueSet,
+} from '../../api/modules/services';
+
+type ServiceEditFormValues = {
+  name: string;
+  env: string;
+  owner: string;
+  service_kind: string;
+  service_type: 'stateless' | 'stateful';
+  runtime_type: 'k8s' | 'compose' | 'helm';
+  config_mode: 'standard' | 'custom';
+  render_target: 'k8s' | 'compose' | 'helm';
+  status: string;
+  labels_text?: string;
+  standard_config_text?: string;
+  custom_yaml?: string;
+};
+
+const parseLabelText = (text: string): LabelKV[] => {
+  const rows = String(text || '').split('\n').map((x) => x.trim()).filter(Boolean);
+  const list: LabelKV[] = [];
+  rows.forEach((row) => {
+    const idx = row.indexOf('=');
+    if (idx <= 0) {
+      return;
+    }
+    const key = row.slice(0, idx).trim();
+    const value = row.slice(idx + 1).trim();
+    if (key) {
+      list.push({ key, value });
+    }
+  });
+  return list;
+};
 
 const ServiceDetailPage: React.FC = () => {
   const navigate = useNavigate();
@@ -18,8 +77,11 @@ const ServiceDetailPage: React.FC = () => {
   const [previewYAML, setPreviewYAML] = React.useState('');
   const [previewWarnings, setPreviewWarnings] = React.useState<Array<{ level: string; code: string; message: string }>>([]);
   const [deploying, setDeploying] = React.useState(false);
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editSaving, setEditSaving] = React.useState(false);
   const [targetForm] = Form.useForm();
   const [varForm] = Form.useForm();
+  const [editForm] = Form.useForm<ServiceEditFormValues>();
 
   const env = Form.useWatch('env', varForm) || 'staging';
 
@@ -167,11 +229,79 @@ const ServiceDetailPage: React.FC = () => {
     await load();
   };
 
+  const openEdit = () => {
+    if (!service) return;
+    editForm.setFieldsValue({
+      name: service.name,
+      env: service.env,
+      owner: service.owner,
+      service_kind: service.serviceKind,
+      service_type: service.serviceType || 'stateless',
+      runtime_type: service.runtimeType,
+      config_mode: service.configMode,
+      render_target: service.renderTarget || (service.runtimeType === 'helm' ? 'k8s' : service.runtimeType),
+      status: service.status,
+      labels_text: (service.labels || []).map((x) => `${x.key}=${x.value}`).join('\n'),
+      standard_config_text: service.standardConfig ? JSON.stringify(service.standardConfig, null, 2) : '{\n  "image": "",\n  "replicas": 1,\n  "ports": [],\n  "envs": []\n}',
+      custom_yaml: service.customYaml || '',
+    });
+    setEditOpen(true);
+  };
+
+  const saveServiceEdit = async () => {
+    if (!id || !service) return;
+    const values = await editForm.validateFields();
+
+    let standardConfig: StandardServiceConfig | undefined;
+    if (values.config_mode === 'standard') {
+      try {
+        standardConfig = JSON.parse(values.standard_config_text || '{}') as StandardServiceConfig;
+      } catch {
+        message.error('标准配置 JSON 格式错误');
+        return;
+      }
+    }
+
+    const payload: Partial<ServiceCreateParams> = {
+      name: values.name,
+      env: values.env,
+      owner: values.owner,
+      service_kind: values.service_kind,
+      service_type: values.service_type,
+      runtime_type: values.runtime_type,
+      config_mode: values.config_mode,
+      render_target: (values.render_target === 'helm' ? 'k8s' : values.render_target) as 'k8s' | 'compose',
+      status: values.status,
+      labels: parseLabelText(values.labels_text || ''),
+      standard_config: values.config_mode === 'standard' ? standardConfig : undefined,
+      custom_yaml: values.config_mode === 'custom' ? (values.custom_yaml || '') : '',
+    };
+
+    setEditSaving(true);
+    try {
+      await Api.services.update(id, payload);
+      message.success('服务配置已更新');
+      setEditOpen(false);
+      await load();
+      Modal.confirm({
+        title: '是否基于最新配置创建 Revision？',
+        okText: '创建 Revision',
+        cancelText: '稍后再说',
+        onOk: () => createRevision(),
+      });
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存服务配置失败');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Space>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/services')}>返回</Button>
         <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>
+        <Button icon={<EditOutlined />} onClick={openEdit}>编辑服务配置</Button>
         <Button icon={<SaveOutlined />} onClick={createRevision}>创建 Revision</Button>
         <Button icon={<CloudUploadOutlined />} type="primary" loading={deploying} onClick={deploy}>Deploy</Button>
       </Space>
@@ -291,6 +421,93 @@ const ServiceDetailPage: React.FC = () => {
           },
         ]} />
       </Card>
+
+      <Modal
+        title="编辑服务配置"
+        open={editOpen}
+        onCancel={() => setEditOpen(false)}
+        onOk={() => void saveServiceEdit()}
+        okText="保存"
+        confirmLoading={editSaving}
+        width={860}
+      >
+        <Form form={editForm} layout="vertical">
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="name" label="服务名" rules={[{ required: true, message: '请输入服务名' }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="env" label="环境" rules={[{ required: true }]}>
+                <Select options={[{ value: 'development' }, { value: 'staging' }, { value: 'production' }]} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="owner" label="负责人" rules={[{ required: true, message: '请输入负责人' }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="status" label="状态" rules={[{ required: true }]}>
+                <Select options={[{ value: 'draft' }, { value: 'running' }, { value: 'stopped' }, { value: 'error' }]} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="service_kind" label="服务分类" rules={[{ required: true }]}>
+                <Input placeholder="web/worker/job" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="service_type" label="服务类型" rules={[{ required: true }]}>
+                <Select options={[{ value: 'stateless' }, { value: 'stateful' }]} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="runtime_type" label="运行时" rules={[{ required: true }]}>
+                <Select options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="config_mode" label="配置模式" rules={[{ required: true }]}>
+                <Select options={[{ value: 'standard' }, { value: 'custom' }]} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="render_target" label="渲染目标" rules={[{ required: true }]}>
+                <Select options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item name="labels_text" label="标签（每行 key=value）">
+            <Input.TextArea rows={3} placeholder={'app=api\nteam=platform'} />
+          </Form.Item>
+
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.config_mode !== next.config_mode}>
+            {({ getFieldValue }) => (
+              getFieldValue('config_mode') === 'standard' ? (
+                <Form.Item name="standard_config_text" label="标准配置（JSON）" rules={[{ required: true, message: '请输入标准配置 JSON' }]}> 
+                  <Input.TextArea rows={10} />
+                </Form.Item>
+              ) : (
+                <Form.Item name="custom_yaml" label="自定义 YAML" rules={[{ required: true, message: '请输入 YAML 配置' }]}> 
+                  <Input.TextArea rows={10} />
+                </Form.Item>
+              )
+            )}
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

@@ -1,334 +1,489 @@
 import React from 'react';
-import {
-  Alert,
-  Breadcrumb,
-  Button,
-  Card,
-  Col,
-  Input,
-  Modal,
-  Row,
-  Space,
-  Statistic,
-  Tag,
-  Typography,
-} from 'antd';
-import {
-  ArrowLeftOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  CloseCircleOutlined,
-  DisconnectOutlined,
-  ReloadOutlined,
-  ThunderboltOutlined,
-} from '@ant-design/icons';
+import { Alert, Breadcrumb, Button, Card, Col, Input, Modal, Row, Space, Spin, Tag, Typography, Upload, message } from 'antd';
+import { ArrowLeftOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileAddOutlined, FolderAddOutlined, ReloadOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import Editor from '@monaco-editor/react';
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css';
 import { Api } from '../../api';
-import type { Host } from '../../api/modules/hosts';
+import type { Host, HostFileItem } from '../../api/modules/hosts';
 
-type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
-type LineType = 'input' | 'output' | 'error' | 'system';
+const { Text } = Typography;
 
-interface TerminalLine {
-  id: number;
-  type: LineType;
-  content: string;
-  timestamp: string;
-}
-
-const lineColors: Record<LineType, string> = {
-  input: '#58d68d',
-  output: '#c9d1d9',
-  error: '#ff6b6b',
-  system: '#8b949e',
-};
-
-const quickCommands = ['pwd', 'whoami', 'hostname', 'uptime', 'ls -la', 'df -h', 'free -m', 'top -bn1 | head -20'];
+type ConnStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error';
 
 const HostTerminalPage: React.FC = () => {
   const navigate = useNavigate();
   const { id = '' } = useParams<{ id: string }>();
-
-  const [loading, setLoading] = React.useState(false);
-  const [executing, setExecuting] = React.useState(false);
-  const [status, setStatus] = React.useState<ConnectionStatus>('connecting');
+  const xtermRef = React.useRef<Terminal | null>(null);
+  const fitRef = React.useRef<FitAddon | null>(null);
+  const resizeObserverRef = React.useRef<ResizeObserver | null>(null);
+  const inputListenerRef = React.useRef<{ dispose: () => void } | null>(null);
+  const wsRef = React.useRef<WebSocket | null>(null);
+  const termWrapRef = React.useRef<HTMLDivElement>(null);
+  const [status, setStatus] = React.useState<ConnStatus>('idle');
   const [host, setHost] = React.useState<Host | null>(null);
-  const [command, setCommand] = React.useState('');
-  const [lines, setLines] = React.useState<TerminalLine[]>([]);
-  const [sessionSeconds, setSessionSeconds] = React.useState(0);
-  const [lastLatencyMs, setLastLatencyMs] = React.useState<number>(0);
+  const [sessionID, setSessionID] = React.useState('');
+  const [cwd, setCwd] = React.useState('.');
+  const [files, setFiles] = React.useState<HostFileItem[]>([]);
+  const [selectedFile, setSelectedFile] = React.useState('');
+  const [selectedContent, setSelectedContent] = React.useState('');
+  const [filesLoading, setFilesLoading] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [newDirOpen, setNewDirOpen] = React.useState(false);
+  const [newDirName, setNewDirName] = React.useState('');
+  const [editorSize, setEditorSize] = React.useState<'sm' | 'md' | 'lg'>('md');
+  const [pathInput, setPathInput] = React.useState('.');
 
-  const lineIdRef = React.useRef(1);
-  const terminalRef = React.useRef<HTMLDivElement>(null);
-  const historyRef = React.useRef<string[]>([]);
-  const historyIndexRef = React.useRef<number>(-1);
+  const pageHeight = 'calc(100vh - 112px)';
+  const fileGridColumns = 'minmax(0, 1fr) 108px 88px 112px 88px';
+  const editorHeightMap: Record<'sm' | 'md' | 'lg', string> = {
+    sm: 'clamp(110px, 16vh, 180px)',
+    md: 'clamp(150px, 24vh, 260px)',
+    lg: 'clamp(190px, 32vh, 340px)',
+  };
 
-  const pushLine = React.useCallback((type: LineType, content: string) => {
-    const items = String(content || '')
-      .split('\n')
-      .map((x) => x.replace(/\r/g, ''))
-      .filter((x) => x.trim() !== '');
-    if (items.length === 0) return;
-    setLines((prev) => [
-      ...prev,
-      ...items.map((item) => ({ id: lineIdRef.current++, type, content: item, timestamp: new Date().toISOString() })),
-    ]);
+  const setupTerminal = React.useCallback(() => {
+    if (!termWrapRef.current || xtermRef.current) return;
+    const term = new Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
+      fontSize: 13,
+      theme: {
+        background: '#0e1117',
+        foreground: '#d4d4d4',
+        cursor: '#8ae234',
+      },
+    });
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(termWrapRef.current);
+    fitAddon.fit();
+    term.writeln('\x1b[90mConnecting to host terminal...\x1b[0m');
+    xtermRef.current = term;
+    fitRef.current = fitAddon;
   }, []);
 
   React.useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }
-  }, [lines]);
+    setupTerminal();
+    const onResize = () => fitRef.current?.fit();
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      wsRef.current?.close();
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+      inputListenerRef.current?.dispose();
+      inputListenerRef.current = null;
+      xtermRef.current?.dispose();
+      xtermRef.current = null;
+    };
+  }, [setupTerminal]);
 
-  React.useEffect(() => {
-    if (status !== 'connected') return;
-    const timer = setInterval(() => setSessionSeconds((prev) => prev + 1), 1000);
-    return () => clearInterval(timer);
-  }, [status]);
-
-  const formatDuration = (total: number) => {
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  const wsURLFromPath = (wsPath: string) => {
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const token = localStorage.getItem('token');
+    const suffix = token ? `${wsPath.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : '';
+    return `${protocol}://${window.location.host}${wsPath}${suffix}`;
   };
 
-  const statusTag = React.useMemo(() => {
-    if (status === 'connecting') return <Tag icon={<ClockCircleOutlined />} color="processing">连接中</Tag>;
-    if (status === 'connected') return <Tag icon={<CheckCircleOutlined />} color="success">已连接</Tag>;
-    if (status === 'error') return <Tag icon={<CloseCircleOutlined />} color="error">连接失败</Tag>;
-    return <Tag icon={<CloseCircleOutlined />}>已断开</Tag>;
-  }, [status]);
+  const refreshFiles = React.useCallback(async (dirPath: string) => {
+    if (!id) return;
+    setFilesLoading(true);
+    try {
+      const res = await Api.hosts.listFiles(id, dirPath);
+      setFiles(res.data.list || []);
+      setCwd(res.data.path || dirPath);
+      setPathInput(res.data.path || dirPath);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '加载文件列表失败');
+    } finally {
+      setFilesLoading(false);
+    }
+  }, [id]);
 
   const connect = React.useCallback(async () => {
     if (!id) return;
-    setLoading(true);
     setStatus('connecting');
     try {
-      const [hostResp, checkResp] = await Promise.all([Api.hosts.getHostDetail(id), Api.hosts.sshCheck(id)]);
+      const [hostResp, sessResp] = await Promise.all([
+        Api.hosts.getHostDetail(id),
+        Api.hosts.createTerminalSession(id),
+      ]);
       setHost(hostResp.data);
-      const reachable = !!checkResp.data?.reachable;
-      if (!reachable) {
+      setSessionID(sessResp.data.session_id);
+
+      const ws = new WebSocket(wsURLFromPath(sessResp.data.ws_path));
+      wsRef.current = ws;
+      ws.onopen = () => {
+        setStatus('connected');
+        fitRef.current?.fit();
+        const term = xtermRef.current;
+        if (!term) return;
+        term.focus();
+        term.writeln(`\x1b[32mConnected to ${hostResp.data.name} (${hostResp.data.ip})\x1b[0m`);
+        inputListenerRef.current?.dispose();
+        inputListenerRef.current = term.onData((data) => {
+          ws.send(JSON.stringify({ type: 'input', input: data }));
+        });
+        const fit = fitRef.current;
+        const size = term.cols && term.rows ? { cols: term.cols, rows: term.rows } : { cols: 120, rows: 40 };
+        ws.send(JSON.stringify({ type: 'resize', ...size }));
+        if (fit) {
+          resizeObserverRef.current?.disconnect();
+          const observer = new ResizeObserver(() => {
+            fit.fit();
+            ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+          });
+          resizeObserverRef.current = observer;
+          if (termWrapRef.current) observer.observe(termWrapRef.current);
+        }
+      };
+      ws.onmessage = (event) => {
+        const term = xtermRef.current;
+        if (!term) return;
+        try {
+          const msg = JSON.parse(String(event.data));
+          if (msg.type === 'output' && msg.payload?.data) {
+            term.write(String(msg.payload.data));
+          }
+        } catch {
+          term.write(String(event.data));
+        }
+      };
+      ws.onerror = () => {
         setStatus('error');
-        pushLine('error', `SSH 连接失败: ${checkResp.data?.message || 'unknown error'}`);
-        return;
-      }
-      setLines([]);
-      setSessionSeconds(0);
-      setStatus('connected');
-      pushLine('system', `Connected to ${hostResp.data.name} (${hostResp.data.ip})`);
-      pushLine('system', '输入命令后按 Enter 执行，执行结果来自真实主机。');
+        xtermRef.current?.writeln('\r\n\x1b[31mTerminal websocket error\x1b[0m');
+      };
+      ws.onclose = () => {
+        setStatus('closed');
+        resizeObserverRef.current?.disconnect();
+        resizeObserverRef.current = null;
+        inputListenerRef.current?.dispose();
+        inputListenerRef.current = null;
+        xtermRef.current?.writeln('\r\n\x1b[90mSession closed\x1b[0m');
+      };
+      await refreshFiles('.');
     } catch (err) {
       setStatus('error');
-      pushLine('error', err instanceof Error ? err.message : '连接失败');
-    } finally {
-      setLoading(false);
+      message.error(err instanceof Error ? err.message : '终端连接失败');
     }
-  }, [id, pushLine]);
+  }, [id, refreshFiles]);
 
   React.useEffect(() => {
     void connect();
   }, [connect]);
 
-  const executeCommand = React.useCallback(async (raw: string) => {
-    const cmd = raw.trim();
-    if (!cmd || status !== 'connected' || !id || executing) return;
+  const closeSession = React.useCallback(async () => {
+    wsRef.current?.close();
+    if (id && sessionID) {
+      try {
+        await Api.hosts.closeTerminalSession(id, sessionID);
+      } catch {
+        // noop
+      }
+    }
+    setStatus('closed');
+  }, [id, sessionID]);
 
-    if (cmd === 'clear') {
-      setLines([]);
-      setCommand('');
+  const openFile = async (item: HostFileItem) => {
+    if (!id) return;
+    if (item.is_dir) {
+      await refreshFiles(item.path);
       return;
     }
-    if (cmd === 'exit') {
-      setStatus('disconnected');
-      pushLine('system', '会话已断开。');
-      setCommand('');
-      return;
-    }
-
-    historyRef.current = [...historyRef.current, cmd];
-    historyIndexRef.current = historyRef.current.length;
-
-    pushLine('input', cmd);
-    setCommand('');
-    setExecuting(true);
-    const start = Date.now();
     try {
-      const resp = await Api.hosts.sshExec(id, cmd);
-      const latency = Date.now() - start;
-      setLastLatencyMs(latency);
-      if (resp.data.stdout) {
-        pushLine('output', resp.data.stdout);
-      }
-      if (resp.data.stderr) {
-        pushLine(resp.data.exit_code === 0 ? 'system' : 'error', resp.data.stderr);
-      }
-      if (!resp.data.stdout && !resp.data.stderr) {
-        pushLine('system', '(无输出)');
-      }
+      const res = await Api.hosts.readFile(id, item.path);
+      setSelectedFile(item.path);
+      setSelectedContent(res.data.content || '');
+      setEditing(false);
     } catch (err) {
-      pushLine('error', err instanceof Error ? err.message : '命令执行失败');
-    } finally {
-      setExecuting(false);
-    }
-  }, [executing, id, pushLine, status]);
-
-  const onCommandKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      void executeCommand(command);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (historyRef.current.length === 0) return;
-      historyIndexRef.current = Math.max(0, historyIndexRef.current - 1);
-      setCommand(historyRef.current[historyIndexRef.current] || '');
-      return;
-    }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (historyRef.current.length === 0) return;
-      historyIndexRef.current = Math.min(historyRef.current.length, historyIndexRef.current + 1);
-      if (historyIndexRef.current >= historyRef.current.length) {
-        setCommand('');
-      } else {
-        setCommand(historyRef.current[historyIndexRef.current] || '');
-      }
+      message.error(err instanceof Error ? err.message : '读取文件失败');
     }
   };
 
-  const disconnect = () => {
+  const saveFile = async () => {
+    if (!id || !selectedFile) return;
+    setSaving(true);
+    try {
+      await Api.hosts.writeFile(id, selectedFile, selectedContent);
+      setEditing(false);
+      message.success('文件已保存');
+      await refreshFiles(cwd);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removePath = (item: HostFileItem) => {
+    if (!id) return;
     Modal.confirm({
-      title: '断开终端会话',
-      content: '确认断开后将停止当前终端命令执行。',
-      onOk: () => {
-        setStatus('disconnected');
-        pushLine('system', '会话已手动断开。');
+      title: `删除 ${item.name}`,
+      content: '此操作不可恢复，确认删除吗？',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await Api.hosts.deletePath(id, item.path);
+        if (item.path === selectedFile) {
+          setSelectedFile('');
+          setSelectedContent('');
+        }
+        await refreshFiles(cwd);
       },
     });
   };
 
+  const renamePath = (item: HostFileItem) => {
+    if (!id) return;
+    let nextName = item.name;
+    Modal.confirm({
+      title: '重命名',
+      content: <Input defaultValue={item.name} onChange={(e) => { nextName = e.target.value; }} />,
+      onOk: async () => {
+        const parent = item.path.includes('/') ? item.path.slice(0, item.path.lastIndexOf('/')) : '.';
+        await Api.hosts.renamePath(id, item.path, `${parent}/${nextName}`);
+        await refreshFiles(cwd);
+      },
+    });
+  };
+
+  const downloadFile = async (item: HostFileItem) => {
+    if (!id || item.is_dir) return;
+    const blob = await Api.hosts.downloadFile(id, item.path);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = item.name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const toParentPath = React.useCallback((path: string) => {
+    if (path === '.') return '.';
+    if (!path.includes('/')) return '.';
+    const parent = path.slice(0, path.lastIndexOf('/'));
+    return parent || '.';
+  }, []);
+
+  const formatLsTime = React.useCallback((value?: string) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${mm}-${dd} ${hh}:${min}`;
+  }, []);
+
   return (
-    <div className="fade-in" style={{ '--term-bg': '#070b11', '--term-panel': '#101826' } as React.CSSProperties}>
+    <div className="fade-in host-terminal-page" style={{ height: pageHeight, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <Breadcrumb className="mb-4">
         <Breadcrumb.Item><Link to="/hosts">主机管理</Link></Breadcrumb.Item>
         <Breadcrumb.Item><Link to={`/hosts/detail/${id}`}>{host?.name || `Host #${id}`}</Link></Breadcrumb.Item>
-        <Breadcrumb.Item>真实终端</Breadcrumb.Item>
+        <Breadcrumb.Item>终端与文件</Breadcrumb.Item>
       </Breadcrumb>
 
       <Card
-        style={{
-          background: 'linear-gradient(135deg, #0f1729 0%, #131f35 100%)',
-          border: '1px solid #24324a',
-          borderRadius: 12,
-          marginBottom: 12,
-        }}
-      >
-        <div className="flex items-center justify-between">
-          <Space size={16}>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/hosts/detail/${id}`)}>返回</Button>
-            <div>
-              <Typography.Title level={5} style={{ margin: 0, color: '#e6edf3' }}>{host?.name || `Host #${id}`}</Typography.Title>
-              <Typography.Text type="secondary">{host?.ip || '-'}</Typography.Text>
-            </div>
-            {statusTag}
-          </Space>
+        style={{ marginBottom: 8, borderRadius: 10, flex: 1, minHeight: 0, overflow: 'hidden' }}
+        styles={{ body: { minHeight: 0, height: '100%' } }}
+        title={
           <Space>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void connect()}>重连</Button>
-            <Button danger icon={<DisconnectOutlined />} disabled={status !== 'connected'} onClick={disconnect}>断开</Button>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/hosts/detail/${id}`)}>返回</Button>
+            <Text strong>{host?.name || `Host #${id}`}</Text>
+            <Text type="secondary">{host?.ip || '-'}</Text>
+            <Tag color={status === 'connected' ? 'success' : status === 'connecting' ? 'processing' : status === 'error' ? 'error' : 'default'}>
+              {status.toUpperCase()}
+            </Tag>
           </Space>
-        </div>
+        }
+        extra={
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={() => void connect()}>重连</Button>
+            <Button danger onClick={() => void closeSession()}>关闭会话</Button>
+          </Space>
+        }
+      >
+        <Row gutter={12} style={{ height: '100%', minHeight: 0 }} align="stretch">
+          <Col xs={24} xl={16} style={{ display: 'flex', minHeight: 0 }}>
+            <Card
+              size="small"
+              styles={{ body: { padding: 0, background: '#0e1117', height: '100%', minHeight: 0 } }}
+              style={{ borderRadius: 10, border: '1px solid #1f2937', width: '100%', height: '100%' }}
+            >
+              <div className="host-terminal-xterm" ref={termWrapRef} style={{ height: '100%', width: '100%', minHeight: 420 }} />
+            </Card>
+          </Col>
+          <Col xs={24} xl={8} style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, overflow: 'hidden' }}>
+            <Card
+              size="small"
+              title="文件管理"
+              extra={
+                <Space size={4}>
+                  <Button size="small" icon={<ReloadOutlined />} onClick={() => void refreshFiles(cwd)} />
+                  <Button size="small" icon={<FolderAddOutlined />} onClick={() => setNewDirOpen(true)} />
+                  <Upload
+                    showUploadList={false}
+                    customRequest={async (opt) => {
+                      const file = opt.file as File;
+                      await Api.hosts.uploadFile(id, cwd, file);
+                      opt.onSuccess?.({}, new XMLHttpRequest());
+                      await refreshFiles(cwd);
+                    }}
+                  >
+                    <Button size="small" icon={<UploadOutlined />} />
+                  </Upload>
+                </Space>
+              }
+              style={{ borderRadius: 10, flex: 1, minHeight: 0 }}
+              styles={{ body: { display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 } }}
+            >
+              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                <Text type="secondary">目录: {cwd}</Text>
+                <Space.Compact style={{ width: 220 }}>
+                  <Input
+                    size="small"
+                    placeholder="输入目录并跳转"
+                    value={pathInput}
+                    onChange={(e) => setPathInput(e.target.value)}
+                    onPressEnter={() => void refreshFiles((pathInput || '.').trim() || '.')}
+                  />
+                  <Button size="small" onClick={() => void refreshFiles((pathInput || '.').trim() || '.')}>跳转</Button>
+                </Space.Compact>
+              </Space>
+              {filesLoading ? <Spin /> : null}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: fileGridColumns,
+                  alignItems: 'center',
+                  columnGap: 12,
+                  fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
+                  fontSize: 12,
+                  color: '#8c8c8c',
+                  padding: '2px 8px',
+                }}
+              >
+                <span>名称</span>
+                <span>修改时间</span>
+                <span style={{ textAlign: 'right' }}>大小</span>
+                <span>权限</span>
+                <span />
+              </div>
+              <div style={{ width: '100%', overflow: 'auto', flex: 1, minHeight: 0 }}>
+                {cwd !== '.' ? (
+                  <div
+                    style={{ display: 'grid', gridTemplateColumns: fileGridColumns, alignItems: 'center', columnGap: 12, borderRadius: 8, padding: '2px 8px' }}
+                  >
+                    <div
+                      onClick={() => void refreshFiles(toParentPath(cwd))}
+                      style={{ cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      <span title="..">📁 ..</span>
+                    </div>
+                    <span>-</span>
+                    <span style={{ textAlign: 'right' }}>-</span>
+                    <span>drwxr-xr-x</span>
+                    <span />
+                  </div>
+                ) : null}
+                {files.map((item) => (
+                  <div
+                    key={item.path}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: fileGridColumns,
+                      alignItems: 'center',
+                      columnGap: 12,
+                      borderRadius: 8,
+                      padding: '2px 8px',
+                      background: selectedFile === item.path ? '#e6f4ff' : 'transparent',
+                    }}
+                  >
+                    <div
+                      onClick={() => void openFile(item)}
+                      style={{ cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      <span title={item.name}>
+                        {item.is_dir ? '📁' : '📄'} {item.name}
+                      </span>
+                    </div>
+                    <span>{formatLsTime(item.updated_at)}</span>
+                    <span style={{ textAlign: 'right' }}>{item.is_dir ? '-' : String(item.size ?? 0)}</span>
+                    <span>{item.mode || '-'}</span>
+                    <Space size={0} style={{ justifyContent: 'flex-end' }}>
+                      {!item.is_dir ? <Button type="text" size="small" icon={<DownloadOutlined />} onClick={() => void downloadFile(item)} /> : null}
+                      <Button type="text" size="small" icon={<EditOutlined />} onClick={() => renamePath(item)} />
+                      <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => removePath(item)} />
+                    </Space>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card
+              size="small"
+              title={selectedFile ? `编辑: ${selectedFile}` : '文件预览'}
+              extra={selectedFile ? (
+                <Space size={4}>
+                  <Button size="small" type={editorSize === 'sm' ? 'primary' : 'default'} onClick={() => setEditorSize('sm')}>缩小</Button>
+                  <Button size="small" type={editorSize === 'md' ? 'primary' : 'default'} onClick={() => setEditorSize('md')}>默认</Button>
+                  <Button size="small" type={editorSize === 'lg' ? 'primary' : 'default'} onClick={() => setEditorSize('lg')}>放大</Button>
+                  <Button size="small" icon={<SaveOutlined />} loading={saving} onClick={() => void saveFile()}>保存</Button>
+                </Space>
+              ) : null}
+              style={{ borderRadius: 10, flexShrink: 0 }}
+              styles={{ body: { overflow: 'hidden' } }}
+            >
+              {selectedFile ? (
+                <>
+                  <Editor
+                    height={editorHeightMap[editorSize]}
+                    defaultLanguage="yaml"
+                    value={selectedContent}
+                    onChange={(v) => { setSelectedContent(v || ''); setEditing(true); }}
+                    theme="vs-dark"
+                    options={{ minimap: { enabled: false }, fontSize: 13 }}
+                  />
+                  {editing ? <Alert style={{ marginTop: 8 }} type="warning" showIcon message="内容已修改，记得保存。" /> : null}
+                </>
+              ) : <Text type="secondary">选择文件后在这里查看与编辑内容。</Text>}
+            </Card>
+          </Col>
+        </Row>
       </Card>
 
-      <Row gutter={12} style={{ marginBottom: 12 }}>
-        <Col span={6}><Card size="small" style={{ borderRadius: 10 }}><Statistic title="会话时长" value={formatDuration(sessionSeconds)} /></Card></Col>
-        <Col span={6}><Card size="small" style={{ borderRadius: 10 }}><Statistic title="最近延迟" value={lastLatencyMs || 0} suffix="ms" /></Card></Col>
-        <Col span={6}><Card size="small" style={{ borderRadius: 10 }}><Statistic title="命令数量" value={historyRef.current.length} /></Card></Col>
-        <Col span={6}><Card size="small" style={{ borderRadius: 10 }}><Statistic title="连接状态" value={status === 'connected' ? 'ONLINE' : 'OFFLINE'} valueStyle={{ color: status === 'connected' ? '#22c55e' : '#ef4444' }} /></Card></Col>
-      </Row>
-
-      <Row gutter={12}>
-        <Col span={18}>
-          <Card
-            bodyStyle={{ padding: 0 }}
-            style={{ borderRadius: 12, border: '1px solid #223149', background: '#0b1220' }}
-            title={
-              <div className="flex items-center justify-between">
-                <span style={{ color: '#cfd6df' }}>root@{host?.name || id}</span>
-                <Tag color="blue">{host?.ip || '-'}:{host?.port || 22}</Tag>
-              </div>
-            }
-          >
-            <div ref={terminalRef} style={{ height: 520, overflowY: 'auto', padding: 14, background: '#070b11', fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace', fontSize: 13 }}>
-              {lines.map((line) => (
-                <div key={line.id} style={{ color: lineColors[line.type], marginBottom: 6, whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>
-                  {line.type === 'input' ? <span style={{ color: '#22c55e', marginRight: 6 }}>$</span> : null}
-                  {line.content}
-                </div>
-              ))}
-              {lines.length === 0 ? <Typography.Text type="secondary">终端输出区</Typography.Text> : null}
-            </div>
-            <div style={{ borderTop: '1px solid #1f2a3c', padding: 12, background: '#0a1220' }}>
-              <Input
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                onKeyDown={onCommandKeyDown}
-                disabled={status !== 'connected' || executing}
-                placeholder={status === 'connected' ? '输入命令，Enter 执行；支持 ↑/↓ 历史命令' : '当前未连接'}
-                addonBefore={<span style={{ color: '#22c55e' }}>$</span>}
-                addonAfter={
-                  <Button type="primary" size="small" loading={executing} onClick={() => void executeCommand(command)} icon={<ThunderboltOutlined />}>
-                    执行
-                  </Button>
-                }
-              />
-            </div>
-          </Card>
-        </Col>
-
-        <Col span={6}>
-          <Card title="快捷命令" size="small" style={{ borderRadius: 12, marginBottom: 12 }}>
-            <Space direction="vertical" style={{ width: '100%' }}>
-              {quickCommands.map((cmd) => (
-                <Button key={cmd} block size="small" onClick={() => void executeCommand(cmd)} disabled={status !== 'connected' || executing}>
-                  {cmd}
-                </Button>
-              ))}
-            </Space>
-          </Card>
-
-          <Card title="会话提示" size="small" style={{ borderRadius: 12 }}>
-            <Alert type="info" showIcon message="这是实时 SSH 执行，不再是模拟终端。" style={{ marginBottom: 8 }} />
-            <Typography.Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
-              1. `clear` 仅清空前端输出。<br />
-              2. `exit` 仅断开当前 UI 会话。<br />
-              3. 生产主机建议使用最小权限账号。
-            </Typography.Paragraph>
-          </Card>
-        </Col>
-      </Row>
-
-      {status === 'error' ? (
+      <div style={{ overflow: 'hidden', flexShrink: 0 }}>
         <Alert
-          type="error"
+          type="info"
           showIcon
-          message="终端连接失败"
-          description="请检查主机 SSH 凭据、网络连通性、端口与密钥配置。"
-          style={{ marginTop: 12 }}
+          message="终端和文件管理都通过主机 SSH 实时执行；删除/覆盖操作请谨慎。"
         />
-      ) : null}
+      </div>
 
-      {status === 'disconnected' ? (
-        <Alert
-          type="warning"
-          showIcon
-          message="终端已断开"
-          description="你可以点击上方“重连”恢复会话。"
-          style={{ marginTop: 12 }}
+      <Modal
+        open={newDirOpen}
+        title="新建目录"
+        onOk={async () => {
+          if (!newDirName.trim()) return;
+          await Api.hosts.mkdir(id, `${cwd}/${newDirName.trim()}`.replace('//', '/'));
+          setNewDirOpen(false);
+          setNewDirName('');
+          await refreshFiles(cwd);
+        }}
+        onCancel={() => setNewDirOpen(false)}
+      >
+        <Input
+          prefix={<FileAddOutlined />}
+          placeholder="目录名"
+          value={newDirName}
+          onChange={(e) => setNewDirName(e.target.value)}
         />
-      ) : null}
+      </Modal>
     </div>
   );
 };

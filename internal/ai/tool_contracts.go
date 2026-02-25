@@ -269,3 +269,27 @@ type HostSSHReadonlyInput struct {
 	HostID  int    `json:"host_id" jsonschema:"required,description=host id"`
 	Command string `json:"command" jsonschema:"required,description=readonly command"`
 }
+
+type HostInventoryInput struct {
+	Status  string `json:"status,omitempty" jsonschema:"description=optional host status filter"`
+	Keyword string `json:"keyword,omitempty" jsonschema:"description=optional keyword on name/ip/hostname"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"description=max hosts,default=50"`
+}
+
+type HostBatchExecPreviewInput struct {
+	HostIDs []int  `json:"host_ids" jsonschema:"required,description=target host ids"`
+	Command string `json:"command" jsonschema:"required,description=shell command to run"`
+	Reason  string `json:"reason,omitempty" jsonschema:"description=execution reason for audit context"`
+}
+
+type HostBatchExecApplyInput struct {
+	HostIDs []int  `json:"host_ids" jsonschema:"required,description=target host ids"`
+	Command string `json:"command" jsonschema:"required,description=shell command to run"`
+	Reason  string `json:"reason,omitempty" jsonschema:"description=execution reason for audit context"`
+}
+
+type HostBatchStatusInput struct {
+	HostIDs []int  `json:"host_ids" jsonschema:"required,description=target host ids"`
+	Action  string `json:"action" jsonschema:"required,description=status action: online/offline/maintenance"`
+	Reason  string `json:"reason,omitempty" jsonschema:"description=change reason for audit context"`
+}

@@ -22,6 +22,7 @@ export interface Host {
   provider?: string;
   providerInstanceId?: string;
   parentHostId?: string;
+  sshKeyId?: number;
 }
 
 export interface HostListParams {
@@ -58,6 +59,8 @@ export interface HostUpdateParams {
   name?: string;
   status?: string;
   tags?: string[];
+  region?: string;
+  description?: string;
 }
 
 export interface HostBatchParams {
@@ -88,6 +91,23 @@ export interface SSHExecResult {
   stdout: string;
   stderr: string;
   exit_code: number;
+}
+
+export interface HostTerminalSession {
+  session_id: string;
+  status: string;
+  ws_path: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export interface HostFileItem {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  mode: string;
+  updated_at: string;
 }
 
 export interface HostProbeParams {
@@ -233,6 +253,7 @@ export const hostApi = {
         provider: item.provider,
         providerInstanceId: item.provider_instance_id,
         parentHostId: item.parent_host_id ? String(item.parent_host_id) : undefined,
+        sshKeyId: item.ssh_key_id ? Number(item.ssh_key_id) : undefined,
       },
     };
   },
@@ -305,7 +326,16 @@ export const hostApi = {
   },
 
   async updateHost(id: string, data: HostUpdateParams): Promise<ApiResponse<Host>> {
-    return apiService.put(`/hosts/${id}`, data);
+    const payload: Record<string, any> = {
+      name: data.name,
+      status: data.status,
+      region: data.region,
+      description: data.description,
+    };
+    if (Array.isArray(data.tags)) {
+      payload.labels = JSON.stringify(data.tags.map((x) => String(x).trim()).filter(Boolean));
+    }
+    return apiService.put(`/hosts/${id}`, payload);
   },
 
   async deleteHost(id: string): Promise<ApiResponse<void>> {
@@ -360,6 +390,63 @@ export const hostApi = {
 
   async sshExec(id: string, command: string): Promise<ApiResponse<SSHExecResult>> {
     return apiService.post(`/hosts/${id}/ssh/exec`, { command });
+  },
+
+  async createTerminalSession(id: string): Promise<ApiResponse<HostTerminalSession>> {
+    return apiService.post(`/hosts/${id}/terminal/sessions`);
+  },
+
+  async getTerminalSession(id: string, sessionId: string): Promise<ApiResponse<any>> {
+    return apiService.get(`/hosts/${id}/terminal/sessions/${sessionId}`);
+  },
+
+  async closeTerminalSession(id: string, sessionId: string): Promise<ApiResponse<any>> {
+    return apiService.delete(`/hosts/${id}/terminal/sessions/${sessionId}`);
+  },
+
+  async listFiles(id: string, dirPath: string): Promise<ApiResponse<{ path: string; list: HostFileItem[]; total: number }>> {
+    return apiService.get(`/hosts/${id}/files`, { params: { path: dirPath } });
+  },
+
+  async readFile(id: string, filePath: string): Promise<ApiResponse<{ path: string; content: string }>> {
+    return apiService.get(`/hosts/${id}/files/content`, { params: { path: filePath } });
+  },
+
+  async writeFile(id: string, filePath: string, content: string): Promise<ApiResponse<{ path: string; size: number }>> {
+    return apiService.put(`/hosts/${id}/files/content`, { path: filePath, content });
+  },
+
+  async uploadFile(id: string, dirPath: string, file: File): Promise<ApiResponse<{ path: string }>> {
+    const form = new FormData();
+    form.append('file', file);
+    return apiService.post(`/hosts/${id}/files/upload`, form, {
+      params: { path: dirPath },
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  async downloadFile(id: string, filePath: string): Promise<Blob> {
+    const base = import.meta.env.VITE_API_BASE || '/api/v1';
+    const token = localStorage.getItem('token');
+    const resp = await fetch(`${base}/hosts/${id}/files/download?path=${encodeURIComponent(filePath)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!resp.ok) {
+      throw new Error(`下载失败: ${resp.status}`);
+    }
+    return await resp.blob();
+  },
+
+  async mkdir(id: string, dirPath: string): Promise<ApiResponse<{ path: string }>> {
+    return apiService.post(`/hosts/${id}/files/mkdir`, { path: dirPath });
+  },
+
+  async renamePath(id: string, oldPath: string, newPath: string): Promise<ApiResponse<{ old_path: string; new_path: string }>> {
+    return apiService.post(`/hosts/${id}/files/rename`, { old_path: oldPath, new_path: newPath });
+  },
+
+  async deletePath(id: string, targetPath: string): Promise<ApiResponse<{ path: string }>> {
+    return apiService.delete(`/hosts/${id}/files`, { params: { path: targetPath } });
   },
 
   async batchExec(hostIds: string[], command: string): Promise<ApiResponse<Record<string, SSHExecResult>>> {

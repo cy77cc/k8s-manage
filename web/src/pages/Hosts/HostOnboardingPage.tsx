@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Button,
@@ -8,7 +8,9 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Radio,
+  Select,
   Space,
   Steps,
   Tag,
@@ -17,7 +19,7 @@ import {
 import { ArrowLeftOutlined, CheckCircleOutlined, CloudUploadOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { Api } from '../../api';
-import type { HostProbeResult } from '../../api/modules/hosts';
+import type { HostProbeResult, SSHKeyItem } from '../../api/modules/hosts';
 import { useAuth } from '../../components/Auth/AuthContext';
 
 interface StepOneForm {
@@ -45,9 +47,51 @@ const HostOnboardingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [probeResult, setProbeResult] = useState<HostProbeResult | null>(null);
   const [stepOneValues, setStepOneValues] = useState<StepOneForm | null>(null);
+  const [sshKeys, setSshKeys] = useState<SSHKeyItem[]>([]);
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
+  const [keyCreating, setKeyCreating] = useState(false);
   const [form] = Form.useForm<StepOneForm & StepThreeForm>();
+  const [keyForm] = Form.useForm<{ name: string; privateKey: string; passphrase?: string }>();
 
   const canForceCreate = user?.username?.toLowerCase() === 'admin';
+
+  const loadSSHKeys = useCallback(async () => {
+    setKeysLoading(true);
+    try {
+      const res = await Api.hosts.listSSHKeys();
+      setSshKeys(res.data || []);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '加载 SSH 密钥失败');
+    } finally {
+      setKeysLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSSHKeys();
+  }, [loadSSHKeys]);
+
+  const quickCreateKey = async () => {
+    const values = await keyForm.validateFields();
+    setKeyCreating(true);
+    try {
+      const res = await Api.hosts.createSSHKey({
+        name: values.name,
+        privateKey: values.privateKey,
+        passphrase: values.passphrase,
+      });
+      await loadSSHKeys();
+      form.setFieldValue('sshKeyId', Number(res.data.id));
+      message.success('密钥创建成功，已自动选中');
+      setKeyModalOpen(false);
+      keyForm.resetFields();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '创建 SSH 密钥失败');
+    } finally {
+      setKeyCreating(false);
+    }
+  };
 
   const doProbe = async () => {
     const values = await form.validateFields(['name', 'ip', 'port', 'authType', 'username', 'password', 'sshKeyId']);
@@ -164,7 +208,7 @@ const HostOnboardingPage: React.FC = () => {
               <Form.Item name="authType" label="认证方式" rules={[{ required: true }]}>
                 <Radio.Group>
                   <Radio.Button value="password">密码</Radio.Button>
-                  <Radio.Button value="key">SSH Key ID</Radio.Button>
+                  <Radio.Button value="key">SSH 密钥</Radio.Button>
                 </Radio.Group>
               </Form.Item>
               <Form.Item noStyle shouldUpdate={(prev, next) => prev.authType !== next.authType}>
@@ -174,8 +218,29 @@ const HostOnboardingPage: React.FC = () => {
                       <Input.Password />
                     </Form.Item>
                   ) : (
-                    <Form.Item name="sshKeyId" label="SSH Key ID" rules={[{ required: true, message: '请输入 key id' }]}>
-                      <InputNumber min={1} style={{ width: '100%' }} />
+                    <Form.Item
+                      name="sshKeyId"
+                      label={(
+                        <Space size={8}>
+                          <span>SSH 密钥</span>
+                          <Button size="small" type="link" onClick={() => setKeyModalOpen(true)} style={{ paddingInline: 0 }}>
+                            快速添加密钥
+                          </Button>
+                        </Space>
+                      )}
+                      rules={[{ required: true, message: '请选择 SSH 密钥' }]}
+                    >
+                      <Select
+                        placeholder="请选择系统中的 SSH 密钥"
+                        loading={keysLoading}
+                        showSearch
+                        optionFilterProp="label"
+                        options={sshKeys.map((key) => ({
+                          value: Number(key.id),
+                          label: `${key.name} (${key.fingerprint || '-'})`,
+                        }))}
+                        notFoundContent={keysLoading ? '加载中...' : '暂无密钥，请先快速添加'}
+                      />
                     </Form.Item>
                   )
                 }
@@ -272,6 +337,28 @@ const HostOnboardingPage: React.FC = () => {
           </div>
         </Form>
       </Card>
+
+      <Modal
+        title="快速添加 SSH 密钥"
+        open={keyModalOpen}
+        onCancel={() => setKeyModalOpen(false)}
+        onOk={quickCreateKey}
+        okText="创建并使用"
+        confirmLoading={keyCreating}
+        width={760}
+      >
+        <Form form={keyForm} layout="vertical">
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入密钥名称' }]}>
+            <Input placeholder="例如: prod-root-key" />
+          </Form.Item>
+          <Form.Item name="privateKey" label="私钥内容（PEM）" rules={[{ required: true, message: '请输入私钥内容' }]}>
+            <Input.TextArea rows={10} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" />
+          </Form.Item>
+          <Form.Item name="passphrase" label="Passphrase（可选）">
+            <Input.Password placeholder="若私钥有口令请输入" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

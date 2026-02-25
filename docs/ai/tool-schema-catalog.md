@@ -51,3 +51,21 @@
 ## `host.ssh_exec_readonly`
 - required: `host_id`, `command`
 - command must be allow-listed readonly command
+
+## `host.list_inventory`
+- required: none
+- defaults: `limit=50`
+
+## `host.batch_exec_preview`
+- required: `host_ids`, `command`
+- readonly preview (no command execution)
+
+## `host.batch_exec_apply`
+- required: `host_ids`, `command`
+- mode: `mutating` (approval required)
+- dangerous commands are blocked
+
+## `host.batch_status_update`
+- required: `host_ids`, `action`
+- action: `online|offline|maintenance`
+- mode: `mutating` (approval required)

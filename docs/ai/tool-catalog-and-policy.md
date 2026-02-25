@@ -24,3 +24,9 @@
 
 - 目标仅允许：`localhost` 或 DB 中存在的节点（ID/IP/Name/Hostname）。
 - 命令白名单：固定参数，禁止用户拼接 shell。
+
+## Host Batch Policy
+
+- `host.list_inventory`、`host.batch_exec_preview` 属于 L1 readonly。
+- `host.batch_exec_apply`、`host.batch_status_update` 属于 L2 mutating，必须审批。
+- `host.batch_exec_apply` 内置危险命令拦截（如 `rm -rf /`、`mkfs`、`shutdown` 等）。

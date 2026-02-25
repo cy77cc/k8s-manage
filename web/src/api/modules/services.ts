@@ -37,8 +37,10 @@ export interface ServiceItem {
   env: string;
   owner: string;
   runtimeType: ServiceRuntimeType;
+  renderTarget?: 'k8s' | 'compose' | 'helm';
   configMode: ServiceConfigMode;
   serviceKind: string;
+  serviceType?: 'stateless' | 'stateful';
   status: string;
   labels: LabelKV[];
   standardConfig?: StandardServiceConfig;
@@ -176,8 +178,10 @@ const mapService = (item: any): ServiceItem => ({
   env: item.env || 'staging',
   owner: item.owner || 'system',
   runtimeType: (item.runtime_type || 'k8s') as ServiceRuntimeType,
+  renderTarget: (item.render_target || item.runtime_type || 'k8s') as 'k8s' | 'compose' | 'helm',
   configMode: (item.config_mode || 'standard') as ServiceConfigMode,
   serviceKind: item.service_kind || 'web',
+  serviceType: (item.service_type || 'stateless') as 'stateless' | 'stateful',
   status: item.status || 'draft',
   labels: Array.isArray(item.labels) ? item.labels.map((x: any) => ({ key: x.key || '', value: x.value || '' })) : [],
   standardConfig: item.standard_config,

@@ -2,10 +2,18 @@ import React from 'react';
 import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Tabs, Tag, Typography, message } from 'antd';
 import { ArrowLeftOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import Editor from '@monaco-editor/react';
 import { Api } from '../../api';
 import type { LabelKV, StandardServiceConfig, TemplateVar } from '../../api/modules/services';
 
 const { Text } = Typography;
+
+const ideChrome = {
+  border: '1px solid #2a2f3a',
+  borderRadius: 10,
+  background: '#0f1117',
+  color: '#d4d4d4',
+} as const;
 
 const ServiceProvisionPage: React.FC = () => {
   const navigate = useNavigate();
@@ -53,9 +61,7 @@ const ServiceProvisionPage: React.FC = () => {
 
   const refreshPreview = React.useCallback(async () => {
     const values = form.getFieldsValue(true);
-    if (!values.name) {
-      return;
-    }
+    if (!values.name) return;
     try {
       setPreviewing(true);
       const targets: Array<'k8s' | 'compose'> = ['k8s', 'compose'];
@@ -86,9 +92,7 @@ const ServiceProvisionPage: React.FC = () => {
   }, [form, varValues]);
 
   React.useEffect(() => {
-    const timer = setTimeout(() => {
-      void refreshPreview();
-    }, 300);
+    const timer = setTimeout(() => { void refreshPreview(); }, 300);
     return () => clearTimeout(timer);
   }, [valuesSnapshot, refreshPreview]);
 
@@ -142,8 +146,14 @@ const ServiceProvisionPage: React.FC = () => {
     }
   };
 
+  const activePreview = previewByTarget[activeTarget] || '# 暂无输出';
+
   return (
-    <Card title="服务工作台（Studio）" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/services')}>返回</Button>}>
+    <Card
+      style={{ background: '#0b0f16', border: '1px solid #1f2937' }}
+      title={<Text style={{ color: '#e5e7eb' }}>Service Studio - VSCode Mode</Text>}
+      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/services')}>返回</Button>}
+    >
       <Form
         form={form}
         layout="vertical"
@@ -165,50 +175,62 @@ const ServiceProvisionPage: React.FC = () => {
           memory: '512Mi',
         }}
       >
-        <Row gutter={16}>
+        <Row gutter={12}>
           <Col span={12}>
-            <Card size="small" title="编辑区">
-              <Row gutter={12}>
-                <Col span={12}><Form.Item label="项目ID" name="project_id" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-                <Col span={12}><Form.Item label="团队ID" name="team_id" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+            <Card size="small" style={ideChrome} title={<Text style={{ color: '#cfd8e3' }}>Editor</Text>}>
+              <Row gutter={10}>
+                <Col span={8}><Form.Item label="项目ID" name="project_id" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+                <Col span={8}><Form.Item label="团队ID" name="team_id" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+                <Col span={8}><Form.Item label="环境" name="env"><Select options={[{ value: 'development' }, { value: 'staging' }, { value: 'production' }]} /></Form.Item></Col>
               </Row>
-              <Row gutter={12}>
+              <Row gutter={10}>
                 <Col span={12}><Form.Item label="服务名" name="name" rules={[{ required: true }]}><Input placeholder="user-service" /></Form.Item></Col>
                 <Col span={12}><Form.Item label="负责人" name="owner" rules={[{ required: true }]}><Input /></Form.Item></Col>
               </Row>
-              <Row gutter={12}>
-                <Col span={8}><Form.Item label="环境" name="env"><Select options={[{ value: 'development' }, { value: 'staging' }, { value: 'production' }]} /></Form.Item></Col>
+              <Row gutter={10}>
                 <Col span={8}><Form.Item label="运行时" name="runtime_type"><Select options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} /></Form.Item></Col>
-                <Col span={8}><Form.Item label="配置模式" name="config_mode"><Select options={[{ value: 'standard', label: '通用配置' }, { value: 'custom', label: '自定义配置' }]} /></Form.Item></Col>
+                <Col span={8}><Form.Item label="配置模式" name="config_mode"><Select options={[{ value: 'standard', label: '通用配置' }, { value: 'custom', label: '自定义 YAML' }]} /></Form.Item></Col>
+                <Col span={8}><Form.Item label="类型" name="service_type"><Select options={[{ value: 'stateless' }, { value: 'stateful' }]} /></Form.Item></Col>
               </Row>
-              <Row gutter={12}>
-                <Col span={8}><Form.Item label="服务分类" name="service_kind"><Input placeholder="web/backend/job" /></Form.Item></Col>
-                <Col span={8}><Form.Item label="服务类型" name="service_type"><Select options={[{ value: 'stateless' }, { value: 'stateful' }]} /></Form.Item></Col>
-                <Col span={8}><Form.Item label="标签(key=value)" name="labels"><Select mode="tags" placeholder="app=user,tier=backend" /></Form.Item></Col>
+              <Row gutter={10}>
+                <Col span={12}><Form.Item label="服务分类" name="service_kind"><Input placeholder="web/backend/job" /></Form.Item></Col>
+                <Col span={12}><Form.Item label="标签(key=value)" name="labels"><Select mode="tags" placeholder="app=user,tier=backend" /></Form.Item></Col>
               </Row>
 
               {mode === 'standard' ? (
                 <>
-                  <Row gutter={12}>
-                    <Col span={12}><Form.Item label="镜像" name="image" rules={[{ required: true }]}><Input placeholder="ghcr.io/org/app:v1" /></Form.Item></Col>
-                    <Col span={6}><Form.Item label="副本" name="replicas"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-                    <Col span={6}><Form.Item label="环境变量(KEY=VALUE)" name="envs"><Select mode="tags" /></Form.Item></Col>
+                  <Row gutter={10}>
+                    <Col span={24}><Form.Item label="镜像" name="image" rules={[{ required: true }]}><Input placeholder="ghcr.io/org/app:v1" /></Form.Item></Col>
                   </Row>
-                  <Row gutter={12}>
-                    <Col span={6}><Form.Item label="Service Port" name="service_port"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-                    <Col span={6}><Form.Item label="Container Port" name="container_port"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
-                    <Col span={6}><Form.Item label="CPU" name="cpu"><Input placeholder="500m" /></Form.Item></Col>
-                    <Col span={6}><Form.Item label="Memory" name="memory"><Input placeholder="512Mi" /></Form.Item></Col>
+                  <Row gutter={10}>
+                    <Col span={8}><Form.Item label="副本" name="replicas"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+                    <Col span={8}><Form.Item label="Service Port" name="service_port"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
+                    <Col span={8}><Form.Item label="Container Port" name="container_port"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col>
                   </Row>
-                  <Button icon={<SwapOutlined />} onClick={transformToCustom}>通用配置转自定义 YAML</Button>
+                  <Row gutter={10}>
+                    <Col span={12}><Form.Item label="CPU" name="cpu"><Input placeholder="500m" /></Form.Item></Col>
+                    <Col span={12}><Form.Item label="Memory" name="memory"><Input placeholder="512Mi" /></Form.Item></Col>
+                  </Row>
+                  <Form.Item label="环境变量(KEY=VALUE)" name="envs"><Select mode="tags" /></Form.Item>
+                  <Button icon={<SwapOutlined />} onClick={transformToCustom}>转换为自定义 YAML</Button>
                 </>
               ) : (
                 <Form.Item label="自定义 YAML" name="custom_yaml" rules={[{ required: true, message: '请输入 YAML' }]}>
-                  <Input.TextArea rows={14} placeholder="apiVersion: apps/v1\nkind: Deployment\n..." />
+                  <Editor
+                    height="280px"
+                    defaultLanguage="yaml"
+                    theme="vs-dark"
+                    options={{
+                      minimap: { enabled: true },
+                      fontSize: 13,
+                      smoothScrolling: true,
+                      stickyScroll: { enabled: true },
+                    }}
+                  />
                 </Form.Item>
               )}
 
-              <Card size="small" title="模板变量（部署时注入）" style={{ marginTop: 12 }}>
+              <Card size="small" style={{ marginTop: 10, background: '#111827', border: '1px solid #243041' }} title={<Text style={{ color: '#cfd8e3' }}>Template Variables</Text>}>
                 {detectedVars.length === 0 ? <Text type="secondary">未检测到模板变量（{'{{var}}'}）</Text> : null}
                 <Space direction="vertical" style={{ width: '100%' }}>
                   {detectedVars.map((item) => (
@@ -221,38 +243,55 @@ const ServiceProvisionPage: React.FC = () => {
                     />
                   ))}
                 </Space>
-                {unresolvedVars.length > 0 ? (
-                  <Alert type="warning" showIcon style={{ marginTop: 8 }} message={`未解析变量: ${unresolvedVars.join(', ')}`} />
-                ) : null}
+                {unresolvedVars.length > 0 ? <Alert style={{ marginTop: 8 }} type="warning" showIcon message={`未解析变量: ${unresolvedVars.join(', ')}`} /> : null}
               </Card>
-
-              <div style={{ marginTop: 16 }}>
-                <Space>
-                  <Button type="primary" icon={<SaveOutlined />} htmlType="submit" loading={loading}>创建服务</Button>
-                  <Button onClick={() => void refreshPreview()} loading={previewing}>刷新预览</Button>
-                </Space>
-              </div>
+              <Space style={{ marginTop: 12 }}>
+                <Button type="primary" icon={<SaveOutlined />} htmlType="submit" loading={loading}>创建服务</Button>
+                <Button onClick={() => void refreshPreview()} loading={previewing}>刷新预览</Button>
+              </Space>
             </Card>
           </Col>
+
           <Col span={12}>
-            <Card size="small" title={previewing ? '实时渲染（更新中）' : '实时渲染（右侧预览）'}>
+            <Card size="small" style={ideChrome} title={<Text style={{ color: '#cfd8e3' }}>Preview</Text>}>
               <Tabs
                 activeKey={activeTarget}
                 onChange={(k) => setActiveTarget(k as 'k8s' | 'compose' | 'helm')}
                 items={[
-                  { key: 'k8s', label: 'K8s YAML', children: <pre style={{ maxHeight: 640, overflow: 'auto' }}>{previewByTarget.k8s || '# 暂无输出'}</pre> },
-                  { key: 'compose', label: 'Compose YAML', children: <pre style={{ maxHeight: 640, overflow: 'auto' }}>{previewByTarget.compose || '# 暂无输出'}</pre> },
-                  { key: 'helm', label: 'Helm', children: <pre style={{ maxHeight: 640, overflow: 'auto' }}>{previewByTarget.k8s || '# Helm 首期复用 K8s 渲染预览'}</pre> },
+                  { key: 'k8s', label: 'K8s YAML' },
+                  { key: 'compose', label: 'Compose YAML' },
+                  { key: 'helm', label: 'Helm' },
                 ]}
               />
-              {(diagnosticsByTarget[activeTarget] || []).length > 0 ? (
-                <Space direction="vertical" size={2}>
-                  {(diagnosticsByTarget[activeTarget] || []).map((d, idx) => (
-                    <Text key={`${d.code}-${idx}`} type={d.level === 'error' ? 'danger' : 'secondary'}>
-                      [{d.level}] {d.message}
-                    </Text>
-                  ))}
+              <Editor
+                height="520px"
+                defaultLanguage="yaml"
+                value={activeTarget === 'helm' ? (previewByTarget.k8s || '# Helm 首期复用 K8s 渲染预览') : activePreview}
+                theme="vs-dark"
+                options={{
+                  readOnly: true,
+                  minimap: { enabled: true },
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                }}
+              />
+              <div style={{ background: '#111827', borderTop: '1px solid #2b3442', marginTop: 6, padding: '6px 10px', borderRadius: 6 }}>
+                <Space>
+                  <Tag color="processing">target: {activeTarget}</Tag>
+                  <Tag color={previewing ? 'warning' : 'success'}>{previewing ? 'rendering' : 'ready'}</Tag>
+                  <Tag color={unresolvedVars.length > 0 ? 'error' : 'default'}>unresolved: {unresolvedVars.length}</Tag>
                 </Space>
+              </div>
+              {(diagnosticsByTarget[activeTarget] || []).length > 0 ? (
+                <Card size="small" style={{ marginTop: 10, background: '#111827', border: '1px solid #243041' }} title={<Text style={{ color: '#cfd8e3' }}>Diagnostics</Text>}>
+                  <Space direction="vertical" size={4}>
+                    {(diagnosticsByTarget[activeTarget] || []).map((d, idx) => (
+                      <Text key={`${d.code}-${idx}`} type={d.level === 'error' ? 'danger' : 'secondary'}>
+                        [{d.level}] {d.code}: {d.message}
+                      </Text>
+                    ))}
+                  </Space>
+                </Card>
               ) : null}
             </Card>
           </Col>
@@ -263,3 +302,4 @@ const ServiceProvisionPage: React.FC = () => {
 };
 
 export default ServiceProvisionPage;
+

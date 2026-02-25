@@ -23,27 +23,49 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 	runtimeInput, convErr := mapToInput[T](resolvedParams)
 	if convErr != nil {
 		res := ToolResult{OK: false, ErrorCode: "invalid_param", Error: convErr.Error(), Source: meta.Provider, LatencyMS: time.Since(start).Milliseconds()}
-		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res, "param_resolution": resolution, "retry": false})
+		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": nextToolCallID(), "result": res, "param_resolution": resolution, "retry": false})
 		return res, nil
 	}
-	EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "params": resolvedParams, "param_resolution": resolution, "retry": false})
+	callID := nextToolCallID()
+	EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "call_id": callID, "params": resolvedParams, "param_resolution": resolution, "retry": false})
 	if err := CheckToolPolicy(ctx, meta, resolvedParams); err != nil {
 		res := ToolResult{OK: false, ErrorCode: "policy_denied", Error: err.Error(), Source: meta.Provider, LatencyMS: time.Since(start).Milliseconds()}
-		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res})
+		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res, "param_resolution": resolution, "retry": false})
 		return res, err
 	}
-	data, source, err := do(runtimeInput)
+	data, source, err := runToolAttempt(ctx, meta, runtimeInput, do)
 	retried := false
 	if err != nil {
 		if ie, ok := AsToolInputError(err); ok && ie.Code == "missing_param" {
+			// First attempt still gets a terminal result event before retry.
+			firstRes := ToolResult{
+				OK:        false,
+				ErrorCode: ie.Code,
+				Error:     err.Error(),
+				Source:    firstNonEmpty(source, meta.Provider),
+				LatencyMS: time.Since(start).Milliseconds(),
+			}
+			EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": firstRes, "param_resolution": resolution, "retry": true})
 			retried = true
 			resolvedRetry, resolutionRetry := resolveToolParams(ctx, meta, resolvedParams, ie.Field)
 			if !equalJSONMap(resolvedRetry, resolvedParams) {
 				resolvedParams = resolvedRetry
 				runtimeInput, convErr = mapToInput[T](resolvedParams)
 				if convErr == nil {
-					EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "params": resolvedParams, "param_resolution": resolutionRetry, "retry": true})
-					data, source, err = do(runtimeInput)
+					callID = nextToolCallID()
+					EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "call_id": callID, "params": resolvedParams, "param_resolution": resolutionRetry, "retry": true})
+					if err := CheckToolPolicy(ctx, meta, resolvedParams); err != nil {
+						res := ToolResult{
+							OK:        false,
+							ErrorCode: "policy_denied",
+							Error:     err.Error(),
+							Source:    meta.Provider,
+							LatencyMS: time.Since(start).Milliseconds(),
+						}
+						EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res, "param_resolution": resolutionRetry, "retry": true})
+						return res, err
+					}
+					data, source, err = runToolAttempt(ctx, meta, runtimeInput, do)
 					resolution = resolutionRetry
 				}
 			}
@@ -58,15 +80,82 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 			errCode = ie.Code
 		}
 		res := ToolResult{OK: false, ErrorCode: errCode, Error: err.Error(), Source: source, LatencyMS: time.Since(start).Milliseconds()}
-		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res, "param_resolution": resolution, "retry": retried})
+		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res, "param_resolution": resolution, "retry": retried})
 		return res, nil
 	}
 	res := ToolResult{OK: true, Data: data, Source: source, LatencyMS: time.Since(start).Milliseconds()}
-	EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "result": res, "params": resolvedParams, "param_resolution": resolution, "retry": retried})
+	EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res, "params": resolvedParams, "param_resolution": resolution, "retry": retried})
 	if mem := ToolMemoryAccessorFromContext(ctx); mem != nil && res.OK {
 		mem.SetLastToolParams(meta.Name, resolvedParams)
 	}
 	return res, nil
+}
+
+func runToolAttempt[T any](ctx context.Context, meta ToolMeta, input T, do func(T) (any, string, error)) (data any, source string, err error) {
+	timeout := 8 * time.Second
+	if meta.Mode == ToolModeMutating {
+		timeout = 20 * time.Second
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	type attemptOut struct {
+		data   any
+		source string
+		err    error
+	}
+	ch := make(chan attemptOut, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- attemptOut{err: &ToolInputError{Code: "tool_panic", Message: fmt.Sprintf("tool panic: %v", r)}}
+			}
+		}()
+		d, s, e := do(input)
+		ch <- attemptOut{data: d, source: s, err: e}
+	}()
+
+	select {
+	case <-attemptCtx.Done():
+		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+			return nil, meta.Provider, &ToolInputError{Code: "tool_timeout", Message: "tool execution timeout"}
+		}
+		return nil, meta.Provider, &ToolInputError{Code: "tool_canceled", Message: "tool execution canceled"}
+	case out := <-ch:
+		if out.source == "" {
+			out.source = meta.Provider
+		}
+		if out.err == nil {
+			return out.data, out.source, nil
+		}
+		return out.data, out.source, normalizeToolErr(out.err)
+	}
+}
+
+func normalizeToolErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := AsToolInputError(err); ok {
+		return err
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "timeout"):
+		return &ToolInputError{Code: "tool_timeout", Message: err.Error()}
+	case strings.Contains(msg, "canceled"):
+		return &ToolInputError{Code: "tool_canceled", Message: err.Error()}
+	default:
+		return err
+	}
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, item := range v {
+		if strings.TrimSpace(item) != "" {
+			return item
+		}
+	}
+	return ""
 }
 
 func resolveK8sClient(deps PlatformDeps, params map[string]any) (*kubernetes.Clientset, string, error) {

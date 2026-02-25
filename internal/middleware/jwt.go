@@ -15,8 +15,12 @@ func JWTAuth() gin.HandlerFunc {
 		accessTokenH := c.Request.Header.Get("Authorization")
 		resp := response.NewResp(xcode.TokenInvalid, "请求未携带 token，无法访问", nil)
 		if accessTokenH == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, xcode.NewErrCode(xcode.Unauthorized))
-			return
+			if qToken := strings.TrimSpace(c.Query("token")); qToken != "" {
+				accessTokenH = "Bearer " + qToken
+			} else {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, xcode.NewErrCode(xcode.Unauthorized))
+				return
+			}
 		}
 
 		parts := strings.SplitN(accessTokenH, " ", 2)

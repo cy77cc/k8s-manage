@@ -260,6 +260,16 @@ body {
   animation: fade-in 0.3s ease-out;
 }
 
+.host-terminal-page .host-terminal-xterm .xterm-viewport {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.host-terminal-page .host-terminal-xterm .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .stagger-1 { animation-delay: 0.1s; }
 .stagger-2 { animation-delay: 0.2s; }
 .stagger-3 { animation-delay: 0.3s; }
