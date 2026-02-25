@@ -88,6 +88,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [loading, setLoading] = useState(false);
   const [streamState, setStreamState] = useState<StreamState>('idle');
   const [streamError, setStreamError] = useState('');
+  const [streamNotice, setStreamNotice] = useState('');
   const [currentSession, setCurrentSession] = useState<AISession | null>(null);
   const [lastPrompt, setLastPrompt] = useState('');
   const [traceRawVisible, setTraceRawVisible] = useState<Record<string, boolean>>({});
@@ -176,6 +177,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setLoading(true);
     setStreamState('running');
     setStreamError('');
+    setStreamNotice('');
     setLastPrompt(messageText);
 
     let latestSession: AISession | undefined;
@@ -259,10 +261,43 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           onDone: (done) => {
             latestSession = done.session;
             setCurrentSession(done.session);
+            if (done.stream_state === 'partial') {
+              setStreamState('timeout');
+              setStreamError('工具结果不完整，可重试本轮对话。');
+              const turnID = done.turn_id || activeTurnID;
+              const missing = done.tool_summary?.missing || [];
+              if (missing.length > 0) {
+                attachTraceToAssistant(assistantMessageID, turnID, {
+                  id: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                  type: 'tool_missing',
+                  payload: {
+                    tool: 'runtime',
+                    missing,
+                    summary: done.tool_summary,
+                  },
+                  timestamp: new Date().toISOString(),
+                });
+              }
+              return;
+            }
+            if (done.stream_state === 'failed') {
+              setStreamState('error');
+              return;
+            }
             setStreamState('done');
           },
           onError: (err) => {
-            setStreamState(err.message?.includes('超时') ? 'timeout' : 'error');
+            if (err.code === 'tool_timeout_soft') {
+              setStreamNotice(err.message || '工具执行较慢，正在继续等待结果…');
+              setStreamState('running');
+              return;
+            }
+            if (err.code === 'tool_result_missing') {
+              setStreamState('timeout');
+              setStreamError(err.message || '工具结果不完整，可重试本轮对话。');
+              return;
+            }
+            setStreamState(err.code === 'tool_timeout_hard' || err.message?.includes('超时') ? 'timeout' : 'error');
             setStreamError(err.message || 'AI服务暂时不可用');
           },
         },
@@ -396,7 +431,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                     const isRawShown = !!traceRawVisible[trace.id];
                                     const traceStatus = trace.type === 'tool_result'
                                       ? ((trace.payload?.result?.ok || trace.payload?.payload?.result?.ok) ? 'success' : 'error')
-                                      : (trace.type === 'approval_required' ? 'warning' : 'processing');
+                                      : (trace.type === 'approval_required' || trace.type === 'tool_missing' ? 'warning' : 'processing');
                                     return (
                                       <Card key={trace.id} size="small" className="ai-trace-card">
                                         <Space className="ai-trace-card-head">
@@ -439,6 +474,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <Text className="ai-chat-loading-text">AI 正在思考...</Text>
           </div>
         )}
+        {streamNotice ? (
+          <div style={{ padding: '4px 8px' }}>
+            <Alert type="info" showIcon message={streamNotice} />
+          </div>
+        ) : null}
         <div ref={messagesEndRef} />
       </div>
 

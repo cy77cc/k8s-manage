@@ -34,7 +34,7 @@ export interface AIRecommendation {
 
 export interface ToolTrace {
   id: string;
-  type: 'tool_call' | 'tool_result' | 'approval_required';
+  type: 'tool_call' | 'tool_result' | 'approval_required' | 'tool_missing';
   payload: Record<string, any>;
   timestamp: string;
 }
@@ -93,11 +93,24 @@ interface SSEDeltaEvent {
 
 interface SSEDoneEvent {
   session: AISession;
+  stream_state?: 'ok' | 'partial' | 'failed';
+  tool_summary?: {
+    calls: number;
+    results: number;
+    missing?: string[];
+  };
   turn_id?: string;
 }
 
 interface SSEErrorEvent {
   message: string;
+  code?: string;
+  recoverable?: boolean;
+  tool_summary?: {
+    calls: number;
+    results: number;
+    missing?: string[];
+  };
   turn_id?: string;
 }
 interface SSEThinkingEvent {
@@ -175,22 +188,44 @@ export const aiApi = {
     const controller = new AbortController();
     let timedOut = false;
     let toolPending = false;
-    let toolTimeoutTimer: number | null = null;
+    let softTimeoutTimer: number | null = null;
+    let hardTimeoutTimer: number | null = null;
+    let softWarned = false;
 
     const clearToolTimer = () => {
-      if (toolTimeoutTimer !== null) {
-        window.clearTimeout(toolTimeoutTimer);
-        toolTimeoutTimer = null;
+      if (softTimeoutTimer !== null) {
+        window.clearTimeout(softTimeoutTimer);
+        softTimeoutTimer = null;
       }
+      if (hardTimeoutTimer !== null) {
+        window.clearTimeout(hardTimeoutTimer);
+        hardTimeoutTimer = null;
+      }
+      softWarned = false;
     };
 
     const armToolTimeout = () => {
       clearToolTimer();
-      toolTimeoutTimer = window.setTimeout(() => {
-        timedOut = true;
-        handlers.onError?.({ message: '工具调用执行超时，请重试本轮对话。' });
-        controller.abort();
+      softTimeoutTimer = window.setTimeout(() => {
+        if (softWarned) {
+          return;
+        }
+        softWarned = true;
+        handlers.onError?.({
+          code: 'tool_timeout_soft',
+          recoverable: true,
+          message: '工具执行较慢，正在继续等待结果…',
+        });
       }, 25000);
+      hardTimeoutTimer = window.setTimeout(() => {
+        timedOut = true;
+        handlers.onError?.({
+          code: 'tool_timeout_hard',
+          recoverable: true,
+          message: '工具调用超时，请重试本轮对话。',
+        });
+        controller.abort();
+      }, 55000);
     };
 
     const touchActivity = () => {
@@ -255,8 +290,11 @@ export const aiApi = {
         clearToolTimer();
       } else if (eventType === 'error') {
         handlers.onError?.(payload as SSEErrorEvent);
-        toolPending = false;
-        clearToolTimer();
+        const err = payload as SSEErrorEvent;
+        if (err.code !== 'tool_timeout_soft') {
+          toolPending = false;
+          clearToolTimer();
+        }
       } else if (eventType === 'thinking_delta') {
         handlers.onThinkingDelta?.(payload as SSEThinkingEvent);
         touchActivity();

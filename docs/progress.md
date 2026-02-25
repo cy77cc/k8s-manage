@@ -547,3 +547,48 @@
 1. 增加 rollout/hpa/quota 的接口级单测与 e2e 场景回归。
 2. 补充 network/observability/storage 的 Phase-C 接口骨架与页面占位。
 3. 将 rollout 动作从 CLI 依赖逐步迁移到可控 controller/API 路径。
+
+## 2026-02-25 (AI Tool Stream Stability Fix: SSE serialize + terminal semantics)
+
+### Scope
+
+- 修复 AI tool calling “tool_call 后偶发提前结束”的稳定性问题，落地串行 SSE 写入、tool call/result 配对校验与前端两阶段超时策略。
+
+### Completed
+
+- 后端：
+  - `internal/service/ai/events_sse.go`
+    - 新增 `sseWriter` 单写协程模型（channel + writer loop），heartbeat 与主流程均通过同一写入通道发事件，移除并发直写 `c.Writer` 路径。
+  - `internal/service/ai/chat_handler.go`
+    - 新增 `toolEventTracker`，按 runtime 事件统计 call/result。
+    - `tool_call/tool_result` 统一以 `WithToolEventEmitter` runtime 事件为准，移除模型层重复 `item.ToolCalls` 发送。
+    - SSE 终态增强：
+      - `done` 增加 `stream_state`（ok/partial/failed）与 `tool_summary`（calls/results/missing）。
+      - 缺失 tool result 时发送 `error(code=tool_result_missing)`，并 `done(stream_state=partial)`。
+      - 流异常时发送 `error(code=stream_interrupted)`，并 `done(stream_state=failed)`。
+    - 删除空内容强制“已完成。”兜底，改为可追溯内容（错误摘要/无输出）。
+  - 新增单测：
+    - `internal/service/ai/chat_handler_test.go`
+    - 覆盖 tool 配对汇总和 `stream_state` 判定。
+- 前端：
+  - `web/src/api/modules/ai.ts`
+    - 扩展 SSE 类型：`done.stream_state/tool_summary`、`error.code/recoverable`。
+    - 超时策略改为两阶段：`25s` soft timeout（仅提示）+ `55s` hard timeout（abort）。
+  - `web/src/components/AI/ChatInterface.tsx`
+    - 支持 `done(stream_state=partial)` UI 告警与重试引导。
+    - 在 assistant 回复内追加 `tool_missing` 轨迹，避免静默结束。
+    - `tool_timeout_soft` 作为“慢执行提示”展示，不中断对话。
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+### Known Gaps / Risks
+
+- 当前 `tool_result_missing` 仍基于事件配对统计，若第三方工具实现不规范（不发 result 事件）会持续触发 partial，需要逐步对齐工具实现。
+
+### Next Actions
+
+1. 给 `chat_handler` 增加集成级 SSE 事件序列测试（包含 heartbeat + tool 流）。
+2. 为前端 trace 增加“按 turn_id 聚合摘要”视图，减少长对话轨迹噪音。

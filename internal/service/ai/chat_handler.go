@@ -15,6 +15,80 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type toolSummary struct {
+	Calls   int      `json:"calls"`
+	Results int      `json:"results"`
+	Missing []string `json:"missing"`
+}
+
+type streamErrorPayload struct {
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+	Recoverable bool   `json:"recoverable"`
+}
+
+type toolEventTracker struct {
+	mu      sync.Mutex
+	calls   map[string]int
+	results map[string]int
+}
+
+func newToolEventTracker() *toolEventTracker {
+	return &toolEventTracker{
+		calls:   map[string]int{},
+		results: map[string]int{},
+	}
+}
+
+func (t *toolEventTracker) noteCall(tool string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	name := strings.TrimSpace(tool)
+	if name == "" {
+		name = "unknown"
+	}
+	t.calls[name]++
+}
+
+func (t *toolEventTracker) noteResult(tool string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	name := strings.TrimSpace(tool)
+	if name == "" {
+		name = "unknown"
+	}
+	t.results[name]++
+}
+
+func (t *toolEventTracker) summary() toolSummary {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := toolSummary{}
+	for _, count := range t.calls {
+		out.Calls += count
+	}
+	for _, count := range t.results {
+		out.Results += count
+	}
+	for tool, callCount := range t.calls {
+		missing := callCount - t.results[tool]
+		for i := 0; i < missing; i++ {
+			out.Missing = append(out.Missing, tool)
+		}
+	}
+	return out
+}
+
+func resolveStreamState(fatalErr *streamErrorPayload, summary toolSummary) string {
+	if fatalErr != nil {
+		return "failed"
+	}
+	if len(summary.Missing) > 0 {
+		return "partial"
+	}
+	return "ok"
+}
+
 func (h *handler) chat(c *gin.Context) {
 	var req chatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -48,34 +122,19 @@ func (h *handler) chat(c *gin.Context) {
 		return
 	}
 	turnID := fmt.Sprintf("turn-%d", time.Now().UnixNano())
-	emit := func(event string, payload gin.H) bool {
-		if payload == nil {
-			payload = gin.H{}
-		}
-		payload["turn_id"] = turnID
-		return writeSSE(c, flusher, event, payload)
-	}
+	writer := newSSEWriter(c, flusher, turnID)
+	emit := writer.Emit
 	var finalOnce sync.Once
-	emitFinal := func(event string, payload gin.H) {
+	emitFinal := func(event string, payload gin.H) bool {
+		sent := false
 		finalOnce.Do(func() {
-			_ = emit(event, payload)
+			sent = emit(event, payload)
 		})
+		return sent
 	}
+	defer writer.Close()
 	stopHeartbeat := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if !emit("heartbeat", gin.H{"status": "alive"}) {
-					return
-				}
-			case <-stopHeartbeat:
-				return
-			}
-		}
-	}()
+	go heartbeatLoop(stopHeartbeat, emit)
 	defer close(stopHeartbeat)
 
 	sid := strings.TrimSpace(req.SessionID)
@@ -104,7 +163,8 @@ func (h *handler) chat(c *gin.Context) {
 	}
 
 	approvalToken := strings.TrimSpace(toString(req.Context["approval_token"]))
-	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, req.Context, emit)
+	tracker := newToolEventTracker()
+	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, req.Context, emit, tracker)
 	prompt := msg
 	if len(req.Context) > 0 {
 		prompt = msg + "\n\n上下文:\n" + mustJSON(req.Context)
@@ -117,6 +177,7 @@ func (h *handler) chat(c *gin.Context) {
 	}
 	defer stream.Close()
 
+	var fatalErr *streamErrorPayload
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
 	var streamErr error
@@ -142,17 +203,6 @@ func (h *handler) chat(c *gin.Context) {
 		if item == nil {
 			continue
 		}
-		if len(item.ToolCalls) > 0 {
-			toolName := "unknown"
-			if item.ToolCalls[0].Function.Name != "" {
-				toolName = item.ToolCalls[0].Function.Name
-			}
-			_ = emit("tool_call", gin.H{
-				"tool":    toolName,
-				"payload": gin.H{"tool_calls": item.ToolCalls},
-				"ts":      time.Now().UTC().Format(time.RFC3339Nano),
-			})
-		}
 		if item.ReasoningContent != "" {
 			reasoningContent.WriteString(item.ReasoningContent)
 			_ = emit("thinking_delta", gin.H{"contentChunk": item.ReasoningContent})
@@ -166,14 +216,39 @@ func (h *handler) chat(c *gin.Context) {
 	}
 	if streamErr != nil && !errors.Is(streamErr, io.EOF) {
 		if _, ok := ai2.IsApprovalRequired(streamErr); !ok {
-			emitFinal("error", gin.H{"message": streamErr.Error()})
-			return
+			fatalErr = &streamErrorPayload{
+				Code:        "stream_interrupted",
+				Message:     streamErr.Error(),
+				Recoverable: true,
+			}
 		}
+	}
+
+	summary := tracker.summary()
+	if len(summary.Missing) > 0 {
+		toolErr := &streamErrorPayload{
+			Code:        "tool_result_missing",
+			Message:     fmt.Sprintf("tool result missing for %d call(s)", len(summary.Missing)),
+			Recoverable: true,
+		}
+		_ = emitFinal("error", gin.H{
+			"code":         toolErr.Code,
+			"message":      toolErr.Message,
+			"recoverable":  toolErr.Recoverable,
+			"tool_summary": summary,
+		})
 	}
 
 	content := strings.TrimSpace(assistantContent.String())
 	if content == "" {
-		content = "已完成。"
+		switch {
+		case fatalErr != nil:
+			content = fmt.Sprintf("本轮执行未完整结束：%s", fatalErr.Message)
+		case len(summary.Missing) > 0:
+			content = "本轮工具调用结果不完整。"
+		default:
+			content = "无输出。"
+		}
 	}
 	assistantTime := time.Now()
 	session, err = h.store.appendMessage(uid, scene, sid, map[string]any{
@@ -188,10 +263,23 @@ func (h *handler) chat(c *gin.Context) {
 		return
 	}
 	h.refreshSuggestions(uid, scene, content)
-	emitFinal("done", gin.H{"session": session})
+	streamState := resolveStreamState(fatalErr, summary)
+	if fatalErr != nil {
+		_ = emitFinal("error", gin.H{
+			"code":         fatalErr.Code,
+			"message":      fatalErr.Message,
+			"recoverable":  fatalErr.Recoverable,
+			"tool_summary": summary,
+		})
+	}
+	emitFinal("done", gin.H{
+		"session":      session,
+		"stream_state": streamState,
+		"tool_summary": summary,
+	})
 }
 
-func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene string, runtime map[string]any, emit func(event string, payload gin.H) bool) context.Context {
+func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene string, runtime map[string]any, emit func(event string, payload gin.H) bool, tracker *toolEventTracker) context.Context {
 	ctx = ai2.WithToolUser(ctx, uid, approvalToken)
 	ctx = ai2.WithToolRuntimeContext(ctx, runtime)
 	ctx = ai2.WithToolMemoryAccessor(ctx, &toolMemoryAccessor{
@@ -204,8 +292,15 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 		switch event {
 		case "tool_call", "tool_result":
 			pm := toPayloadMap(payload)
+			toolName := strings.TrimSpace(toString(pm["tool"]))
+			switch event {
+			case "tool_call":
+				tracker.noteCall(toolName)
+			case "tool_result":
+				tracker.noteResult(toolName)
+			}
 			_ = emit(event, gin.H{
-				"tool":             toString(pm["tool"]),
+				"tool":             toolName,
 				"payload":          pm,
 				"ts":               time.Now().UTC().Format(time.RFC3339Nano),
 				"retry":            pm["retry"],
