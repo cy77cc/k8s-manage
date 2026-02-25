@@ -17,10 +17,10 @@ func TestBuildLocalTools_HasSchemaAndRequired(t *testing.T) {
 	}
 
 	cases := []string{
-		"os.get_cpu_mem",
-		"k8s.get_pod_logs",
-		"service.deploy_apply",
-		"host.ssh_exec_readonly",
+		"os_get_cpu_mem",
+		"k8s_get_pod_logs",
+		"service_deploy_apply",
+		"host_ssh_exec_readonly",
 	}
 	for _, name := range cases {
 		meta, ok := lookup[name]

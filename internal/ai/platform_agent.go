@@ -172,7 +172,8 @@ func (p *PlatformAgent) RunTool(ctx context.Context, toolName string, params map
 	if p == nil {
 		return ToolResult{OK: false, Error: "agent not initialized", Source: "platform"}, fmt.Errorf("agent not initialized")
 	}
-	t, ok := p.tools[toolName]
+	normalizedName := NormalizeToolName(toolName)
+	t, ok := p.tools[normalizedName]
 	if !ok {
 		return ToolResult{OK: false, Error: "tool not found", Source: "platform"}, fmt.Errorf("tool not found")
 	}

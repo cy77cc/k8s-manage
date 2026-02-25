@@ -4,10 +4,10 @@ import "testing"
 
 func TestToolEventTrackerSummary(t *testing.T) {
 	tracker := newToolEventTracker()
-	tracker.noteCall("c1", "os.get_cpu_mem")
-	tracker.noteCall("c2", "os.get_cpu_mem")
-	tracker.noteCall("c3", "k8s.get_events")
-	tracker.noteResult("c1", "os.get_cpu_mem")
+	tracker.noteCall("c1", "os_get_cpu_mem")
+	tracker.noteCall("c2", "os_get_cpu_mem")
+	tracker.noteCall("c3", "k8s_get_events")
+	tracker.noteResult("c1", "os_get_cpu_mem")
 
 	summary := tracker.summary()
 	if summary.Calls != 3 {

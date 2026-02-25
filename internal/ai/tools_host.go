@@ -14,7 +14,7 @@ import (
 )
 
 func hostSSHReadonly(ctx context.Context, deps PlatformDeps, input HostSSHReadonlyInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host.ssh_exec_readonly", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in HostSSHReadonlyInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host_ssh_exec_readonly", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in HostSSHReadonlyInput) (any, string, error) {
 		hostID := in.HostID
 		cmd := strings.TrimSpace(in.Command)
 		if hostID <= 0 {
@@ -39,7 +39,7 @@ func hostSSHReadonly(ctx context.Context, deps PlatformDeps, input HostSSHReadon
 }
 
 func hostListInventory(ctx context.Context, deps PlatformDeps, input HostInventoryInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host.list_inventory", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in HostInventoryInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host_list_inventory", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in HostInventoryInput) (any, string, error) {
 		if deps.DB == nil {
 			return nil, "db", fmt.Errorf("db unavailable")
 		}
@@ -89,7 +89,7 @@ func hostListInventory(ctx context.Context, deps PlatformDeps, input HostInvento
 }
 
 func hostBatchExecPreview(ctx context.Context, deps PlatformDeps, input HostBatchExecPreviewInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host.batch_exec_preview", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in HostBatchExecPreviewInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host_batch_exec_preview", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in HostBatchExecPreviewInput) (any, string, error) {
 		hostIDs, err := normalizeHostIDs(in.HostIDs)
 		if err != nil {
 			return nil, "host_batch_preview", err
@@ -125,7 +125,7 @@ func hostBatchExecPreview(ctx context.Context, deps PlatformDeps, input HostBatc
 }
 
 func hostBatchExecApply(ctx context.Context, deps PlatformDeps, input HostBatchExecApplyInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host.batch_exec_apply", Mode: ToolModeMutating, Risk: ToolRiskHigh, Provider: "local", Permission: "ai:tool:execute"}, input, func(in HostBatchExecApplyInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host_batch_exec_apply", Mode: ToolModeMutating, Risk: ToolRiskHigh, Provider: "local", Permission: "ai:tool:execute"}, input, func(in HostBatchExecApplyInput) (any, string, error) {
 		hostIDs, err := normalizeHostIDs(in.HostIDs)
 		if err != nil {
 			return nil, "host_batch_exec", err
@@ -181,7 +181,7 @@ func hostBatchExecApply(ctx context.Context, deps PlatformDeps, input HostBatchE
 }
 
 func hostBatchStatusUpdate(ctx context.Context, deps PlatformDeps, input HostBatchStatusInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host.batch_status_update", Mode: ToolModeMutating, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:execute"}, input, func(in HostBatchStatusInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "host_batch_status_update", Mode: ToolModeMutating, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:execute"}, input, func(in HostBatchStatusInput) (any, string, error) {
 		hostIDs, err := normalizeHostIDs(in.HostIDs)
 		if err != nil {
 			return nil, "host_batch_status", err

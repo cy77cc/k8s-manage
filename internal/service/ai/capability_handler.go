@@ -49,6 +49,7 @@ func (h *handler) previewTool(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "tool not found"})
 		return
 	}
+	req.Tool = meta.Name
 	if h.svcCtx.AI == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "msg": "ai agent not initialized"})
 		return
@@ -99,6 +100,7 @@ func (h *handler) executeTool(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "tool not found"})
 		return
 	}
+	req.Tool = meta.Name
 	rec := &executionRecord{
 		ID:         "exe-" + strconvFormatInt(time.Now().UnixNano()),
 		Tool:       req.Tool,
@@ -167,6 +169,7 @@ func (h *handler) createApproval(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "tool not found"})
 		return
 	}
+	req.Tool = meta.Name
 	if meta.Mode == ai2.ToolModeReadonly {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "readonly tool does not require approval"})
 		return
@@ -221,8 +224,9 @@ func (h *handler) findMeta(name string) (ai2.ToolMeta, bool) {
 	if h.svcCtx.AI == nil {
 		return ai2.ToolMeta{}, false
 	}
+	normalized := ai2.NormalizeToolName(name)
 	for _, item := range h.svcCtx.AI.ToolMetas() {
-		if item.Name == name {
+		if item.Name == normalized {
 			return item, true
 		}
 	}

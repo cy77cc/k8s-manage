@@ -9,7 +9,7 @@ import (
 )
 
 func k8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.list_resources", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sListInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s_list_resources", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sListInput) (any, string, error) {
 		if strings.TrimSpace(in.Resource) == "" {
 			return nil, "validation", NewMissingParam("resource", "resource is required")
 		}
@@ -86,7 +86,7 @@ func k8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput
 }
 
 func k8sGetEvents(ctx context.Context, deps PlatformDeps, input K8sEventsInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.get_events", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sEventsInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s_get_events", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sEventsInput) (any, string, error) {
 		cli, source, err := resolveK8sClient(deps, structToMap(in))
 		if err != nil {
 			return nil, source, err
@@ -115,7 +115,7 @@ func k8sGetEvents(ctx context.Context, deps PlatformDeps, input K8sEventsInput) 
 }
 
 func k8sGetPodLogs(ctx context.Context, deps PlatformDeps, input K8sPodLogsInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s.get_pod_logs", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sPodLogsInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "k8s_get_pod_logs", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in K8sPodLogsInput) (any, string, error) {
 		cli, source, err := resolveK8sClient(deps, structToMap(in))
 		if err != nil {
 			return nil, source, err

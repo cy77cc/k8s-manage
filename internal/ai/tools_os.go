@@ -11,7 +11,7 @@ import (
 var serviceUnitRegexp = regexp.MustCompile(`^[a-zA-Z0-9_.@-]+$`)
 
 func osGetCPUMem(ctx context.Context, deps PlatformDeps, input OSCPUMemInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_cpu_mem", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSCPUMemInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os_get_cpu_mem", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSCPUMemInput) (any, string, error) {
 		target := strings.TrimSpace(in.Target)
 		loadavg, _, _ := runOnTarget(ctx, deps, target, "cat", []string{"/proc/loadavg"}, "cat /proc/loadavg")
 		mem, source, err := runOnTarget(ctx, deps, target, "cat", []string{"/proc/meminfo"}, "cat /proc/meminfo")
@@ -24,7 +24,7 @@ func osGetCPUMem(ctx context.Context, deps PlatformDeps, input OSCPUMemInput) (T
 }
 
 func osGetDiskFS(ctx context.Context, deps PlatformDeps, input OSDiskInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_disk_fs", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSDiskInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os_get_disk_fs", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSDiskInput) (any, string, error) {
 		target := strings.TrimSpace(in.Target)
 		out, source, err := runOnTarget(ctx, deps, target, "df", []string{"-h"}, "df -h")
 		if err != nil {
@@ -35,7 +35,7 @@ func osGetDiskFS(ctx context.Context, deps PlatformDeps, input OSDiskInput) (Too
 }
 
 func osGetNetStat(ctx context.Context, deps PlatformDeps, input OSNetInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_net_stat", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSNetInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os_get_net_stat", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSNetInput) (any, string, error) {
 		target := strings.TrimSpace(in.Target)
 		dev, source, err := runOnTarget(ctx, deps, target, "cat", []string{"/proc/net/dev"}, "cat /proc/net/dev")
 		if err != nil {
@@ -47,7 +47,7 @@ func osGetNetStat(ctx context.Context, deps PlatformDeps, input OSNetInput) (Too
 }
 
 func osGetProcessTop(ctx context.Context, deps PlatformDeps, input OSProcessTopInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_process_top", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSProcessTopInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os_get_process_top", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSProcessTopInput) (any, string, error) {
 		target := strings.TrimSpace(in.Target)
 		limit := in.Limit
 		if limit <= 0 {
@@ -66,7 +66,7 @@ func osGetProcessTop(ctx context.Context, deps PlatformDeps, input OSProcessTopI
 }
 
 func osGetJournalTail(ctx context.Context, deps PlatformDeps, input OSJournalInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_journal_tail", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSJournalInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os_get_journal_tail", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSJournalInput) (any, string, error) {
 		target := strings.TrimSpace(in.Target)
 		service := strings.TrimSpace(in.Service)
 		if service == "" {
@@ -93,7 +93,7 @@ func osGetJournalTail(ctx context.Context, deps PlatformDeps, input OSJournalInp
 }
 
 func osGetContainerRuntime(ctx context.Context, deps PlatformDeps, input OSContainerRuntimeInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os.get_container_runtime", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSContainerRuntimeInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "os_get_container_runtime", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in OSContainerRuntimeInput) (any, string, error) {
 		target := strings.TrimSpace(in.Target)
 		out, source, err := runOnTarget(ctx, deps, target, "docker", []string{"ps", "--format", "{{.ID}} {{.Image}} {{.Status}}"}, "docker ps --format '{{.ID}} {{.Image}} {{.Status}}'")
 		if err == nil {

@@ -7,7 +7,7 @@ import (
 )
 
 func serviceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetailInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.get_detail", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in ServiceDetailInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service_get_detail", Mode: ToolModeReadonly, Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read"}, input, func(in ServiceDetailInput) (any, string, error) {
 		sid := in.ServiceID
 		if sid <= 0 {
 			return nil, "validation", NewMissingParam("service_id", "service_id is required")
@@ -21,7 +21,7 @@ func serviceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetai
 }
 
 func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceDeployPreviewInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.deploy_preview", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in ServiceDeployPreviewInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service_deploy_preview", Mode: ToolModeReadonly, Risk: ToolRiskMedium, Provider: "local", Permission: "ai:tool:read"}, input, func(in ServiceDeployPreviewInput) (any, string, error) {
 		sid := in.ServiceID
 		cid := in.ClusterID
 		if sid <= 0 {
@@ -39,7 +39,7 @@ func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceD
 }
 
 func serviceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDeployApplyInput) (ToolResult, error) {
-	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service.deploy_apply", Mode: ToolModeMutating, Risk: ToolRiskHigh, Provider: "local", Permission: "ai:tool:execute"}, input, func(in ServiceDeployApplyInput) (any, string, error) {
+	return runWithPolicyAndEvent(ctx, ToolMeta{Name: "service_deploy_apply", Mode: ToolModeMutating, Risk: ToolRiskHigh, Provider: "local", Permission: "ai:tool:execute"}, input, func(in ServiceDeployApplyInput) (any, string, error) {
 		sid := in.ServiceID
 		cid := in.ClusterID
 		if sid <= 0 {

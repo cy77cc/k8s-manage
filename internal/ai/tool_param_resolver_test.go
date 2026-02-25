@@ -29,7 +29,7 @@ func TestResolveToolParamsPriority(t *testing.T) {
 	}})
 
 	meta := ToolMeta{
-		Name:        "k8s.get_events",
+		Name:        "k8s_get_events",
 		DefaultHint: map[string]any{"namespace": "ns-default", "limit": 50},
 	}
 	resolved, _ := resolveToolParams(ctx, meta, map[string]any{}, "")
