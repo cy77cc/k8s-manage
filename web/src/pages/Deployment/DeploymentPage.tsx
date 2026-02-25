@@ -1,0 +1,421 @@
+import React from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Row,
+  Select,
+  Space,
+  Table,
+  Tabs,
+  Tag,
+  Tooltip,
+  message,
+} from 'antd';
+import { Api } from '../../api';
+import type { Cluster } from '../../api/modules/kubernetes';
+import type { Host } from '../../api/modules/hosts';
+import type { ServiceItem } from '../../api/modules/services';
+import type { DeployTarget, DeployRelease, Inspection } from '../../api/modules/deployment';
+
+const envOptions = [{ value: 'development' }, { value: 'staging' }, { value: 'production' }];
+const strategyOptions = [{ value: 'rolling' }, { value: 'blue-green' }, { value: 'canary' }];
+
+type GovernanceForm = {
+  service_id: number;
+  env: string;
+  traffic_policy: string;
+  resilience_policy: string;
+  access_policy: string;
+  slo_policy: string;
+};
+
+const parseJSONMap = (raw?: string): Record<string, any> => {
+  const content = (raw || '').trim();
+  if (!content) return {};
+  const parsed = JSON.parse(content);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error('JSON 内容必须是对象');
+  }
+  return parsed;
+};
+
+const parseVariables = (raw?: string): Record<string, string> => {
+  const content = (raw || '').trim();
+  if (!content) return {};
+  const parsed = JSON.parse(content);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error('变量必须是 JSON 对象');
+  }
+  const out: Record<string, string> = {};
+  Object.entries(parsed).forEach(([k, v]) => {
+    out[k] = String(v ?? '');
+  });
+  return out;
+};
+
+const DeploymentPage: React.FC = () => {
+  const [loading, setLoading] = React.useState(false);
+  const [targets, setTargets] = React.useState<DeployTarget[]>([]);
+  const [releases, setReleases] = React.useState<DeployRelease[]>([]);
+  const [inspections, setInspections] = React.useState<Inspection[]>([]);
+  const [clusters, setClusters] = React.useState<Cluster[]>([]);
+  const [hosts, setHosts] = React.useState<Host[]>([]);
+  const [services, setServices] = React.useState<ServiceItem[]>([]);
+  const [previewManifest, setPreviewManifest] = React.useState('');
+  const [previewWarnings, setPreviewWarnings] = React.useState<Array<{ code: string; message: string; level: string }>>([]);
+  const [clusterModalOpen, setClusterModalOpen] = React.useState(false);
+
+  const [targetForm] = Form.useForm();
+  const [releaseForm] = Form.useForm();
+  const [clusterForm] = Form.useForm();
+  const [governanceForm] = Form.useForm<GovernanceForm>();
+  const [inspectionForm] = Form.useForm();
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [tRes, rRes, iRes, cRes, hRes, sRes] = await Promise.all([
+        Api.deployment.getTargets(),
+        Api.deployment.getReleases(),
+        Api.deployment.listInspections(),
+        Api.kubernetes.getClusterList({ page: 1, pageSize: 200 }),
+        Api.hosts.getHostList({ page: 1, pageSize: 500 }),
+        Api.services.getList({ page: 1, pageSize: 500 }),
+      ]);
+      setTargets(tRes.data.list || []);
+      setReleases(rRes.data.list || []);
+      setInspections(iRes.data.list || []);
+      setClusters(cRes.data.list || []);
+      setHosts(hRes.data.list || []);
+      setServices(sRes.data.list || []);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '加载部署管理失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  const createCluster = async () => {
+    const v = await clusterForm.validateFields();
+    await Api.kubernetes.createCluster({
+      name: String(v.name),
+      server: String(v.server),
+      credential_ref: String(v.credential_ref || ''),
+      description: String(v.description || ''),
+    });
+    message.success('K8s 集群创建成功');
+    setClusterModalOpen(false);
+    clusterForm.resetFields();
+    await load();
+  };
+
+  const createTarget = async () => {
+    const v = await targetForm.validateFields();
+    const payload: any = {
+      name: v.name,
+      target_type: v.target_type,
+      cluster_id: v.target_type === 'k8s' ? Number(v.cluster_id || 0) : 0,
+      project_id: Number(localStorage.getItem('projectId') || 1),
+      team_id: Number(localStorage.getItem('teamId') || 1),
+      env: v.env || 'staging',
+      nodes: (v.host_ids || []).map((id: number) => ({ host_id: Number(id), role: 'worker', weight: 100 })),
+    };
+    await Api.deployment.createTarget(payload);
+    message.success('部署目标创建成功');
+    targetForm.resetFields();
+    await load();
+  };
+
+  const preview = async () => {
+    const v = await releaseForm.validateFields();
+    const variables = parseVariables(v.variables_json);
+    const resp = await Api.deployment.previewRelease({
+      service_id: Number(v.service_id),
+      target_id: Number(v.target_id),
+      env: v.env || 'staging',
+      strategy: v.strategy || 'rolling',
+      variables,
+    });
+    setPreviewManifest(resp.data.resolved_manifest || '');
+    setPreviewWarnings(resp.data.warnings || []);
+  };
+
+  const apply = async () => {
+    const v = await releaseForm.validateFields();
+    const variables = parseVariables(v.variables_json);
+    const resp = await Api.deployment.applyRelease({
+      service_id: Number(v.service_id),
+      target_id: Number(v.target_id),
+      env: v.env || 'staging',
+      strategy: v.strategy || 'rolling',
+      variables,
+    });
+    message.success(`发布已执行，release #${resp.data.release_id}`);
+    await load();
+  };
+
+  const rollback = async (releaseId: number) => {
+    await Api.deployment.rollbackRelease(releaseId);
+    message.success(`回滚任务已提交，来源 release #${releaseId}`);
+    await load();
+  };
+
+  const runInspection = async (stage: 'pre' | 'post' | 'periodic', releaseId?: number) => {
+    const v = inspectionForm.getFieldsValue();
+    await Api.deployment.runInspection({
+      release_id: releaseId || (v.release_id ? Number(v.release_id) : undefined),
+      service_id: v.service_id ? Number(v.service_id) : undefined,
+      target_id: v.target_id ? Number(v.target_id) : undefined,
+      stage,
+    });
+    message.success('AIOPS 巡检已执行');
+    await load();
+  };
+
+  const loadGovernance = async () => {
+    const v = await governanceForm.validateFields(['service_id', 'env']);
+    const resp = await Api.deployment.getGovernance(Number(v.service_id), v.env);
+    const row = resp.data || {};
+    governanceForm.setFieldsValue({
+      traffic_policy: row.traffic_policy_json || '{}',
+      resilience_policy: row.resilience_policy_json || '{}',
+      access_policy: row.access_policy_json || '{}',
+      slo_policy: row.slo_policy_json || '{}',
+    });
+    message.success('已加载治理策略');
+  };
+
+  const saveGovernance = async () => {
+    const v = await governanceForm.validateFields();
+    await Api.deployment.putGovernance(Number(v.service_id), {
+      env: v.env,
+      traffic_policy: parseJSONMap(v.traffic_policy),
+      resilience_policy: parseJSONMap(v.resilience_policy),
+      access_policy: parseJSONMap(v.access_policy),
+      slo_policy: parseJSONMap(v.slo_policy),
+    });
+    message.success('治理策略保存成功');
+  };
+
+  const clusterOptions = clusters.map((c) => ({ value: Number(c.id), label: `${c.name} (#${c.id})` }));
+  const hostOptions = hosts.map((h) => ({ value: Number(h.id), label: `${h.name} (${h.ip})` }));
+  const serviceOptions = services.map((s) => ({ value: Number(s.id), label: `${s.name} (#${s.id})` }));
+  const targetOptions = targets.map((t) => ({ value: t.id, label: `${t.name} [${t.target_type}]` }));
+
+  return (
+    <div className="space-y-4">
+      <Card title="部署管理（K8s + Compose）" extra={<Button onClick={() => void load()} loading={loading}>刷新</Button>}>
+        <Tabs items={[
+          {
+            key: 'targets',
+            label: `Targets (${targets.length})`,
+            children: (
+              <>
+                <Form form={targetForm} layout="vertical">
+                  <Row gutter={12}>
+                    <Col span={6}><Form.Item name="name" label="目标名称" rules={[{ required: true }]}><Input placeholder="prod-k8s / edge-compose" /></Form.Item></Col>
+                    <Col span={4}><Form.Item name="target_type" label="类型" initialValue="k8s" rules={[{ required: true }]}><Select options={[{ value: 'k8s' }, { value: 'compose' }]} /></Form.Item></Col>
+                    <Col span={4}><Form.Item name="env" label="环境" initialValue="staging"><Select options={envOptions} /></Form.Item></Col>
+                    <Col span={10}>
+                      <Form.Item shouldUpdate noStyle>
+                        {({ getFieldValue }) => {
+                          const targetType = getFieldValue('target_type') || 'k8s';
+                          if (targetType === 'k8s') {
+                            return (
+                              <Form.Item name="cluster_id" label="K8s 集群" rules={[{ required: true, message: '请选择集群' }]}>
+                                <Select
+                                  options={clusterOptions}
+                                  placeholder="选择已有 K8s 集群"
+                                  dropdownRender={(menu) => (
+                                    <div>
+                                      {menu}
+                                      <div style={{ padding: 8, borderTop: '1px solid #f0f0f0' }}>
+                                        <Button type="link" onClick={() => setClusterModalOpen(true)}>+ 新建 K8s 集群</Button>
+                                      </div>
+                                    </div>
+                                  )}
+                                />
+                              </Form.Item>
+                            );
+                          }
+                          return (
+                            <Form.Item name="host_ids" label="Compose 主机节点" rules={[{ required: true, message: '请选择至少一台主机' }]}>
+                              <Select mode="multiple" options={hostOptions} placeholder="选择主机组（Host 组即 Compose Cluster）" />
+                            </Form.Item>
+                          );
+                        }}
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Form>
+                <Space style={{ marginBottom: 12 }}>
+                  <Button type="primary" onClick={() => void createTarget()}>创建部署目标</Button>
+                  <Tooltip title="Compose 目标直接复用主机管理里的主机组，K8s 目标复用集群管理能力。">
+                    <Tag color="blue">主机/集群已联动</Tag>
+                  </Tooltip>
+                </Space>
+                <Table
+                  rowKey="id"
+                  dataSource={targets}
+                  pagination={false}
+                  columns={[
+                    { title: 'ID', dataIndex: 'id', width: 80 },
+                    { title: '名称', dataIndex: 'name' },
+                    { title: '类型', dataIndex: 'target_type', render: (v: string) => <Tag color={v === 'k8s' ? 'blue' : 'geekblue'}>{v}</Tag> },
+                    {
+                      title: '目标资源',
+                      render: (_: unknown, r: DeployTarget) => (r.target_type === 'k8s'
+                        ? `cluster #${r.cluster_id}`
+                        : (r.nodes || []).map((n) => n.name ? `${n.name}(${n.ip})` : `host#${n.host_id}`).join(', ') || '-'),
+                    },
+                    { title: 'Env', dataIndex: 'env', render: (v: string) => <Tag>{v}</Tag> },
+                    { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'active' ? 'success' : 'default'}>{v}</Tag> },
+                  ]}
+                />
+              </>
+            ),
+          },
+          {
+            key: 'releases',
+            label: `Releases (${releases.length})`,
+            children: (
+              <Row gutter={16}>
+                <Col span={10}>
+                  <Card size="small" title="发布执行">
+                    <Form form={releaseForm} layout="vertical">
+                      <Form.Item name="service_id" label="服务" rules={[{ required: true }]}>
+                        <Select showSearch options={serviceOptions} placeholder="选择服务" optionFilterProp="label" />
+                      </Form.Item>
+                      <Form.Item name="target_id" label="部署目标" rules={[{ required: true }]}>
+                        <Select showSearch options={targetOptions} placeholder="选择目标" optionFilterProp="label" />
+                      </Form.Item>
+                      <Row gutter={12}>
+                        <Col span={12}><Form.Item name="env" label="环境" initialValue="staging"><Select options={envOptions} /></Form.Item></Col>
+                        <Col span={12}><Form.Item name="strategy" label="发布策略" initialValue="rolling"><Select options={strategyOptions} /></Form.Item></Col>
+                      </Row>
+                      <Form.Item name="variables_json" label="模板变量(JSON)">
+                        <Input.TextArea rows={6} placeholder='{"image_tag":"v1.2.3","replicas":"3"}' />
+                      </Form.Item>
+                      <Space>
+                        <Button onClick={() => void preview()}>Preview</Button>
+                        <Button type="primary" onClick={() => void apply()}>Apply</Button>
+                        <Button onClick={() => void runInspection('pre')}>AIOPS Pre-check</Button>
+                      </Space>
+                    </Form>
+                  </Card>
+                </Col>
+                <Col span={14}>
+                  <Card size="small" title="Preview Manifest">
+                    {previewWarnings.length > 0 ? (
+                      <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }}>
+                        {previewWarnings.map((w, idx) => <Alert key={`${w.code}-${idx}`} type={w.level === 'error' ? 'error' : 'warning'} showIcon message={w.message} />)}
+                      </Space>
+                    ) : null}
+                    <pre style={{ maxHeight: 280, overflow: 'auto' }}>{previewManifest || '# 暂无预览'}</pre>
+                  </Card>
+                </Col>
+                <Col span={24} style={{ marginTop: 12 }}>
+                  <Table
+                    rowKey="id"
+                    dataSource={releases}
+                    pagination={false}
+                    columns={[
+                      { title: 'Release', dataIndex: 'id', width: 90 },
+                      { title: 'Service', dataIndex: 'service_id' },
+                      { title: 'Target', dataIndex: 'target_id' },
+                      { title: 'Runtime', dataIndex: 'runtime_type', render: (v: string) => <Tag color={v === 'k8s' ? 'blue' : 'purple'}>{v}</Tag> },
+                      { title: 'Strategy', dataIndex: 'strategy' },
+                      { title: 'Status', dataIndex: 'status', render: (v: string) => <Tag color={v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'}>{v}</Tag> },
+                      { title: '创建时间', dataIndex: 'created_at', render: (v: string) => new Date(v).toLocaleString() },
+                      {
+                        title: '操作',
+                        render: (_: unknown, row: DeployRelease) => (
+                          <Space>
+                            <Button size="small" onClick={() => void rollback(row.id)}>Rollback</Button>
+                            <Button size="small" onClick={() => void runInspection('post', row.id)}>AIOPS Post-check</Button>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </Col>
+              </Row>
+            ),
+          },
+          {
+            key: 'governance',
+            label: 'Governance',
+            children: (
+              <Card size="small" title="服务治理策略（策略 + 流量 + SLO）">
+                <Form form={governanceForm} layout="vertical" initialValues={{ env: 'staging', traffic_policy: '{}', resilience_policy: '{}', access_policy: '{}', slo_policy: '{}' }}>
+                  <Row gutter={12}>
+                    <Col span={8}><Form.Item name="service_id" label="服务" rules={[{ required: true }]}><Select showSearch options={serviceOptions} placeholder="选择服务" optionFilterProp="label" /></Form.Item></Col>
+                    <Col span={4}><Form.Item name="env" label="环境" rules={[{ required: true }]}><Select options={envOptions} /></Form.Item></Col>
+                    <Col span={12}><Space style={{ marginTop: 30 }}><Button onClick={() => void loadGovernance()}>加载策略</Button><Button type="primary" onClick={() => void saveGovernance()}>保存策略</Button></Space></Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}><Form.Item name="traffic_policy" label="流量策略(JSON)"><Input.TextArea rows={7} /></Form.Item></Col>
+                    <Col span={12}><Form.Item name="resilience_policy" label="韧性策略(JSON)"><Input.TextArea rows={7} /></Form.Item></Col>
+                    <Col span={12}><Form.Item name="access_policy" label="访问策略(JSON)"><Input.TextArea rows={7} /></Form.Item></Col>
+                    <Col span={12}><Form.Item name="slo_policy" label="SLO 策略(JSON)"><Input.TextArea rows={7} /></Form.Item></Col>
+                  </Row>
+                </Form>
+              </Card>
+            ),
+          },
+          {
+            key: 'aiops',
+            label: `AIOPS (${inspections.length})`,
+            children: (
+              <>
+                <Card size="small" title="AIOPS 主动巡检" style={{ marginBottom: 12 }}>
+                  <Form form={inspectionForm} layout="inline">
+                    <Form.Item name="service_id"><Select allowClear style={{ width: 220 }} showSearch options={serviceOptions} placeholder="服务" optionFilterProp="label" /></Form.Item>
+                    <Form.Item name="target_id"><Select allowClear style={{ width: 220 }} showSearch options={targetOptions} placeholder="部署目标" optionFilterProp="label" /></Form.Item>
+                    <Form.Item name="release_id"><InputNumber min={1} placeholder="release id" /></Form.Item>
+                    <Form.Item name="stage" initialValue="periodic"><Select style={{ width: 160 }} options={[{ value: 'pre' }, { value: 'post' }, { value: 'periodic' }]} /></Form.Item>
+                    <Button type="primary" onClick={() => void runInspection((inspectionForm.getFieldValue('stage') || 'periodic') as 'pre' | 'post' | 'periodic')}>运行巡检</Button>
+                  </Form>
+                </Card>
+                <Table
+                  rowKey="id"
+                  dataSource={inspections}
+                  pagination={false}
+                  columns={[
+                    { title: 'ID', dataIndex: 'id', width: 80 },
+                    { title: 'Stage', dataIndex: 'stage', render: (v: string) => <Tag>{v}</Tag> },
+                    { title: 'Service/Target', render: (_: unknown, r: Inspection) => `${r.service_id} / ${r.target_id}` },
+                    { title: 'Summary', dataIndex: 'summary' },
+                    { title: 'Status', dataIndex: 'status', render: (v: string) => <Tag color={v === 'done' ? 'success' : 'processing'}>{v}</Tag> },
+                    { title: '时间', dataIndex: 'created_at', render: (v: string) => new Date(v).toLocaleString() },
+                  ]}
+                />
+              </>
+            ),
+          },
+        ]} />
+      </Card>
+
+      <Modal title="新建 K8s 集群" open={clusterModalOpen} onCancel={() => setClusterModalOpen(false)} onOk={() => void createCluster()} okText="创建">
+        <Form form={clusterForm} layout="vertical">
+          <Form.Item name="name" label="集群名称" rules={[{ required: true }]}><Input placeholder="prod-cn-hz" /></Form.Item>
+          <Form.Item name="server" label="API Server" rules={[{ required: true }]}><Input placeholder="https://10.0.0.10:6443" /></Form.Item>
+          <Form.Item name="credential_ref" label="凭据引用"><Input placeholder="env:KUBECONFIG_PROD" /></Form.Item>
+          <Form.Item name="description" label="描述"><Input.TextArea rows={3} /></Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  );
+};
+
+export default DeploymentPage;

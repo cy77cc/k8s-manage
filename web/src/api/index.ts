@@ -49,6 +49,8 @@ import { cicdApi } from './modules/cicd';
 
 export * from './modules/topology';
 import { topologyApi } from './modules/topology';
+export * from './modules/deployment';
+import { deploymentApi } from './modules/deployment';
 
 // 统一导出所有API
 export const Api = {
@@ -71,6 +73,7 @@ export const Api = {
   automation: automationApi,
   cicd: cicdApi,
   topology: topologyApi,
+  deployment: deploymentApi,
 };
 
 export default Api;

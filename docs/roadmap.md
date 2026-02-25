@@ -40,6 +40,7 @@
 | Hosts | In Progress | CRUD + action + ssh exec + batch + onboarding token flow + cloud/kvm/credentials mvp |
 | Clusters / K8s | In Progress | Phase-1新增 namespaces/bindings、rollouts(argo)、hpa、quota/limit-range、prod审批门禁 |
 | Services | In Progress | Service Studio(双栏) + template vars(`{{var}}`) + revisions + env variable sets + deploy target + release records + k8s deploy preview/apply |
+| Deployment Management | In Progress | 统一 Deploy Target(`k8s|compose`) + releases preview/apply/rollback + governance + aiops inspections |
 | RBAC | In Progress | admin 全量放行（含 `*:*`）+ users/roles/permissions 列表统一 `data.list/total` + 关联写入事务化 |
 | AI | In Progress | Eino + Ollama(`glm-5:cloud`) + 控制面（capabilities/tools/approvals/executions）+ SSE tool events + typed tool schema hardening + param resolver/retry |
 
@@ -51,6 +52,7 @@
 | Hosts | `/api/v1/hosts/*` | In Progress |
 | K8s | `/api/v1/clusters/*` | In Progress (Phase-1 lifecycle + namespace isolation + rollout/hpa/quota 已落地) |
 | Services | `/api/v1/services/*` | In Progress |
+| Deployment Management | `/api/v1/deploy/*` + `/api/v1/aiops/*` | In Progress |
 | Settings-RBAC | `/api/v1/rbac/*` | In Progress |
 | Global AI Assistant | `/api/v1/ai/*` | In Progress |
 | Node legacy adapter | `/api/v1/node/add` | In Progress (deprecated, delegating to host domain) |

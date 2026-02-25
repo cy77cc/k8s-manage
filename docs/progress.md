@@ -318,7 +318,30 @@
 
 - `go test ./...` 通过。
 - `npm run build` 通过。
-  - `hosts API` 新增 `probeHost`、`updateCredentials`，`createHost` 支持 probe token。
+
+## 2026-02-25 (Deployment Management Phase-1 Integration)
+
+### Scope
+
+- 将原“K8s 集群”入口升级为统一“部署管理”入口。
+- 打通 `k8s + compose` 两类部署目标创建，与主机/服务联动。
+- 增强发布控制（preview/apply/rollback）、治理策略与 AIOPS 巡检面板。
+
+### Completed
+
+- 前端路由与导航：
+  - 菜单 `/k8s` 切换为 `/deployment`（标签“部署管理”）。
+  - `App.tsx` 新增 `/deployment` 路由，`/k8s` 和 `/k8s/:cluster` 重定向到新入口。
+  - 保留 `/k8s-legacy` 兼容旧页面。
+- 部署管理页面重构（`web/src/pages/Deployment/DeploymentPage.tsx`）：
+  - Targets：支持创建 `k8s|compose` 目标。
+  - K8s 目标支持在页内弹窗创建集群并回填选择。
+  - Compose 目标支持直接选择主机管理中的主机作为节点组。
+  - Releases：支持服务+目标选择，preview/apply/rollback，并支持变量 JSON 注入。
+  - Governance：新增治理策略读写（traffic/resilience/access/slo）。
+  - AIOPS：支持巡检任务发起与记录查看（pre/post/periodic）。
+- 文档更新：
+  - `docs/roadmap.md` 增加 Deployment Management 模块与 API 覆盖行。
 
 ### Verification
 
@@ -327,15 +350,14 @@
 
 ### Known Gaps / Risks
 
-- `rbac` 与 `cluster` 已迁移到 handler 子目录，但仍可继续细分为更小 handler 文件。
-- `POST /hosts` 仍保留无 `probe_token` 的 legacy 路径以兼容旧调用，后续应逐步收敛。
-- 迁移 `down` 仅建议测试环境使用。
+- Compose apply 仍为 Phase-1 占位（发布记录可落库，执行器后续接主机编排）。
+- 发布权限当前以后端权限码为主，前端按钮级精细权限可继续细化。
 
 ### Next Actions
 
-1. 将 `rbac` 拆分为 `permission.go + user_role.go` 等更细文件。
-2. 在 HostList 页面移除 legacy 弹窗创建，统一跳转三步向导。
-3. 为 onboarding 增加后端集成测试（token 一次性消费/过期/非 admin force）。
+1. 后端补充 compose 执行器（`docker compose config/up/ps/logs`）与回滚快照恢复。
+2. 在服务详情页增加 deployment target 直接选择器与治理策略快捷入口。
+3. 增加 deploy/governance/aiops 端到端回归用例（含权限与审批路径）。
 
 ## 2026-02-24 (Team: Host Platform Expansion - SSH/Credentials/Cloud/KVM)
 

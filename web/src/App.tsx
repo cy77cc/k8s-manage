@@ -14,6 +14,7 @@ import HostVirtualizationPage from './pages/Hosts/HostVirtualizationPage';
 import ConfigPage from './pages/Config/ConfigPage';
 import TasksPage from './pages/Tasks/TasksPage';
 import K8sPage from './pages/K8s/K8sPage';
+import DeploymentPage from './pages/Deployment/DeploymentPage';
 import MonitorPage from './pages/Monitor/MonitorPage';
 import ToolsPage from './pages/Tools/ToolsPage';
 import SettingsPage from './pages/Settings/SettingsPage';
@@ -87,8 +88,10 @@ const ProtectedApp: React.FC = () => {
           <Route path="/jobs/:id/edit" element={withAuth('task', 'write', <JobCreationPage />)} />
           <Route path="/jobs/:jobId/history" element={withAuth('task', 'read', <ExecutionHistoryPage />)} />
           <Route path="/jobs/calendar" element={withAuth('task', 'read', <JobCalendarPage />)} />
-          <Route path="/k8s" element={withAuth('kubernetes', 'read', <K8sPage />)} />
-          <Route path="/k8s/:cluster" element={withAuth('kubernetes', 'read', <K8sPage />)} />
+          <Route path="/deployment" element={withAuth('deploy:target', 'read', <DeploymentPage />)} />
+          <Route path="/k8s" element={<Navigate to="/deployment" replace />} />
+          <Route path="/k8s/:cluster" element={<Navigate to="/deployment" replace />} />
+          <Route path="/k8s-legacy" element={withAuth('kubernetes', 'read', <K8sPage />)} />
           <Route path="/monitor" element={withAuth('monitoring', 'read', <MonitorPage />)} />
           <Route path="/monitor/dashboard" element={withAuth('monitoring', 'read', <MonitorPage />)} />
           <Route path="/monitor/alerts" element={withAuth('monitoring', 'read', <MonitorPage />)} />

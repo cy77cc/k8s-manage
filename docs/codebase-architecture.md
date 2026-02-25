@@ -134,3 +134,24 @@
 - 数据层扩展：
   - `services` 表新增 ownership/config/render 相关字段
   - 新表：`service_helm_releases`、`service_render_snapshots`
+
+## 9. Deployment Management Control Plane (2026-02-25)
+
+- UI 入口从 `K8s` 升级为 `部署管理`（`/deployment`），兼容 `/k8s -> /deployment`。
+- 控制面 API：
+  - `GET/POST/PUT/DELETE /api/v1/deploy/targets*`
+  - `POST /api/v1/deploy/releases/preview|apply`
+  - `POST /api/v1/deploy/releases/:id/rollback`
+  - `GET /api/v1/deploy/releases*`
+  - `GET/PUT /api/v1/services/:id/governance`
+  - `POST /api/v1/aiops/inspections/run` + `GET /api/v1/aiops/inspections*`
+- 目标抽象：
+  - `target_type=k8s`：绑定现有 `clusters.id`
+  - `target_type=compose`：绑定主机组（`deployment_target_nodes.host_id`）
+- 发布抽象：
+  - 统一 `preview/apply/rollback`，落库 `deployment_releases`
+  - K8s 运行时复用现有 cluster deploy 路径
+  - Compose Phase-1 为受控占位（先记录发布状态，执行器后续接入）
+- 治理与 AIOPS：
+  - `service_governance_policies` 保存流量/韧性/访问/SLO 策略
+  - `aiops_inspections` 记录 pre/post/periodic 巡检与建议摘要

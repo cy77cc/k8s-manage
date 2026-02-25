@@ -7,7 +7,9 @@ import (
 
 	"github.com/cy77cc/k8s-manage/internal/middleware"
 	"github.com/cy77cc/k8s-manage/internal/service/ai"
+	"github.com/cy77cc/k8s-manage/internal/service/aiops"
 	"github.com/cy77cc/k8s-manage/internal/service/cluster"
+	"github.com/cy77cc/k8s-manage/internal/service/deployment"
 	"github.com/cy77cc/k8s-manage/internal/service/host"
 	"github.com/cy77cc/k8s-manage/internal/service/node"
 	"github.com/cy77cc/k8s-manage/internal/service/project"
@@ -32,8 +34,10 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	servicemgr.RegisterServiceHandlers(v1, serverCtx)
 	host.RegisterHostHandlers(v1, serverCtx)
 	cluster.RegisterClusterHandlers(v1, serverCtx)
+	deployment.RegisterDeploymentHandlers(v1, serverCtx)
 	rbac.RegisterRBACHandlers(v1, serverCtx)
 	ai.RegisterAIHandlers(v1, serverCtx)
+	aiops.RegisterAIOPSHandlers(v1, serverCtx)
 
 	registerWebStaticRoutes(r)
 }

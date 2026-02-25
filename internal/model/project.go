@@ -37,6 +37,8 @@ type Service struct {
 	TemplateVer           string    `gorm:"column:source_template_version;type:varchar(32);default:'v1'" json:"source_template_version"`
 	LastRevisionID        uint      `gorm:"column:last_revision_id;default:0" json:"last_revision_id"`
 	DefaultTargetID       uint      `gorm:"column:default_target_id;default:0" json:"default_target_id"`
+	DefaultDeploymentTargetID uint   `gorm:"column:default_deployment_target_id;default:0" json:"default_deployment_target_id"`
+	RuntimeStrategyJSON       string `gorm:"column:runtime_strategy_json;type:longtext" json:"runtime_strategy_json"`
 	TemplateEngineVersion string    `gorm:"column:template_engine_version;type:varchar(16);default:'v1'" json:"template_engine_version"`
 	Status                string    `gorm:"column:status;type:varchar(32);default:'draft';index" json:"status"`
 	Name                  string    `gorm:"column:name;type:varchar(64);not null" json:"name"`

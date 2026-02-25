@@ -18,6 +18,7 @@ type Cluster struct {
 	Token       string    `gorm:"column:token;type:text" json:"token"`
 	Nodes       string    `gorm:"column:nodes;type:json" json:"nodes"`
 	AuthMethod  string    `gorm:"column:auth_method;type:varchar(32);not null" json:"auth_method"` // token / basic
+	ManagementMode string `gorm:"column:management_mode;type:varchar(32);default:'k8s-only'" json:"management_mode"`
 	CreatedBy   string    `gorm:"column:created_by;type:varchar(64)" json:"created_by"`
 	UpdatedBy   string    `gorm:"column:updated_by;type:varchar(64)" json:"updated_by"`
 	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`

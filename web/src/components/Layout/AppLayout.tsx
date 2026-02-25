@@ -45,7 +45,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     { key: '/cicd', icon: <ToolOutlined />, label: 'CI/CD' },
     { key: '/config', icon: <SettingOutlined />, label: t('menu.config') },
     { key: '/tasks', icon: <ClockCircleOutlined />, label: t('menu.tasks') },
-    { key: '/k8s', icon: <CloudOutlined />, label: t('menu.k8s') },
+    { key: '/deployment', icon: <CloudOutlined />, label: '部署管理' },
     { key: '/monitor', icon: <AlertOutlined />, label: t('menu.monitor') },
     { key: '/tools', icon: <ToolOutlined />, label: t('menu.tools') },
   ];
@@ -53,6 +53,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const activeMenuKey = React.useMemo(() => {
     if (location.pathname.startsWith('/jobs')) return '/tasks';
     if (location.pathname.startsWith('/configcenter')) return '/config';
+    if (location.pathname.startsWith('/k8s')) return '/deployment';
     return location.pathname;
   }, [location.pathname]);
 
