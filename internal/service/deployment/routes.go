@@ -22,6 +22,10 @@ func RegisterDeploymentHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext)
 		g.POST("/releases/:id/rollback", h.RollbackRelease)
 		g.GET("/releases", h.ListReleases)
 		g.GET("/releases/:id", h.GetRelease)
+
+		g.POST("/clusters/bootstrap/preview", h.PreviewClusterBootstrap)
+		g.POST("/clusters/bootstrap/apply", h.ApplyClusterBootstrap)
+		g.GET("/clusters/bootstrap/:task_id", h.GetClusterBootstrapTask)
 	}
 
 	sg := v1.Group("/services", middleware.JWTAuth())
@@ -30,4 +34,3 @@ func RegisterDeploymentHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext)
 		sg.PUT("/:id/governance", h.PutGovernance)
 	}
 }
-

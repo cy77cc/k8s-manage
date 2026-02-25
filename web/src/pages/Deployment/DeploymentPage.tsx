@@ -21,7 +21,7 @@ import { Api } from '../../api';
 import type { Cluster } from '../../api/modules/kubernetes';
 import type { Host } from '../../api/modules/hosts';
 import type { ServiceItem } from '../../api/modules/services';
-import type { DeployTarget, DeployRelease, Inspection } from '../../api/modules/deployment';
+import type { ClusterBootstrapTask, DeployTarget, DeployRelease, Inspection } from '../../api/modules/deployment';
 
 const envOptions = [{ value: 'development' }, { value: 'staging' }, { value: 'production' }];
 const strategyOptions = [{ value: 'rolling' }, { value: 'blue-green' }, { value: 'canary' }];
@@ -70,12 +70,15 @@ const DeploymentPage: React.FC = () => {
   const [previewManifest, setPreviewManifest] = React.useState('');
   const [previewWarnings, setPreviewWarnings] = React.useState<Array<{ code: string; message: string; level: string }>>([]);
   const [clusterModalOpen, setClusterModalOpen] = React.useState(false);
+  const [bootstrapPreview, setBootstrapPreview] = React.useState<{ steps: string[]; expected_endpoint?: string } | null>(null);
+  const [bootstrapTasks, setBootstrapTasks] = React.useState<ClusterBootstrapTask[]>([]);
 
   const [targetForm] = Form.useForm();
   const [releaseForm] = Form.useForm();
   const [clusterForm] = Form.useForm();
   const [governanceForm] = Form.useForm<GovernanceForm>();
   const [inspectionForm] = Form.useForm();
+  const [bootstrapForm] = Form.useForm();
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -94,6 +97,17 @@ const DeploymentPage: React.FC = () => {
       setClusters(cRes.data.list || []);
       setHosts(hRes.data.list || []);
       setServices(sRes.data.list || []);
+      const taskId = String(localStorage.getItem('clusterBootstrapTaskId') || '').trim();
+      if (taskId) {
+        try {
+          const task = await Api.deployment.getClusterBootstrapTask(taskId);
+          setBootstrapTasks([task.data]);
+        } catch {
+          setBootstrapTasks([]);
+        }
+      } else {
+        setBootstrapTasks([]);
+      }
     } catch (err) {
       message.error(err instanceof Error ? err.message : '加载部署管理失败');
     } finally {
@@ -205,6 +219,31 @@ const DeploymentPage: React.FC = () => {
       slo_policy: parseJSONMap(v.slo_policy),
     });
     message.success('治理策略保存成功');
+  };
+
+  const previewBootstrap = async () => {
+    const v = await bootstrapForm.validateFields();
+    const resp = await Api.deployment.previewClusterBootstrap({
+      name: String(v.name),
+      control_plane_host_id: Number(v.control_plane_host_id),
+      worker_host_ids: (v.worker_host_ids || []).map((x: number) => Number(x)),
+      cni: String(v.cni || 'flannel'),
+    });
+    setBootstrapPreview({ steps: resp.data.steps || [], expected_endpoint: resp.data.expected_endpoint });
+    message.success('已生成建群步骤预览');
+  };
+
+  const applyBootstrap = async () => {
+    const v = await bootstrapForm.validateFields();
+    const resp = await Api.deployment.applyClusterBootstrap({
+      name: String(v.name),
+      control_plane_host_id: Number(v.control_plane_host_id),
+      worker_host_ids: (v.worker_host_ids || []).map((x: number) => Number(x)),
+      cni: String(v.cni || 'flannel'),
+    });
+    localStorage.setItem('clusterBootstrapTaskId', resp.data.task_id);
+    message.success(`建群任务已启动: ${resp.data.task_id}`);
+    await load();
   };
 
   const clusterOptions = clusters.map((c) => ({ value: Number(c.id), label: `${c.name} (#${c.id})` }));
@@ -401,6 +440,59 @@ const DeploymentPage: React.FC = () => {
                   ]}
                 />
               </>
+            ),
+          },
+          {
+            key: 'bootstrap',
+            label: '半自动建群',
+            children: (
+              <Row gutter={16}>
+                <Col span={10}>
+                  <Card size="small" title="节点选择与参数">
+                    <Form form={bootstrapForm} layout="vertical" initialValues={{ cni: 'flannel' }}>
+                      <Form.Item name="name" label="集群名称" rules={[{ required: true }]}><Input placeholder="edge-cluster-a" /></Form.Item>
+                      <Form.Item name="control_plane_host_id" label="控制平面节点" rules={[{ required: true }]}>
+                        <Select showSearch optionFilterProp="label" options={hostOptions} placeholder="选择一台控制平面主机" />
+                      </Form.Item>
+                      <Form.Item name="worker_host_ids" label="工作节点">
+                        <Select mode="multiple" showSearch optionFilterProp="label" options={hostOptions} placeholder="可选，选择多台工作节点" />
+                      </Form.Item>
+                      <Form.Item name="cni" label="CNI">
+                        <Select options={[{ value: 'flannel' }, { value: 'calico' }]} />
+                      </Form.Item>
+                      <Space>
+                        <Button onClick={() => void previewBootstrap()}>预览步骤</Button>
+                        <Button type="primary" onClick={() => void applyBootstrap()}>执行建群</Button>
+                      </Space>
+                    </Form>
+                  </Card>
+                </Col>
+                <Col span={14}>
+                  <Card size="small" title="预览与任务状态">
+                    {bootstrapPreview ? (
+                      <Alert
+                        type="info"
+                        showIcon
+                        message={`预计 API Endpoint: ${bootstrapPreview.expected_endpoint || '-'}`}
+                        description={(bootstrapPreview.steps || []).map((s, idx) => <div key={idx}>{idx + 1}. {s}</div>)}
+                        style={{ marginBottom: 12 }}
+                      />
+                    ) : <Alert type="warning" showIcon message="尚未生成预览步骤" style={{ marginBottom: 12 }} />}
+                    <Table
+                      rowKey="id"
+                      dataSource={bootstrapTasks}
+                      pagination={false}
+                      columns={[
+                        { title: '任务ID', dataIndex: 'id' },
+                        { title: '集群名称', dataIndex: 'name' },
+                        { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'}>{v}</Tag> },
+                        { title: '错误', dataIndex: 'error_message', render: (v: string) => v || '-' },
+                        { title: '更新时间', dataIndex: 'updated_at', render: (v: string) => (v ? new Date(v).toLocaleString() : '-') },
+                      ]}
+                    />
+                  </Card>
+                </Col>
+              </Row>
             ),
           },
         ]} />

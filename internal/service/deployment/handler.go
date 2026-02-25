@@ -210,6 +210,53 @@ func (h *Handler) PutGovernance(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": row})
 }
 
+func (h *Handler) PreviewClusterBootstrap(c *gin.Context) {
+	if !h.authorize(c, "deploy:target:write") {
+		return
+	}
+	var req ClusterBootstrapPreviewReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	resp, err := h.logic.PreviewClusterBootstrap(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) ApplyClusterBootstrap(c *gin.Context) {
+	if !h.authorize(c, "deploy:target:write") {
+		return
+	}
+	var req ClusterBootstrapPreviewReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	uid, _ := c.Get("uid")
+	resp, err := h.logic.ApplyClusterBootstrap(c.Request.Context(), toUint(uid), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) GetClusterBootstrapTask(c *gin.Context) {
+	if !h.authorize(c, "deploy:target:read") {
+		return
+	}
+	task, err := h.logic.GetClusterBootstrapTask(c.Request.Context(), strings.TrimSpace(c.Param("task_id")))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": task})
+}
+
 func (h *Handler) authorize(c *gin.Context, codes ...string) bool {
 	if h.isAdmin(c) {
 		return true
@@ -229,7 +276,9 @@ func (h *Handler) authorize(c *gin.Context, codes ...string) bool {
 }
 
 func (h *Handler) hasPermission(uid uint64, code string) bool {
-	var rows []struct{ Code string `gorm:"column:code"` }
+	var rows []struct {
+		Code string `gorm:"column:code"`
+	}
 	if err := h.svcCtx.DB.Table("permissions").
 		Select("permissions.code").
 		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").

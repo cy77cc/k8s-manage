@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +13,12 @@ import (
 	"strings"
 	"time"
 
+	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	projectlogic "github.com/cy77cc/k8s-manage/internal/service/project/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/k8s-manage/internal/utils"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
@@ -307,9 +311,16 @@ func (l *Logic) Deploy(ctx context.Context, id uint, operator uint64, req Deploy
 
 	switch target {
 	case "compose":
-		rec.Status = "accepted"
+		out, execErr := l.applyComposeByTarget(ctx, targetResp.ClusterID, rec.ID, resolved)
+		if execErr != nil {
+			rec.Status = "failed"
+			rec.Error = truncateStr(execErr.Error(), 500)
+			_ = l.svcCtx.DB.WithContext(ctx).Save(rec).Error
+			return rec.ID, fmt.Errorf("compose apply failed: %s; %s", execErr.Error(), truncateStr(out, 300))
+		}
+		rec.Status = "succeeded"
 		_ = l.svcCtx.DB.WithContext(ctx).Save(rec).Error
-		return rec.ID, nil // MVP placeholder
+		return rec.ID, nil
 	case "helm":
 		if err := l.deployHelm(ctx, id); err != nil {
 			rec.Status = "failed"
@@ -465,6 +476,12 @@ func toDeployTargetResp(t *model.ServiceDeployTarget) DeployTargetResp {
 
 func (l *Logic) resolveDeployTarget(ctx context.Context, serviceID uint, req DeployReq) (DeployTargetResp, error) {
 	if req.ClusterID > 0 {
+		if strings.EqualFold(defaultIfEmpty(req.DeployTarget, "k8s"), "compose") {
+			var target model.DeploymentTarget
+			if err := l.svcCtx.DB.WithContext(ctx).Where("id = ? AND target_type = ?", req.ClusterID, "compose").First(&target).Error; err != nil {
+				return DeployTargetResp{}, fmt.Errorf("compose deployment target not found: %w", err)
+			}
+		}
 		return DeployTargetResp{
 			ServiceID:    serviceID,
 			ClusterID:    req.ClusterID,
@@ -486,6 +503,12 @@ func (l *Logic) resolveDeployTarget(ctx context.Context, serviceID uint, req Dep
 	}
 	if strings.TrimSpace(req.DeployTarget) != "" {
 		resp.DeployTarget = req.DeployTarget
+	}
+	if strings.EqualFold(resp.DeployTarget, "compose") {
+		var target model.DeploymentTarget
+		if err := l.svcCtx.DB.WithContext(ctx).Where("id = ? AND target_type = ?", resp.ClusterID, "compose").First(&target).Error; err != nil {
+			return DeployTargetResp{}, fmt.Errorf("compose deployment target not found: %w", err)
+		}
 	}
 	return resp, nil
 }
@@ -676,6 +699,12 @@ func (l *Logic) UpsertDeployTarget(ctx context.Context, serviceID uint, uid uint
 	}
 	ns := defaultIfEmpty(req.Namespace, "default")
 	deployTarget := defaultIfEmpty(req.DeployTarget, "k8s")
+	if deployTarget == "compose" {
+		var target model.DeploymentTarget
+		if err := l.svcCtx.DB.WithContext(ctx).Where("id = ? AND target_type = ?", req.ClusterID, "compose").First(&target).Error; err != nil {
+			return DeployTargetResp{}, fmt.Errorf("compose deployment target not found: %w", err)
+		}
+	}
 	policyJSON := mustJSON(req.Policy)
 	var row model.ServiceDeployTarget
 	err := l.svcCtx.DB.WithContext(ctx).Where("service_id = ? AND is_default = 1", serviceID).First(&row).Error
@@ -847,6 +876,68 @@ func buildLegacyResources(cfg *StandardServiceConfig) string {
 	}
 	b, _ := json.Marshal(map[string]any{"limits": cfg.Resources})
 	return string(b)
+}
+
+func truncateStr(v string, max int) string {
+	s := strings.TrimSpace(v)
+	if len(s) <= max || max <= 0 {
+		return s
+	}
+	return s[:max]
+}
+
+func (l *Logic) applyComposeByTarget(ctx context.Context, targetID uint, releaseID uint, manifest string) (string, error) {
+	if targetID == 0 {
+		return "", fmt.Errorf("compose target id is required")
+	}
+	var links []model.DeploymentTargetNode
+	if err := l.svcCtx.DB.WithContext(ctx).
+		Where("target_id = ? AND status = ?", targetID, "active").
+		Order("CASE WHEN role = 'manager' THEN 0 ELSE 1 END, id ASC").
+		Find(&links).Error; err != nil {
+		return "", err
+	}
+	if len(links) == 0 {
+		return "", fmt.Errorf("compose target has no active nodes")
+	}
+	var node model.Node
+	if err := l.svcCtx.DB.WithContext(ctx).First(&node, links[0].HostID).Error; err != nil {
+		return "", err
+	}
+	privateKey, err := l.loadNodeSSHPrivateKey(ctx, &node)
+	if err != nil {
+		return "", err
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	if err != nil {
+		return "", err
+	}
+	defer cli.Close()
+	workDir := fmt.Sprintf("/tmp/opspilot/service-releases/%d", releaseID)
+	composeFile := fmt.Sprintf("%s/docker-compose.yaml", workDir)
+	encoded := base64.StdEncoding.EncodeToString([]byte(manifest))
+	cmd := fmt.Sprintf("mkdir -p %s && echo '%s' | base64 -d > %s && docker compose -f %s pull && docker compose -f %s up -d && docker compose -f %s ps", workDir, encoded, composeFile, composeFile, composeFile, composeFile)
+	return sshclient.RunCommand(cli, cmd)
+}
+
+func (l *Logic) loadNodeSSHPrivateKey(ctx context.Context, node *model.Node) (string, error) {
+	if node == nil || node.SSHKeyID == nil {
+		return "", nil
+	}
+	var key model.SSHKey
+	if err := l.svcCtx.DB.WithContext(ctx).
+		Select("id", "private_key", "encrypted").
+		Where("id = ?", uint64(*node.SSHKeyID)).
+		First(&key).Error; err != nil {
+		return "", err
+	}
+	if !key.Encrypted {
+		return strings.TrimSpace(key.PrivateKey), nil
+	}
+	if strings.TrimSpace(config.CFG.Security.EncryptionKey) == "" {
+		return "", fmt.Errorf("security.encryption_key is required")
+	}
+	return utils.DecryptText(strings.TrimSpace(key.PrivateKey), config.CFG.Security.EncryptionKey)
 }
 
 func ensureStandardConfig(cfg *StandardServiceConfig) *StandardServiceConfig {

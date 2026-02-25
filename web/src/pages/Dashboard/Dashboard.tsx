@@ -12,8 +12,7 @@ interface DashboardState {
   alertTotal: number;
   topHosts: Array<{ id: string; name: string; ip: string; status: string; cpu: number; memory: number }>;
   recentAlerts: Array<{ id: string; message: string; severity: string; createdAt: string }>;
-  summary: Record<string, any>;
-  dashboards: any[];
+  recentFailedReleases: number;
 }
 
 const Dashboard: React.FC = () => {
@@ -27,26 +26,26 @@ const Dashboard: React.FC = () => {
     alertTotal: 0,
     topHosts: [],
     recentAlerts: [],
-    summary: {},
-    dashboards: [],
+    recentFailedReleases: 0,
   });
 
   const load = async () => {
     setLoading(true);
     try {
-      const [hosts, jobs, clusters, alerts, summary, dashboards] = await Promise.all([
+      const [hosts, jobs, clusters, alerts, releases] = await Promise.all([
         Api.hosts.getHostList({ page: 1, pageSize: 100 }),
         Api.tasks.getTaskList({ page: 1, pageSize: 100 }),
         Api.kubernetes.getClusterList({ page: 1, pageSize: 20 }),
         Api.monitoring.getAlertList({ page: 1, pageSize: 20 }),
-        Api.service.get('/dashboard/summary'),
-        Api.service.get('/dashboards', { params: { page: 1, page_size: 20 } }),
+        Api.deployment.getReleases(),
       ]);
 
       const hostList = hosts.data.list || [];
       const jobList = jobs.data.list || [];
       const clusterList = clusters.data.list || [];
       const alertList = alerts.data.list || [];
+      const releaseList = releases.data.list || [];
+      const recentFailedReleases = releaseList.filter((r) => r.status === 'failed').length;
 
       setState({
         hostTotal: hostList.length,
@@ -57,8 +56,7 @@ const Dashboard: React.FC = () => {
         alertTotal: alertList.filter((a) => a.status === 'firing').length,
         topHosts: hostList.slice(0, 5).map((h) => ({ id: String(h.id), name: h.name, ip: h.ip, status: h.status, cpu: h.cpu ?? 0, memory: h.memory ?? 0 })),
         recentAlerts: alertList.slice(0, 6).map((a) => ({ id: String(a.id), message: a.title || a.source || '告警事件', severity: a.severity, createdAt: a.createdAt })),
-        summary: summary.data || {},
-        dashboards: Array.isArray(dashboards.data) ? dashboards.data : [],
+        recentFailedReleases,
       });
     } finally {
       setLoading(false);
@@ -75,7 +73,7 @@ const Dashboard: React.FC = () => {
   const widgets = useMemo(() => [
     { key: 'host-health', title: '主机健康', value: `${state.hostOnline}/${state.hostTotal}`, extra: `${Math.round((state.hostOnline / Math.max(1, state.hostTotal)) * 100)}%` },
     { key: 'task-success', title: '任务成功率', value: `${state.jobTotal - state.jobRunning}/${Math.max(1, state.jobTotal)}`, extra: `${Math.round(((state.jobTotal - state.jobRunning) / Math.max(1, state.jobTotal)) * 100)}%` },
-    { key: 'release-frequency', title: '发布频次', value: state.summary.dashboardCount || 0, extra: '24h' },
+    { key: 'release-frequency', title: '最近失败发布', value: state.recentFailedReleases, extra: '24h' },
     { key: 'alert-trend', title: '告警趋势', value: state.alertTotal, extra: 'active' },
     { key: 'k8s-capacity', title: 'K8s 容量', value: state.clusterTotal, extra: 'clusters' },
     { key: 'service-slo', title: '服务 SLO', value: '99.90%', extra: '目标 99.95%' },
@@ -141,9 +139,11 @@ const Dashboard: React.FC = () => {
         </Col>
       </Row>
 
-      <Card title="仪表盘模板">
+      <Card title="运行摘要">
         <Space wrap>
-          {(state.dashboards || []).map((d: any) => <Tag key={d.id}>{d.name || `dashboard-${d.id}`}</Tag>)}
+          <Tag color="blue">在线主机: {state.hostOnline}</Tag>
+          <Tag color="geekblue">集群数: {state.clusterTotal}</Tag>
+          <Tag color={state.recentFailedReleases > 0 ? 'error' : 'success'}>失败发布: {state.recentFailedReleases}</Tag>
         </Space>
       </Card>
     </div>

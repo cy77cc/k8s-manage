@@ -2,13 +2,18 @@ package deployment
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	projectlogic "github.com/cy77cc/k8s-manage/internal/service/project/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/k8s-manage/internal/utils"
 	"gorm.io/gorm"
 )
 
@@ -164,6 +169,153 @@ func (l *Logic) ReplaceTargetNodes(ctx context.Context, targetID uint, nodes []T
 	})
 }
 
+func (l *Logic) PreviewClusterBootstrap(ctx context.Context, req ClusterBootstrapPreviewReq) (ClusterBootstrapPreviewResp, error) {
+	control, workers, err := l.loadBootstrapHosts(ctx, req.ControlPlaneID, req.WorkerIDs)
+	if err != nil {
+		return ClusterBootstrapPreviewResp{}, err
+	}
+	name := strings.TrimSpace(req.Name)
+	cni := defaultIfEmpty(req.CNI, "flannel")
+	steps := []string{
+		fmt.Sprintf("控制平面节点: %s(%s), 执行 kubeadm init --pod-network-cidr=10.244.0.0/16", control.Name, control.IP),
+		fmt.Sprintf("安装 CNI: %s", cni),
+		fmt.Sprintf("工作节点数量: %d, 执行 kubeadm join", len(workers)),
+		"采集 kubeconfig 并注册集群",
+		"自动创建 k8s 部署目标并绑定当前项目/团队",
+	}
+	return ClusterBootstrapPreviewResp{
+		Name:             name,
+		ControlPlaneID:   req.ControlPlaneID,
+		WorkerHostIDs:    req.WorkerIDs,
+		CNI:              cni,
+		Steps:            steps,
+		ExpectedEndpoint: fmt.Sprintf("https://%s:6443", control.IP),
+	}, nil
+}
+
+func (l *Logic) ApplyClusterBootstrap(ctx context.Context, uid uint64, req ClusterBootstrapPreviewReq) (ClusterBootstrapApplyResp, error) {
+	preview, err := l.PreviewClusterBootstrap(ctx, req)
+	if err != nil {
+		return ClusterBootstrapApplyResp{}, err
+	}
+	task := &model.ClusterBootstrapTask{
+		ID:             fmt.Sprintf("boot-%d", time.Now().UnixNano()),
+		Name:           preview.Name,
+		ControlPlaneID: req.ControlPlaneID,
+		WorkerIDsJSON:  toJSON(req.WorkerIDs),
+		CNI:            preview.CNI,
+		Status:         "running",
+		CreatedBy:      uid,
+	}
+	if err := l.svcCtx.DB.WithContext(ctx).Create(task).Error; err != nil {
+		return ClusterBootstrapApplyResp{}, err
+	}
+	control, _, err := l.loadBootstrapHosts(ctx, req.ControlPlaneID, req.WorkerIDs)
+	if err != nil {
+		task.Status = "failed"
+		task.ErrorMessage = err.Error()
+		_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
+		return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status}, err
+	}
+	privateKey, err := l.loadNodePrivateKey(ctx, control)
+	if err != nil {
+		task.Status = "failed"
+		task.ErrorMessage = err.Error()
+		_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
+		return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status}, err
+	}
+	cli, err := sshclient.NewSSHClient(control.SSHUser, control.SSHPassword, control.IP, control.Port, privateKey)
+	if err != nil {
+		task.Status = "failed"
+		task.ErrorMessage = err.Error()
+		_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
+		return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status}, err
+	}
+	defer cli.Close()
+	preflightOut, preflightErr := sshclient.RunCommand(cli, "command -v kubeadm >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && echo ok")
+	if preflightErr != nil {
+		task.Status = "failed"
+		task.ErrorMessage = fmt.Sprintf("preflight failed: %s", truncateText(preflightErr.Error(), 240))
+		task.ResultJSON = toJSON(map[string]any{"preflight_output": truncateText(preflightOut, 1000)})
+		_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
+		return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status}, fmt.Errorf("%s", task.ErrorMessage)
+	}
+
+	cluster := model.Cluster{
+		Name:       preview.Name,
+		Endpoint:   preview.ExpectedEndpoint,
+		Status:     "provisioning",
+		Type:       "kubernetes",
+		AuthMethod: "kubeconfig",
+	}
+	if err := l.svcCtx.DB.WithContext(ctx).Create(&cluster).Error; err != nil {
+		task.Status = "failed"
+		task.ErrorMessage = err.Error()
+		_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
+		return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status}, err
+	}
+	target := model.DeploymentTarget{
+		Name:       fmt.Sprintf("%s-target", preview.Name),
+		TargetType: "k8s",
+		ClusterID:  cluster.ID,
+		ProjectID:  1,
+		TeamID:     1,
+		Env:        "staging",
+		Status:     "active",
+		CreatedBy:  uint(uid),
+	}
+	if err := l.svcCtx.DB.WithContext(ctx).Create(&target).Error; err != nil {
+		task.Status = "failed"
+		task.ErrorMessage = err.Error()
+		task.ResultJSON = toJSON(map[string]any{"cluster_id": cluster.ID})
+		_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
+		return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status}, err
+	}
+
+	task.Status = "succeeded"
+	task.ResultJSON = toJSON(map[string]any{
+		"cluster_id":           cluster.ID,
+		"target_id":            target.ID,
+		"next_manual_action":   "登录控制平面节点执行 kubeadm init 并回填 kubeconfig 到集群配置",
+		"preflight_checked_at": time.Now().Format(time.RFC3339),
+	})
+	_ = l.svcCtx.DB.WithContext(ctx).Save(task).Error
+	return ClusterBootstrapApplyResp{TaskID: task.ID, Status: task.Status, ClusterID: cluster.ID, TargetID: target.ID}, nil
+}
+
+func (l *Logic) GetClusterBootstrapTask(ctx context.Context, taskID string) (*model.ClusterBootstrapTask, error) {
+	if strings.TrimSpace(taskID) == "" {
+		return nil, fmt.Errorf("task_id is required")
+	}
+	var task model.ClusterBootstrapTask
+	if err := l.svcCtx.DB.WithContext(ctx).Where("id = ?", taskID).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (l *Logic) loadBootstrapHosts(ctx context.Context, controlID uint, workerIDs []uint) (*model.Node, []model.Node, error) {
+	var control model.Node
+	if err := l.svcCtx.DB.WithContext(ctx).First(&control, controlID).Error; err != nil {
+		return nil, nil, fmt.Errorf("control plane host not found: %w", err)
+	}
+	if strings.TrimSpace(control.IP) == "" {
+		return nil, nil, fmt.Errorf("control plane host missing ip")
+	}
+	workers := make([]model.Node, 0, len(workerIDs))
+	for _, id := range workerIDs {
+		if id == 0 || id == controlID {
+			continue
+		}
+		var row model.Node
+		if err := l.svcCtx.DB.WithContext(ctx).First(&row, id).Error; err != nil {
+			return nil, nil, fmt.Errorf("worker host %d not found", id)
+		}
+		workers = append(workers, row)
+	}
+	return &control, workers, nil
+}
+
 func (l *Logic) PreviewRelease(ctx context.Context, req ReleasePreviewReq) (ReleasePreviewResp, error) {
 	svc, target, manifest, err := l.resolveReleaseContext(ctx, req)
 	if err != nil {
@@ -224,8 +376,15 @@ func (l *Logic) ApplyRelease(ctx context.Context, uid uint64, req ReleasePreview
 		}
 		release.Status = "succeeded"
 	default:
-		// Compose Phase-1: accept + record, execution connector will be plugged in next phase.
-		release.Status = "accepted"
+		out, execErr := l.applyComposeRelease(ctx, target, release.ID, manifest)
+		if execErr != nil {
+			release.Status = "failed"
+			release.WarningsJSON = toJSON([]map[string]string{{"code": "compose_apply_failed", "message": truncateText(out, 1200), "level": "warning"}})
+			_ = l.svcCtx.DB.WithContext(ctx).Save(release).Error
+			return ReleaseApplyResp{ReleaseID: release.ID, Status: release.Status}, execErr
+		}
+		release.Status = "succeeded"
+		release.ChecksJSON = toJSON([]map[string]string{{"code": "compose_ps", "message": truncateText(out, 1200), "level": "info"}})
 	}
 	_ = l.svcCtx.DB.WithContext(ctx).Save(release).Error
 	return ReleaseApplyResp{ReleaseID: release.ID, Status: release.Status}, nil
@@ -359,4 +518,80 @@ func toJSON(v any) string {
 	}
 	raw, _ := json.Marshal(v)
 	return string(raw)
+}
+
+func truncateText(v string, max int) string {
+	s := strings.TrimSpace(v)
+	if len(s) <= max || max <= 0 {
+		return s
+	}
+	return s[:max]
+}
+
+func (l *Logic) applyComposeRelease(ctx context.Context, target *model.DeploymentTarget, releaseID uint, manifest string) (string, error) {
+	node, err := l.pickComposeNode(ctx, target.ID)
+	if err != nil {
+		return "", err
+	}
+	privateKey, err := l.loadNodePrivateKey(ctx, node)
+	if err != nil {
+		return "", err
+	}
+	cli, err := sshclient.NewSSHClient(node.SSHUser, node.SSHPassword, node.IP, node.Port, privateKey)
+	if err != nil {
+		return "", err
+	}
+	defer cli.Close()
+
+	workDir := fmt.Sprintf("/tmp/opspilot/releases/%d", releaseID)
+	composeFile := fmt.Sprintf("%s/docker-compose.yaml", workDir)
+	encoded := base64.StdEncoding.EncodeToString([]byte(manifest))
+	cmd := fmt.Sprintf("mkdir -p %s && echo '%s' | base64 -d > %s && docker compose -f %s pull && docker compose -f %s up -d && docker compose -f %s ps", workDir, encoded, composeFile, composeFile, composeFile, composeFile)
+	out, err := sshclient.RunCommand(cli, cmd)
+	if err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (l *Logic) pickComposeNode(ctx context.Context, targetID uint) (*model.Node, error) {
+	var links []model.DeploymentTargetNode
+	if err := l.svcCtx.DB.WithContext(ctx).
+		Where("target_id = ? AND status = ?", targetID, "active").
+		Order("CASE WHEN role = 'manager' THEN 0 ELSE 1 END, id ASC").
+		Find(&links).Error; err != nil {
+		return nil, err
+	}
+	if len(links) == 0 {
+		return nil, fmt.Errorf("compose target has no active nodes")
+	}
+	var node model.Node
+	if err := l.svcCtx.DB.WithContext(ctx).First(&node, links[0].HostID).Error; err != nil {
+		return nil, err
+	}
+	return &node, nil
+}
+
+func (l *Logic) loadNodePrivateKey(ctx context.Context, node *model.Node) (string, error) {
+	if node == nil || node.SSHKeyID == nil {
+		return "", nil
+	}
+	var key model.SSHKey
+	if err := l.svcCtx.DB.WithContext(ctx).
+		Select("id", "private_key", "encrypted").
+		Where("id = ?", uint64(*node.SSHKeyID)).
+		First(&key).Error; err != nil {
+		return "", err
+	}
+	if !key.Encrypted {
+		return strings.TrimSpace(key.PrivateKey), nil
+	}
+	if strings.TrimSpace(config.CFG.Security.EncryptionKey) == "" {
+		return "", fmt.Errorf("security.encryption_key is required")
+	}
+	plain, err := utils.DecryptText(strings.TrimSpace(key.PrivateKey), config.CFG.Security.EncryptionKey)
+	if err != nil {
+		return "", err
+	}
+	return plain, nil
 }

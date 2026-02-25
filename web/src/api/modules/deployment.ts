@@ -51,6 +51,19 @@ export interface Inspection {
   created_at: string;
 }
 
+export interface ClusterBootstrapTask {
+  id: string;
+  name: string;
+  control_plane_host_id: number;
+  worker_ids_json: string;
+  cni: string;
+  status: string;
+  result_json?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export const deploymentApi = {
   getTargets(): Promise<ApiResponse<PaginatedResponse<DeployTarget>>> {
     return apiService.get('/deploy/targets');
@@ -116,5 +129,23 @@ export const deploymentApi = {
   listInspections(params?: { service_id?: number; target_id?: number }): Promise<ApiResponse<PaginatedResponse<Inspection>>> {
     return apiService.get('/aiops/inspections', { params });
   },
+  previewClusterBootstrap(payload: {
+    name: string;
+    control_plane_host_id: number;
+    worker_host_ids?: number[];
+    cni?: string;
+  }): Promise<ApiResponse<{ name: string; control_plane_host_id: number; worker_host_ids: number[]; cni: string; steps: string[]; expected_endpoint: string }>> {
+    return apiService.post('/deploy/clusters/bootstrap/preview', payload);
+  },
+  applyClusterBootstrap(payload: {
+    name: string;
+    control_plane_host_id: number;
+    worker_host_ids?: number[];
+    cni?: string;
+  }): Promise<ApiResponse<{ task_id: string; status: string; cluster_id?: number; target_id?: number }>> {
+    return apiService.post('/deploy/clusters/bootstrap/apply', payload);
+  },
+  getClusterBootstrapTask(taskId: string): Promise<ApiResponse<ClusterBootstrapTask>> {
+    return apiService.get(`/deploy/clusters/bootstrap/${encodeURIComponent(taskId)}`);
+  },
 };
-

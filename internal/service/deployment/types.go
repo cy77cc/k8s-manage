@@ -70,3 +70,25 @@ type GovernanceReq struct {
 	SLOPolicy        map[string]any `json:"slo_policy"`
 }
 
+type ClusterBootstrapPreviewReq struct {
+	Name           string `json:"name" binding:"required"`
+	ControlPlaneID uint   `json:"control_plane_host_id" binding:"required"`
+	WorkerIDs      []uint `json:"worker_host_ids"`
+	CNI            string `json:"cni"`
+}
+
+type ClusterBootstrapPreviewResp struct {
+	Name             string   `json:"name"`
+	ControlPlaneID   uint     `json:"control_plane_host_id"`
+	WorkerHostIDs    []uint   `json:"worker_host_ids"`
+	CNI              string   `json:"cni"`
+	Steps            []string `json:"steps"`
+	ExpectedEndpoint string   `json:"expected_endpoint"`
+}
+
+type ClusterBootstrapApplyResp struct {
+	TaskID    string `json:"task_id"`
+	Status    string `json:"status"`
+	ClusterID uint   `json:"cluster_id,omitempty"`
+	TargetID  uint   `json:"target_id,omitempty"`
+}

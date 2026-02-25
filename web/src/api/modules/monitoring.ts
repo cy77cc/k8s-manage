@@ -15,7 +15,10 @@ export interface Alert {
 export interface AlertRule {
   id: string;
   name: string;
-  condition: string;
+  condition?: string;
+  metric?: string;
+  operator?: string;
+  threshold?: number;
   severity: string;
   enabled: boolean;
   channels: string[];
@@ -119,5 +122,11 @@ export const monitoringApi = {
         end_time: params.endTime,
       },
     });
+  },
+  async createAlertRule(payload: { name: string; metric: string; operator?: string; threshold: number; severity?: string; enabled?: boolean }): Promise<ApiResponse<any>> {
+    return apiService.post('/alert-rules', payload);
+  },
+  async updateAlertRule(id: string, payload: { name?: string; operator?: string; threshold?: number; severity?: string; enabled?: boolean }): Promise<ApiResponse<any>> {
+    return apiService.put(`/alert-rules/${encodeURIComponent(id)}`, payload);
   },
 };
