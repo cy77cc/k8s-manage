@@ -78,7 +78,7 @@ func hostListInventory(ctx context.Context, deps PlatformDeps, input HostInvento
 				"disk_gb":    node.DiskGB,
 				"labels":     parseHostLabels(node.Labels),
 				"updated_at": node.UpdatedAt,
-			}
+			})
 		}
 
 		return map[string]any{
@@ -201,9 +201,9 @@ func hostBatchStatusUpdate(ctx context.Context, deps PlatformDeps, input HostBat
 			return nil, "db", res.Error
 		}
 		return map[string]any{
-			"action":       action,
-			"reason":       strings.TrimSpace(in.Reason),
-			"target_count": len(hostIDs),
+			"action":        action,
+			"reason":        strings.TrimSpace(in.Reason),
+			"target_count":  len(hostIDs),
 			"updated_count": res.RowsAffected,
 		}, "host_batch_status", nil
 	})
