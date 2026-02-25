@@ -39,10 +39,10 @@ const HostTerminalPage: React.FC = () => {
 
   const pageHeight = 'calc(100vh - 112px)';
   const fileGridColumns = 'minmax(0, 1fr) 108px 88px 112px 88px';
-  const editorHeightMap: Record<'sm' | 'md' | 'lg', string> = {
-    sm: 'clamp(110px, 16vh, 180px)',
-    md: 'clamp(150px, 24vh, 260px)',
-    lg: 'clamp(190px, 32vh, 340px)',
+  const rightPanelSplitMap: Record<'sm' | 'md' | 'lg', string> = {
+    sm: 'minmax(0, 64fr) minmax(0, 36fr)',
+    md: 'minmax(0, 58fr) minmax(0, 42fr)',
+    lg: 'minmax(0, 52fr) minmax(0, 48fr)',
   };
 
   const setupTerminal = React.useCallback(() => {
@@ -177,6 +177,13 @@ const HostTerminalPage: React.FC = () => {
     void connect();
   }, [connect]);
 
+  React.useEffect(() => {
+    const raf = window.requestAnimationFrame(() => {
+      fitRef.current?.fit();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [selectedFile, editorSize]);
+
   const closeSession = React.useCallback(async () => {
     wsRef.current?.close();
     if (id && sessionID) {
@@ -309,16 +316,28 @@ const HostTerminalPage: React.FC = () => {
         }
       >
         <Row gutter={12} style={{ height: '100%', minHeight: 0 }} align="stretch">
-          <Col xs={24} xl={16} style={{ display: 'flex', minHeight: 0 }}>
+          <Col xs={24} xl={16} style={{ display: 'flex', minHeight: 0, minWidth: 0 }}>
             <Card
               size="small"
               styles={{ body: { padding: 0, background: '#0e1117', height: '100%', minHeight: 0 } }}
               style={{ borderRadius: 10, border: '1px solid #1f2937', width: '100%', height: '100%' }}
             >
-              <div className="host-terminal-xterm" ref={termWrapRef} style={{ height: '100%', width: '100%', minHeight: 420 }} />
+              <div className="host-terminal-xterm" ref={termWrapRef} style={{ height: '100%', width: '100%', minHeight: 360 }} />
             </Card>
           </Col>
-          <Col xs={24} xl={8} style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, overflow: 'hidden' }}>
+          <Col
+            xs={24}
+            xl={8}
+              style={{
+                display: 'grid',
+                gridTemplateRows: rightPanelSplitMap[editorSize],
+                gap: 8,
+                minHeight: 0,
+                minWidth: 0,
+                overflow: 'hidden',
+                height: '100%',
+              }}
+          >
             <Card
               size="small"
               title="文件管理"
@@ -339,8 +358,8 @@ const HostTerminalPage: React.FC = () => {
                   </Upload>
                 </Space>
               }
-              style={{ borderRadius: 10, flex: 1, minHeight: 0 }}
-              styles={{ body: { display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 } }}
+              style={{ borderRadius: 10, minHeight: 0, height: '100%' }}
+              styles={{ body: { display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, height: '100%', overflow: 'hidden' } }}
             >
               <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                 <Text type="secondary">目录: {cwd}</Text>
@@ -374,7 +393,7 @@ const HostTerminalPage: React.FC = () => {
                 <span>权限</span>
                 <span />
               </div>
-              <div style={{ width: '100%', overflow: 'auto', flex: 1, minHeight: 0 }}>
+              <div style={{ width: '100%', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0 }}>
                 {cwd !== '.' ? (
                   <div
                     style={{ display: 'grid', gridTemplateColumns: fileGridColumns, alignItems: 'center', columnGap: 12, borderRadius: 8, padding: '2px 8px' }}
@@ -427,7 +446,7 @@ const HostTerminalPage: React.FC = () => {
 
             <Card
               size="small"
-              title={selectedFile ? `编辑: ${selectedFile}` : '文件预览'}
+              title={selectedFile ? <Text ellipsis={{ tooltip: selectedFile }} style={{ maxWidth: '100%', display: 'block' }}>{`编辑: ${selectedFile}`}</Text> : '文件预览'}
               extra={selectedFile ? (
                 <Space size={4}>
                   <Button size="small" type={editorSize === 'sm' ? 'primary' : 'default'} onClick={() => setEditorSize('sm')}>缩小</Button>
@@ -436,19 +455,21 @@ const HostTerminalPage: React.FC = () => {
                   <Button size="small" icon={<SaveOutlined />} loading={saving} onClick={() => void saveFile()}>保存</Button>
                 </Space>
               ) : null}
-              style={{ borderRadius: 10, flexShrink: 0 }}
-              styles={{ body: { overflow: 'hidden' } }}
+              style={{ borderRadius: 10, minHeight: 0, height: '100%' }}
+              styles={{ body: { overflow: 'hidden', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' } }}
             >
               {selectedFile ? (
                 <>
-                  <Editor
-                    height={editorHeightMap[editorSize]}
-                    defaultLanguage="yaml"
-                    value={selectedContent}
-                    onChange={(v) => { setSelectedContent(v || ''); setEditing(true); }}
-                    theme="vs-dark"
-                    options={{ minimap: { enabled: false }, fontSize: 13 }}
-                  />
+                  <div style={{ flex: 1, minHeight: 0 }}>
+                    <Editor
+                      height="100%"
+                      defaultLanguage="yaml"
+                      value={selectedContent}
+                      onChange={(v) => { setSelectedContent(v || ''); setEditing(true); }}
+                      theme="vs-dark"
+                      options={{ minimap: { enabled: false }, fontSize: 13 }}
+                    />
+                  </div>
                   {editing ? <Alert style={{ marginTop: 8 }} type="warning" showIcon message="内容已修改，记得保存。" /> : null}
                 </>
               ) : <Text type="secondary">选择文件后在这里查看与编辑内容。</Text>}
