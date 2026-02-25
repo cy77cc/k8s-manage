@@ -22,5 +22,9 @@ func RunDevAutoMigrate(db *gorm.DB) error {
 		&model.AIChatSession{},
 		&model.AIChatMessage{},
 		&model.HostProbeSession{},
+		&model.Project{},
+		&model.Service{},
+		&model.ServiceHelmRelease{},
+		&model.ServiceRenderSnapshot{},
 	)
 }

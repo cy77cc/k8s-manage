@@ -111,3 +111,26 @@
 - 安全策略：
   - 私钥与云密钥使用 AES-GCM 加密落库（`security.encryption_key`）
   - 前端不回显私钥，仅展示指纹与元信息。
+
+## 8. Service Management Domain (2026-02-25)
+
+- 新服务域目录：`internal/service/service/`，按 `routes + handler + logic` 组织。
+- 核心能力：
+  - 配置模式：`standard` / `custom`
+  - 渲染目标：`k8s` / `compose`
+  - Helm 首期：`import + render + deploy`
+- 关键接口：
+  - `POST /api/v1/services/render/preview`
+  - `POST /api/v1/services/transform`
+  - `POST/PUT/GET /api/v1/services*`
+  - `POST /api/v1/services/:id/deploy`
+  - `POST /api/v1/services/helm/import`
+  - `POST /api/v1/services/helm/render`
+  - `POST /api/v1/services/:id/deploy/helm`
+- 权限与归属：
+  - 权限码：`service:read|write|deploy|approve`
+  - 归属模型：`project_id + team_id + owner_user_id`
+  - 生产环境部署追加 `service:approve` 校验
+- 数据层扩展：
+  - `services` 表新增 ownership/config/render 相关字段
+  - 新表：`service_helm_releases`、`service_render_snapshots`

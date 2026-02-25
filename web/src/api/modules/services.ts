@@ -1,19 +1,49 @@
 import apiService from '../api';
 import type { ApiResponse, PaginatedResponse } from '../api';
 
+export type ServiceRuntimeType = 'k8s' | 'compose' | 'helm';
+export type ServiceConfigMode = 'standard' | 'custom';
+
+export interface LabelKV {
+  key: string;
+  value: string;
+}
+
+export interface EnvKV {
+  key: string;
+  value: string;
+}
+
+export interface PortConfig {
+  name?: string;
+  protocol?: string;
+  container_port: number;
+  service_port: number;
+}
+
+export interface StandardServiceConfig {
+  image: string;
+  replicas: number;
+  ports: PortConfig[];
+  envs: EnvKV[];
+  resources?: Record<string, string>;
+}
+
 export interface ServiceItem {
   id: string;
   projectId: string;
+  teamId: string;
   name: string;
   env: string;
   owner: string;
-  status: 'running' | 'syncing' | 'deploying' | 'error';
-  image: string;
-  replicas: number;
-  cpuLimit: number;
-  memLimit: number;
-  tags: string[];
-  config: string;
+  runtimeType: ServiceRuntimeType;
+  configMode: ServiceConfigMode;
+  serviceKind: string;
+  status: string;
+  labels: LabelKV[];
+  standardConfig?: StandardServiceConfig;
+  customYaml?: string;
+  renderedYaml?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -37,60 +67,93 @@ export interface ServiceQuota {
 export interface ServiceMgmtListParams {
   page?: number;
   pageSize?: number;
+  projectId?: string;
+  teamId?: string;
+  runtimeType?: ServiceRuntimeType | 'all';
+  env?: string;
+  labelSelector?: string;
+  q?: string;
 }
 
 export interface ServiceCreateParams {
+  project_id?: number;
+  team_id?: number;
   name: string;
   env: string;
   owner: string;
+  runtime_type: ServiceRuntimeType;
+  config_mode: ServiceConfigMode;
+  service_kind: string;
+  service_type: 'stateless' | 'stateful';
+  render_target: 'k8s' | 'compose';
+  labels?: LabelKV[];
+  standard_config?: StandardServiceConfig;
+  custom_yaml?: string;
+  source_template_version?: string;
   status?: string;
-  image: string;
-  replicas?: number;
-  cpuLimit?: number;
-  memLimit?: number;
-  tags?: string[];
-  config?: string;
 }
 
-const parseTags = (input: unknown): string[] => {
-  if (Array.isArray(input)) return input.map(String);
-  if (typeof input === 'string') {
-    try {
-      const parsed = JSON.parse(input);
-      if (Array.isArray(parsed)) return parsed.map(String);
-    } catch {
-      return input.split(',').map((v) => v.trim()).filter(Boolean);
-    }
-  }
-  return [];
-};
+export interface RenderPreviewReq {
+  mode: ServiceConfigMode;
+  target: 'k8s' | 'compose';
+  service_name: string;
+  service_type: 'stateless' | 'stateful';
+  standard_config?: StandardServiceConfig;
+  custom_yaml?: string;
+}
+
+export interface RenderPreviewResp {
+  rendered_yaml: string;
+  diagnostics: Array<{ level: string; code: string; message: string }>;
+  normalized_config?: StandardServiceConfig;
+}
 
 const mapService = (item: any): ServiceItem => ({
   id: String(item.id),
-  projectId: String(item.project_id || item.projectId || ''),
-  name: item.name,
-  env: item.env || (Array.isArray(item.env_vars) ? (item.env_vars.find((x: any) => x.key === 'ENV')?.value || 'staging') : 'staging'),
-  owner: item.owner || (Array.isArray(item.env_vars) ? (item.env_vars.find((x: any) => x.key === 'OWNER')?.value || 'system') : 'system'),
-  status: item.status || 'running',
-  image: item.image,
-  replicas: item.replicas || 1,
-  cpuLimit: item.cpu_limit || item.cpuLimit || 0,
-  memLimit: item.mem_limit || item.memLimit || 0,
-  tags: parseTags(item.tags),
-  config: item.config || '',
-  createdAt: item.created_at || item.createdAt,
-  updatedAt: item.updated_at || item.updatedAt,
+  projectId: String(item.project_id || ''),
+  teamId: String(item.team_id || ''),
+  name: item.name || '',
+  env: item.env || 'staging',
+  owner: item.owner || 'system',
+  runtimeType: (item.runtime_type || 'k8s') as ServiceRuntimeType,
+  configMode: (item.config_mode || 'standard') as ServiceConfigMode,
+  serviceKind: item.service_kind || 'web',
+  status: item.status || 'draft',
+  labels: Array.isArray(item.labels) ? item.labels.map((x: any) => ({ key: x.key || '', value: x.value || '' })) : [],
+  standardConfig: item.standard_config,
+  customYaml: item.custom_yaml,
+  renderedYaml: item.rendered_yaml || item.yaml_content,
+  createdAt: item.created_at,
+  updatedAt: item.updated_at,
 });
 
 export const serviceApi = {
+  async preview(data: RenderPreviewReq): Promise<ApiResponse<RenderPreviewResp>> {
+    return apiService.post('/services/render/preview', data);
+  },
+
+  async transform(data: { standard_config: StandardServiceConfig; target: 'k8s' | 'compose'; service_name: string; service_type: 'stateless' | 'stateful' }): Promise<ApiResponse<{ custom_yaml: string; source_hash: string }>> {
+    return apiService.post('/services/transform', data);
+  },
+
   async getList(params?: ServiceMgmtListParams): Promise<ApiResponse<PaginatedResponse<ServiceItem>>> {
-    const response = await apiService.get<any[]>('/services', {
-      params: { page: params?.page, page_size: params?.pageSize },
+    const response = await apiService.get<any>('/services', {
+      params: {
+        page: params?.page,
+        page_size: params?.pageSize,
+        project_id: params?.projectId,
+        team_id: params?.teamId,
+        runtime_type: params?.runtimeType && params.runtimeType !== 'all' ? params.runtimeType : undefined,
+        env: params?.env && params.env !== 'all' ? params.env : undefined,
+        label_selector: params?.labelSelector,
+        q: params?.q,
+      },
     });
-    const list = (response.data || []).map(mapService);
+    const payload = response.data || {};
+    const list = (payload.list || []).map(mapService);
     return {
       ...response,
-      data: { list, total: response.total || list.length },
+      data: { list, total: Number(payload.total || list.length) },
     };
   },
 
@@ -100,54 +163,16 @@ export const serviceApi = {
   },
 
   async create(data: ServiceCreateParams): Promise<ApiResponse<ServiceItem>> {
-    const projectId = Number(localStorage.getItem('projectId') || '1');
-    const payload = {
-      project_id: projectId,
-      name: data.name,
-      type: 'stateless',
-      image: data.image,
-      replicas: data.replicas || 1,
-      service_port: 80,
-      container_port: 8080,
-      env_vars: [
-        { key: 'ENV', value: data.env || 'staging' },
-        { key: 'OWNER', value: data.owner || 'system' },
-        { key: 'CONFIG', value: data.config || '' },
-      ],
-      resources: {
-        limits: {
-          cpu: `${Math.max(100, data.cpuLimit || 500)}m`,
-          memory: `${Math.max(128, data.memLimit || 512)}Mi`,
-        },
-      },
-    };
-    const response = await apiService.post<any>('/services', payload);
+    const response = await apiService.post<any>('/services', {
+      project_id: data.project_id || Number(localStorage.getItem('projectId') || '1'),
+      team_id: data.team_id || Number(localStorage.getItem('teamId') || '1'),
+      ...data,
+    });
     return { ...response, data: mapService(response.data) };
   },
 
   async update(id: string, data: Partial<ServiceCreateParams>): Promise<ApiResponse<ServiceItem>> {
-    const projectId = Number(localStorage.getItem('projectId') || '1');
-    const payload = {
-      project_id: projectId,
-      name: data.name,
-      type: 'stateless',
-      image: data.image,
-      replicas: data.replicas || 1,
-      service_port: 80,
-      container_port: 8080,
-      env_vars: [
-        { key: 'ENV', value: data.env || 'staging' },
-        { key: 'OWNER', value: data.owner || 'system' },
-        { key: 'CONFIG', value: data.config || '' },
-      ],
-      resources: {
-        limits: {
-          cpu: `${Math.max(100, data.cpuLimit || 500)}m`,
-          memory: `${Math.max(128, data.memLimit || 512)}Mi`,
-        },
-      },
-    };
-    const response = await apiService.put<any>(`/services/${id}`, payload);
+    const response = await apiService.put<any>(`/services/${id}`, data);
     return { ...response, data: mapService(response.data) };
   },
 
@@ -155,9 +180,8 @@ export const serviceApi = {
     return apiService.delete(`/services/${id}`);
   },
 
-  async deploy(id: string, changeSet?: Record<string, any>): Promise<ApiResponse<void>> {
-    const clusterId = Number(localStorage.getItem('clusterId') || '1');
-    return apiService.post(`/services/${id}/deploy`, { cluster_id: clusterId, ...(changeSet || {}) });
+  async deploy(id: string, payload?: { deploy_target?: ServiceRuntimeType; cluster_id?: number; approval_token?: string }): Promise<ApiResponse<void>> {
+    return apiService.post(`/services/${id}/deploy`, payload || {});
   },
 
   async rollback(id: string): Promise<ApiResponse<void>> {
@@ -174,10 +198,22 @@ export const serviceApi = {
       message: item.message,
       createdAt: item.created_at || item.createdAt,
     }));
-    return { ...response, data: { list, total: response.total || list.length } };
+    return { ...response, data: { list, total: list.length } };
   },
 
   async getQuota(): Promise<ApiResponse<ServiceQuota>> {
     return apiService.get('/services/quota');
+  },
+
+  async helmImport(payload: { service_id: number; chart_name: string; chart_version?: string; chart_ref?: string; values_yaml?: string; rendered_yaml?: string }): Promise<ApiResponse<any>> {
+    return apiService.post('/services/helm/import', payload);
+  },
+
+  async helmRender(payload: { release_id?: number; chart_name?: string; chart_ref?: string; values_yaml?: string; rendered_yaml?: string }): Promise<ApiResponse<{ rendered_yaml: string; diagnostics: Array<{ level: string; code: string; message: string }> }>> {
+    return apiService.post('/services/helm/render', payload);
+  },
+
+  async deployHelm(id: string): Promise<ApiResponse<void>> {
+    return apiService.post(`/services/${id}/deploy/helm`);
   },
 };

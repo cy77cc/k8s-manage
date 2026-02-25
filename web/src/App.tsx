@@ -104,9 +104,9 @@ const ProtectedApp: React.FC = () => {
           <Route path="/settings/users" element={withAuth('rbac', 'read', <UsersPage />)} />
           <Route path="/settings/roles" element={withAuth('rbac', 'read', <RolesPage />)} />
           <Route path="/settings/permissions" element={withAuth('rbac', 'read', <PermissionsPage />)} />
-          <Route path="/services" element={<ServiceListPage />} />
-          <Route path="/services/provision" element={<ServiceProvisionPage />} />
-          <Route path="/services/:id" element={<ServiceDetailPage />} />
+          <Route path="/services" element={withAuth('service', 'read', <ServiceListPage />)} />
+          <Route path="/services/provision" element={withAuth('service', 'write', <ServiceProvisionPage />)} />
+          <Route path="/services/:id" element={withAuth('service', 'read', <ServiceDetailPage />)} />
           <Route path="/cmdb/assets" element={withAuth('cmdb', 'read', <CMDBPage />)} />
           <Route path="/automation" element={withAuth('automation', 'read', <AutomationPage />)} />
           <Route path="/cicd" element={withAuth('cicd', 'read', <CICDPage />)} />

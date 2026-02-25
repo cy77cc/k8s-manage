@@ -433,3 +433,57 @@
 1. 增加 auth/rbac 接口集成测试（含返回结构断言）。
 2. 增加旧密码登录后自动 rehash 的可选开关。
 3. 清理 `internal/service/user/handler/{roles,permissions,rbac}.go` 空壳文件或补齐实现。
+
+## 2026-02-25 (Service Management: Standard/Custom + Preview + Ownership + Helm)
+
+### Scope
+
+- 落地服务管理能力升级：通用配置/自定义配置、实时渲染预览、多维筛选、权限分层与 Helm 导入渲染。
+
+### Completed
+
+- 后端服务域重构：
+  - 新增 `internal/service/service/`（`routes/handler/logic/render/types`）。
+  - `internal/service/service.go` 注册新服务域路由。
+  - `internal/service/project/routes.go` 移除旧 services 路由挂载。
+- API 能力补齐：
+  - `POST /api/v1/services/render/preview`
+  - `POST /api/v1/services/transform`
+  - 扩展 `POST/PUT /api/v1/services`
+  - 扩展 `GET /api/v1/services`（team/runtime/env/label_selector/q）
+  - `POST /api/v1/services/:id/deploy`（支持 `k8s|compose|helm`）
+  - Helm: `POST /api/v1/services/helm/import`, `POST /api/v1/services/helm/render`, `POST /api/v1/services/:id/deploy/helm`
+  - 保留 `rollback/events/quota` 的 MVP 接口兼容。
+- 数据模型与迁移：
+  - 扩展 `internal/model/project.go` 的 `Service` 字段（ownership/config/render/labels）。
+  - 新增 `ServiceHelmRelease`、`ServiceRenderSnapshot` 模型。
+  - 新增 migration：`20260225_000005_service_management_upgrade.sql`。
+  - 修复 migration 执行兼容：将 `PREPARE/EXECUTE/DEALLOCATE` 拆成独立语句并加索引幂等检查。
+- 权限模型：
+  - 新权限码：`service:read|write|deploy|approve`（migration seed）。
+  - handler 中增加 `service:approve` 的 production deploy 校验。
+  - 前端服务路由接入 `Authorized('service', ...)`。
+- 前端页面：
+  - `ServiceProvisionPage` 升级为双模式（standard/custom）+ 目标渲染切换（k8s/compose）+ 实时预览 + 一键转换。
+  - `ServiceListPage` 增加 team/runtime/env/label_selector/q 筛选与标签展示。
+  - `ServiceDetailPage` 展示归属与配置摘要，支持 Helm 导入渲染与部署按钮。
+  - `web/src/api/modules/services.ts` 对齐新接口与字段映射。
+- 测试补充：
+  - 新增 `internal/service/service/render_test.go`，覆盖 standard->k8s/compose 渲染主路径。
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+### Known Gaps / Risks
+
+- Helm 渲染当前优先使用传入 `rendered_yaml` 或系统 `helm template`，未完成 Helm SDK 全链路托管。
+- 标签筛选当前基于 `labels_json LIKE`，数据量上升后需要专用索引策略。
+- `rollback/events/quota` 仍为 MVP 兼容实现，后续需接真实审计与配额统计源。
+
+### Next Actions
+
+1. 将 Helm 渲染切换为 SDK 路径并增加 chart 依赖/私仓异常分类。
+2. 为服务权限补充接口级测试（owner/team + prod approve）。
+3. 将服务详情页的部署审批流程接入 AI 审批中心统一入口。

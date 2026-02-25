@@ -23,6 +23,19 @@ func (Project) TableName() string {
 type Service struct {
 	ID            uint      `gorm:"primaryKey;column:id" json:"id"`
 	ProjectID     uint      `gorm:"column:project_id;not null" json:"project_id"`
+	TeamID        uint      `gorm:"column:team_id;default:0;index" json:"team_id"`
+	OwnerUserID   uint      `gorm:"column:owner_user_id;default:0" json:"owner_user_id"`
+	Owner         string    `gorm:"column:owner;type:varchar(64);default:''" json:"owner"`
+	Env           string    `gorm:"column:env;type:varchar(32);default:'staging';index" json:"env"`
+	RuntimeType   string    `gorm:"column:runtime_type;type:varchar(16);default:'k8s';index" json:"runtime_type"` // k8s/compose/helm
+	ConfigMode    string    `gorm:"column:config_mode;type:varchar(16);default:'standard'" json:"config_mode"`     // standard/custom
+	ServiceKind   string    `gorm:"column:service_kind;type:varchar(32);default:'web'" json:"service_kind"`
+	RenderTarget  string    `gorm:"column:render_target;type:varchar(16);default:'k8s'" json:"render_target"`
+	LabelsJSON    string    `gorm:"column:labels_json;type:json" json:"labels_json"`
+	StandardJSON  string    `gorm:"column:standard_config_json;type:json" json:"standard_config_json"`
+	CustomYAML    string    `gorm:"column:custom_yaml;type:mediumtext" json:"custom_yaml"`
+	TemplateVer   string    `gorm:"column:source_template_version;type:varchar(32);default:'v1'" json:"source_template_version"`
+	Status        string    `gorm:"column:status;type:varchar(32);default:'draft';index" json:"status"`
 	Name          string    `gorm:"column:name;type:varchar(64);not null" json:"name"`
 	Type          string    `gorm:"column:type;type:varchar(32);not null" json:"type"` // stateless / stateful
 	Image         string    `gorm:"column:image;type:varchar(256);not null" json:"image"`
@@ -39,4 +52,37 @@ type Service struct {
 
 func (Service) TableName() string {
 	return "services"
+}
+
+type ServiceHelmRelease struct {
+	ID           uint      `gorm:"primaryKey;column:id" json:"id"`
+	ServiceID    uint      `gorm:"column:service_id;not null;index" json:"service_id"`
+	ChartName    string    `gorm:"column:chart_name;type:varchar(128);not null" json:"chart_name"`
+	ChartVersion string    `gorm:"column:chart_version;type:varchar(64);default:''" json:"chart_version"`
+	ChartRef     string    `gorm:"column:chart_ref;type:varchar(512);default:''" json:"chart_ref"` // local path/repo ref
+	ValuesYAML   string    `gorm:"column:values_yaml;type:mediumtext" json:"values_yaml"`
+	RenderedYAML string    `gorm:"column:rendered_yaml;type:longtext" json:"rendered_yaml"`
+	Status       string    `gorm:"column:status;type:varchar(32);default:'imported'" json:"status"`
+	CreatedBy    uint      `gorm:"column:created_by;default:0" json:"created_by"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (ServiceHelmRelease) TableName() string {
+	return "service_helm_releases"
+}
+
+type ServiceRenderSnapshot struct {
+	ID           uint      `gorm:"primaryKey;column:id" json:"id"`
+	ServiceID    uint      `gorm:"column:service_id;not null;index" json:"service_id"`
+	Target       string    `gorm:"column:target;type:varchar(16);not null" json:"target"` // k8s/compose/helm
+	Mode         string    `gorm:"column:mode;type:varchar(16);not null" json:"mode"`     // standard/custom
+	RenderedYAML string    `gorm:"column:rendered_yaml;type:longtext" json:"rendered_yaml"`
+	Diagnostics  string    `gorm:"column:diagnostics_json;type:json" json:"diagnostics_json"`
+	CreatedBy    uint      `gorm:"column:created_by;default:0" json:"created_by"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (ServiceRenderSnapshot) TableName() string {
+	return "service_render_snapshots"
 }

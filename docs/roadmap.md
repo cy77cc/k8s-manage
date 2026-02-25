@@ -39,7 +39,7 @@
 | Auth | In Progress | login/register/refresh/logout + `auth/me`，已补全 roles/permissions 回填与 refreshToken 流程 |
 | Hosts | In Progress | CRUD + action + ssh exec + batch + onboarding token flow + cloud/kvm/credentials mvp |
 | Clusters / K8s | In Progress | list/create/detail + nodes/pods/deployments/services/ingresses/events/logs + deploy preview/apply |
-| Services | In Progress | CRUD + deploy + quota/events/rollback(mvp stub) |
+| Services | In Progress | 新增 `standard/custom` 配置模式、`k8s/compose` 实时渲染预览、Helm 导入/渲染/部署首期支持、`service:*` 权限码落地 |
 | RBAC | In Progress | admin 全量放行（含 `*:*`）+ users/roles/permissions 列表统一 `data.list/total` + 关联写入事务化 |
 | AI | In Progress | Eino + Ollama(`glm-5:cloud`) + 控制面（capabilities/tools/approvals/executions）+ SSE tool events + typed tool schema hardening + param resolver/retry |
 
@@ -66,3 +66,5 @@
 - AI function calling 默认只读放行，变更动作必须审批后执行。
 - AI 工具实现采用 “本地 Eino Tool + mcp-go MCP Tool Proxy” 混合模式。
 - AI tool calling 参数治理：`runtime context > session memory > safety defaults`，缺参仅重试一次。
+- 服务管理采用双配置模式：`standard`（模板）与 `custom`（YAML 编辑）。
+- 服务权限颗粒度固定：`service:read|write|deploy|approve`，`production` 发布需 `service:approve`。

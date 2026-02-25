@@ -12,6 +12,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/service/node"
 	"github.com/cy77cc/k8s-manage/internal/service/project"
 	"github.com/cy77cc/k8s-manage/internal/service/rbac"
+	servicemgr "github.com/cy77cc/k8s-manage/internal/service/service"
 	"github.com/cy77cc/k8s-manage/internal/service/user"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	webui "github.com/cy77cc/k8s-manage/web"
@@ -28,6 +29,7 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	user.RegisterUserHandlers(v1, serverCtx)
 	node.RegisterNodeHandlers(v1, serverCtx)
 	project.RegisterProjectHandlers(v1, serverCtx)
+	servicemgr.RegisterServiceHandlers(v1, serverCtx)
 	host.RegisterHostHandlers(v1, serverCtx)
 	cluster.RegisterClusterHandlers(v1, serverCtx)
 	rbac.RegisterRBACHandlers(v1, serverCtx)
