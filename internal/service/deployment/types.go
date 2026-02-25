@@ -9,13 +9,14 @@ type TargetNodeReq struct {
 }
 
 type TargetUpsertReq struct {
-	Name       string          `json:"name" binding:"required"`
-	TargetType string          `json:"target_type" binding:"required"` // k8s|compose
-	ClusterID  uint            `json:"cluster_id"`
-	ProjectID  uint            `json:"project_id"`
-	TeamID     uint            `json:"team_id"`
-	Env        string          `json:"env"`
-	Nodes      []TargetNodeReq `json:"nodes"`
+	Name        string          `json:"name" binding:"required"`
+	TargetType  string          `json:"target_type" binding:"required"` // k8s|compose
+	RuntimeType string          `json:"runtime_type"`
+	ClusterID   uint            `json:"cluster_id"`
+	ProjectID   uint            `json:"project_id"`
+	TeamID      uint            `json:"team_id"`
+	Env         string          `json:"env"`
+	Nodes       []TargetNodeReq `json:"nodes"`
 }
 
 type TargetNodeResp struct {
@@ -28,17 +29,18 @@ type TargetNodeResp struct {
 }
 
 type TargetResp struct {
-	ID         uint             `json:"id"`
-	Name       string           `json:"name"`
-	TargetType string           `json:"target_type"`
-	ClusterID  uint             `json:"cluster_id"`
-	ProjectID  uint             `json:"project_id"`
-	TeamID     uint             `json:"team_id"`
-	Env        string           `json:"env"`
-	Status     string           `json:"status"`
-	Nodes      []TargetNodeResp `json:"nodes,omitempty"`
-	CreatedAt  time.Time        `json:"created_at"`
-	UpdatedAt  time.Time        `json:"updated_at"`
+	ID          uint             `json:"id"`
+	Name        string           `json:"name"`
+	TargetType  string           `json:"target_type"`
+	RuntimeType string           `json:"runtime_type"`
+	ClusterID   uint             `json:"cluster_id"`
+	ProjectID   uint             `json:"project_id"`
+	TeamID      uint             `json:"team_id"`
+	Env         string           `json:"env"`
+	Status      string           `json:"status"`
+	Nodes       []TargetNodeResp `json:"nodes,omitempty"`
+	CreatedAt   time.Time        `json:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at"`
 }
 
 type ReleasePreviewReq struct {
@@ -58,8 +60,9 @@ type ReleasePreviewResp struct {
 }
 
 type ReleaseApplyResp struct {
-	ReleaseID uint   `json:"release_id"`
-	Status    string `json:"status"`
+	ReleaseID   uint   `json:"release_id"`
+	Status      string `json:"status"`
+	RuntimeType string `json:"runtime_type"`
 }
 
 type GovernanceReq struct {

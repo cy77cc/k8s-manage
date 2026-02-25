@@ -56,6 +56,7 @@ func TestReleaseStateTransitions(t *testing.T) {
 	ctx := context.Background()
 	_, err := logic.UpsertDeploymentCDConfig(ctx, 2, 201, UpsertDeploymentCDConfigReq{
 		Env:              "prod",
+		RuntimeType:      "k8s",
 		Strategy:         "rolling",
 		StrategyConfig:   map[string]any{"batch": 1},
 		ApprovalRequired: true,
@@ -63,7 +64,7 @@ func TestReleaseStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert cd config: %v", err)
 	}
-	release, err := logic.TriggerRelease(ctx, 3, TriggerReleaseReq{ServiceID: 101, DeploymentID: 201, Env: "prod", Version: "v1.0.0"})
+	release, err := logic.TriggerRelease(ctx, 3, TriggerReleaseReq{ServiceID: 101, DeploymentID: 201, Env: "prod", RuntimeType: "k8s", Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("trigger release: %v", err)
 	}
@@ -83,5 +84,20 @@ func TestReleaseStateTransitions(t *testing.T) {
 	}
 	if rolled.Status != "rolled_back" {
 		t.Fatalf("expected rolled_back, got %s", rolled.Status)
+	}
+}
+
+func TestComposeCanaryRejected(t *testing.T) {
+	logic := newTestLogic(t)
+	ctx := context.Background()
+	_, err := logic.UpsertDeploymentCDConfig(ctx, 2, 201, UpsertDeploymentCDConfigReq{
+		Env:              "staging",
+		RuntimeType:      "compose",
+		Strategy:         "canary",
+		StrategyConfig:   map[string]any{"traffic_percent": 10, "steps": []int{10, 50}},
+		ApprovalRequired: false,
+	})
+	if err == nil {
+		t.Fatalf("expected compose canary to be rejected")
 	}
 }

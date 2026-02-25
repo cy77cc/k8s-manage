@@ -110,9 +110,19 @@ func (l *Logic) ListCIRuns(ctx context.Context, serviceID uint) ([]cicdv1.CIRunR
 }
 
 func (l *Logic) UpsertDeploymentCDConfig(ctx context.Context, uid uint, deploymentID uint, req UpsertDeploymentCDConfigReq) (*cicdv1.DeploymentCDConfigResp, error) {
+	runtimeType := normalizeRuntimeType(req.RuntimeType)
+	if strings.TrimSpace(req.RuntimeType) != "" && runtimeType == "" {
+		return nil, fmt.Errorf("runtime_type must be one of: k8s, compose")
+	}
+	if runtimeType == "" {
+		runtimeType = "k8s"
+	}
 	strategy := normalizeStrategy(req.Strategy)
 	if strategy == "" {
 		return nil, fmt.Errorf("strategy must be one of: rolling, blue-green, canary")
+	}
+	if runtimeType == "compose" && strategy == "canary" {
+		return nil, fmt.Errorf("compose runtime does not support canary strategy")
 	}
 	if strategy == "canary" {
 		if _, ok := req.StrategyConfig["traffic_percent"]; !ok {
@@ -125,6 +135,7 @@ func (l *Logic) UpsertDeploymentCDConfig(ctx context.Context, uid uint, deployme
 	row, err := l.repo.UpsertDeploymentCDConfig(ctx, model.CICDDeploymentCDConfig{
 		DeploymentID:       deploymentID,
 		Env:                defaultIfEmpty(strings.TrimSpace(req.Env), "staging"),
+		RuntimeType:        runtimeType,
 		Strategy:           strategy,
 		StrategyConfigJSON: mustJSON(req.StrategyConfig),
 		ApprovalRequired:   req.ApprovalRequired,
@@ -133,12 +144,12 @@ func (l *Logic) UpsertDeploymentCDConfig(ctx context.Context, uid uint, deployme
 	if err != nil {
 		return nil, err
 	}
-	_ = l.writeAudit(ctx, 0, deploymentID, 0, "cd.config.updated", uid, map[string]any{"cd_config_id": row.ID, "env": row.Env, "strategy": row.Strategy})
+	_ = l.writeAudit(ctx, 0, deploymentID, 0, "cd.config.updated", uid, map[string]any{"cd_config_id": row.ID, "env": row.Env, "runtime": row.RuntimeType, "strategy": row.Strategy})
 	return toCDConfigResp(row), nil
 }
 
-func (l *Logic) GetDeploymentCDConfig(ctx context.Context, deploymentID uint, env string) (*cicdv1.DeploymentCDConfigResp, error) {
-	row, err := l.repo.GetDeploymentCDConfig(ctx, deploymentID, strings.TrimSpace(env))
+func (l *Logic) GetDeploymentCDConfig(ctx context.Context, deploymentID uint, env, runtimeType string) (*cicdv1.DeploymentCDConfigResp, error) {
+	row, err := l.repo.GetDeploymentCDConfig(ctx, deploymentID, strings.TrimSpace(env), normalizeRuntimeType(runtimeType))
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +157,16 @@ func (l *Logic) GetDeploymentCDConfig(ctx context.Context, deploymentID uint, en
 }
 
 func (l *Logic) TriggerRelease(ctx context.Context, uid uint, req TriggerReleaseReq) (*cicdv1.ReleaseResp, error) {
-	cfg, err := l.repo.GetDeploymentCDConfig(ctx, req.DeploymentID, strings.TrimSpace(req.Env))
+	runtimeType := normalizeRuntimeType(req.RuntimeType)
+	if strings.TrimSpace(req.RuntimeType) != "" && runtimeType == "" {
+		return nil, fmt.Errorf("runtime_type must be one of: k8s, compose")
+	}
+	cfg, err := l.repo.GetDeploymentCDConfig(ctx, req.DeploymentID, strings.TrimSpace(req.Env), runtimeType)
 	if err != nil {
 		return nil, fmt.Errorf("cd config not found for deployment/env: %w", err)
+	}
+	if runtimeType == "" {
+		runtimeType = cfg.RuntimeType
 	}
 	now := time.Now()
 	status := "executing"
@@ -163,6 +181,7 @@ func (l *Logic) TriggerRelease(ctx context.Context, uid uint, req TriggerRelease
 		ServiceID:    req.ServiceID,
 		DeploymentID: req.DeploymentID,
 		Env:          strings.TrimSpace(req.Env),
+		RuntimeType:  runtimeType,
 		Version:      strings.TrimSpace(req.Version),
 		Strategy:     cfg.Strategy,
 		Status:       status,
@@ -175,6 +194,7 @@ func (l *Logic) TriggerRelease(ctx context.Context, uid uint, req TriggerRelease
 	}
 	if !cfg.ApprovalRequired {
 		release.Status = "succeeded"
+		release.DiagnosticsJSON = mustJSON(map[string]any{"runtime": runtimeType, "stage": "execute", "summary": "release completed without approval"})
 		_ = l.repo.SaveRelease(ctx, release)
 	}
 	_ = l.writeAudit(ctx, req.ServiceID, req.DeploymentID, release.ID, "release.triggered", uid, map[string]any{
@@ -200,12 +220,17 @@ func (l *Logic) ApproveRelease(ctx context.Context, uid uint, releaseID uint, co
 	now := time.Now()
 	row.ApprovedBy = uid
 	row.ApprovalComment = strings.TrimSpace(comment)
+	row.Status = "approved"
+	if err := l.repo.SaveRelease(ctx, row); err != nil {
+		return nil, err
+	}
 	row.Status = "executing"
 	row.StartedAt = &now
 	if err := l.repo.SaveRelease(ctx, row); err != nil {
 		return nil, err
 	}
 	row.Status = "succeeded"
+	row.DiagnosticsJSON = mustJSON(map[string]any{"runtime": row.RuntimeType, "stage": "execute", "summary": "approved release executed"})
 	row.FinishedAt = &now
 	if err := l.repo.SaveRelease(ctx, row); err != nil {
 		return nil, err
@@ -252,21 +277,34 @@ func (l *Logic) RollbackRelease(ctx context.Context, uid uint, releaseID uint, t
 		ServiceID:             row.ServiceID,
 		DeploymentID:          row.DeploymentID,
 		Env:                   row.Env,
+		RuntimeType:           row.RuntimeType,
 		Version:               strings.TrimSpace(targetVersion),
 		Strategy:              "rollback",
-		Status:                "rolled_back",
+		Status:                "executing",
 		TriggeredBy:           uid,
 		ApprovedBy:            uid,
 		ApprovalComment:       strings.TrimSpace(comment),
 		RollbackFromReleaseID: row.ID,
+		DiagnosticsJSON:       mustJSON(map[string]any{"runtime": row.RuntimeType, "stage": "rollback", "summary": "rollback executing"}),
 		StartedAt:             &now,
-		FinishedAt:            &now,
 	})
 	if err != nil {
 		return nil, err
 	}
+	if err := l.executeRuntimeRollback(ctx, row.RuntimeType); err != nil {
+		rollback.Status = "failed"
+		rollback.DiagnosticsJSON = mustJSON(map[string]any{"runtime": row.RuntimeType, "stage": "rollback", "error": err.Error(), "summary": "runtime rollback failed"})
+		rollback.FinishedAt = &now
+		_ = l.repo.SaveRelease(ctx, rollback)
+		return nil, err
+	}
+	rollback.Status = "rolled_back"
+	rollback.DiagnosticsJSON = mustJSON(map[string]any{"runtime": row.RuntimeType, "stage": "rollback", "summary": "runtime rollback completed"})
+	rollback.FinishedAt = &now
+	_ = l.repo.SaveRelease(ctx, rollback)
 	_ = l.writeAudit(ctx, row.ServiceID, row.DeploymentID, rollback.ID, "release.rolled_back", uid, map[string]any{
 		"from_release_id": row.ID,
+		"runtime":         row.RuntimeType,
 		"target_version":  targetVersion,
 		"comment":         comment,
 	})
@@ -274,8 +312,8 @@ func (l *Logic) RollbackRelease(ctx context.Context, uid uint, releaseID uint, t
 	return toReleaseResp(rollback), nil
 }
 
-func (l *Logic) ListReleases(ctx context.Context, serviceID, deploymentID uint) ([]cicdv1.ReleaseResp, error) {
-	rows, err := l.repo.ListReleases(ctx, serviceID, deploymentID)
+func (l *Logic) ListReleases(ctx context.Context, serviceID, deploymentID uint, runtimeType string) ([]cicdv1.ReleaseResp, error) {
+	rows, err := l.repo.ListReleases(ctx, serviceID, deploymentID, normalizeRuntimeType(runtimeType))
 	if err != nil {
 		return nil, err
 	}
@@ -373,11 +411,11 @@ func toCIRunResp(row *model.CICDServiceCIRun) *cicdv1.CIRunResp {
 }
 
 func toCDConfigResp(row *model.CICDDeploymentCDConfig) *cicdv1.DeploymentCDConfigResp {
-	return &cicdv1.DeploymentCDConfigResp{ID: row.ID, DeploymentID: row.DeploymentID, Env: row.Env, Strategy: row.Strategy, StrategyConfig: parseMapJSON(row.StrategyConfigJSON), ApprovalRequired: row.ApprovalRequired, UpdatedBy: row.UpdatedBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	return &cicdv1.DeploymentCDConfigResp{ID: row.ID, DeploymentID: row.DeploymentID, Env: row.Env, RuntimeType: row.RuntimeType, Strategy: row.Strategy, StrategyConfig: parseMapJSON(row.StrategyConfigJSON), ApprovalRequired: row.ApprovalRequired, UpdatedBy: row.UpdatedBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 
 func toReleaseResp(row *model.CICDRelease) *cicdv1.ReleaseResp {
-	return &cicdv1.ReleaseResp{ID: row.ID, ServiceID: row.ServiceID, DeploymentID: row.DeploymentID, Env: row.Env, Version: row.Version, Strategy: row.Strategy, Status: row.Status, TriggeredBy: row.TriggeredBy, ApprovedBy: row.ApprovedBy, ApprovalComment: row.ApprovalComment, RollbackFromReleaseID: row.RollbackFromReleaseID, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	return &cicdv1.ReleaseResp{ID: row.ID, ServiceID: row.ServiceID, DeploymentID: row.DeploymentID, Env: row.Env, RuntimeType: row.RuntimeType, Version: row.Version, Strategy: row.Strategy, Status: row.Status, TriggeredBy: row.TriggeredBy, ApprovedBy: row.ApprovedBy, ApprovalComment: row.ApprovalComment, RollbackFromReleaseID: row.RollbackFromReleaseID, Diagnostics: parseAnyJSON(row.DiagnosticsJSON), StartedAt: row.StartedAt, FinishedAt: row.FinishedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 
 func normalizeTriggerMode(mode string) string {
@@ -412,6 +450,24 @@ func normalizeStrategy(strategy string) string {
 		return s
 	default:
 		return ""
+	}
+}
+
+func normalizeRuntimeType(runtimeType string) string {
+	switch strings.TrimSpace(runtimeType) {
+	case "", "k8s", "compose":
+		return strings.TrimSpace(runtimeType)
+	default:
+		return ""
+	}
+}
+
+func (l *Logic) executeRuntimeRollback(ctx context.Context, runtimeType string) error {
+	switch runtimeType {
+	case "k8s", "compose":
+		return nil
+	default:
+		return fmt.Errorf("unsupported runtime rollback executor: %s", runtimeType)
 	}
 }
 

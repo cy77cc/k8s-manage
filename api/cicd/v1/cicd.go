@@ -43,6 +43,7 @@ type CIRunResp struct {
 
 type UpsertDeploymentCDConfigReq struct {
 	Env              string         `json:"env" binding:"required"`
+	RuntimeType      string         `json:"runtime_type"`
 	Strategy         string         `json:"strategy" binding:"required"` // rolling|blue-green|canary
 	StrategyConfig   map[string]any `json:"strategy_config"`
 	ApprovalRequired bool           `json:"approval_required"`
@@ -52,6 +53,7 @@ type DeploymentCDConfigResp struct {
 	ID               uint           `json:"id"`
 	DeploymentID     uint           `json:"deployment_id"`
 	Env              string         `json:"env"`
+	RuntimeType      string         `json:"runtime_type"`
 	Strategy         string         `json:"strategy"`
 	StrategyConfig   map[string]any `json:"strategy_config"`
 	ApprovalRequired bool           `json:"approval_required"`
@@ -64,6 +66,7 @@ type TriggerReleaseReq struct {
 	ServiceID    uint   `json:"service_id" binding:"required"`
 	DeploymentID uint   `json:"deployment_id" binding:"required"`
 	Env          string `json:"env" binding:"required"`
+	RuntimeType  string `json:"runtime_type"`
 	Version      string `json:"version" binding:"required"`
 }
 
@@ -81,6 +84,7 @@ type ReleaseResp struct {
 	ServiceID             uint       `json:"service_id"`
 	DeploymentID          uint       `json:"deployment_id"`
 	Env                   string     `json:"env"`
+	RuntimeType           string     `json:"runtime_type"`
 	Version               string     `json:"version"`
 	Strategy              string     `json:"strategy"`
 	Status                string     `json:"status"`
@@ -88,6 +92,7 @@ type ReleaseResp struct {
 	ApprovedBy            uint       `json:"approved_by"`
 	ApprovalComment       string     `json:"approval_comment"`
 	RollbackFromReleaseID uint       `json:"rollback_from_release_id"`
+	Diagnostics           any        `json:"diagnostics"`
 	StartedAt             *time.Time `json:"started_at,omitempty"`
 	FinishedAt            *time.Time `json:"finished_at,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`

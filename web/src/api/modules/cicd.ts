@@ -35,6 +35,7 @@ export interface DeploymentCDConfig {
   id: number;
   deployment_id: number;
   env: string;
+  runtime_type: 'k8s' | 'compose';
   strategy: 'rolling' | 'blue-green' | 'canary';
   strategy_config: Record<string, any>;
   approval_required: boolean;
@@ -48,6 +49,7 @@ export interface ReleaseRecord {
   service_id: number;
   deployment_id: number;
   env: string;
+  runtime_type: 'k8s' | 'compose';
   version: string;
   strategy: string;
   status: ReleaseStatus;
@@ -55,6 +57,7 @@ export interface ReleaseRecord {
   approved_by: number;
   approval_comment: string;
   rollback_from_release_id: number;
+  diagnostics?: any;
   started_at?: string;
   finished_at?: string;
   created_at: string;
@@ -108,12 +111,13 @@ export const cicdApi = {
     return apiService.get(`/cicd/services/${serviceId}/ci-runs`);
   },
 
-  getDeploymentCDConfig(deploymentId: number, env?: string): Promise<ApiResponse<DeploymentCDConfig>> {
-    return apiService.get(`/cicd/deployments/${deploymentId}/cd-config`, { params: { env } });
+  getDeploymentCDConfig(deploymentId: number, env?: string, runtimeType?: 'k8s' | 'compose'): Promise<ApiResponse<DeploymentCDConfig>> {
+    return apiService.get(`/cicd/deployments/${deploymentId}/cd-config`, { params: { env, runtime_type: runtimeType } });
   },
 
   putDeploymentCDConfig(deploymentId: number, payload: {
     env: string;
+    runtime_type?: 'k8s' | 'compose';
     strategy: 'rolling' | 'blue-green' | 'canary';
     strategy_config?: Record<string, any>;
     approval_required?: boolean;
@@ -125,12 +129,13 @@ export const cicdApi = {
     service_id: number;
     deployment_id: number;
     env: string;
+    runtime_type?: 'k8s' | 'compose';
     version: string;
   }): Promise<ApiResponse<ReleaseRecord>> {
     return apiService.post('/cicd/releases', payload);
   },
 
-  listReleases(params?: { service_id?: number; deployment_id?: number }): Promise<ApiResponse<PaginatedResponse<ReleaseRecord>>> {
+  listReleases(params?: { service_id?: number; deployment_id?: number; runtime_type?: 'k8s' | 'compose' }): Promise<ApiResponse<PaginatedResponse<ReleaseRecord>>> {
     return apiService.get('/cicd/releases', { params });
   },
 

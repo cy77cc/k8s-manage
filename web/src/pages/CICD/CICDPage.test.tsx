@@ -58,7 +58,7 @@ const setupApi = () => {
   });
   mockApi.cicd.listReleases.mockResolvedValue({
     data: {
-      list: [{ id: 31, service_id: 101, deployment_id: 201, env: 'staging', version: 'v1.0.0', strategy: 'rolling', status: 'pending_approval' }],
+      list: [{ id: 31, service_id: 101, deployment_id: 201, env: 'staging', runtime_type: 'k8s', version: 'v1.0.0', strategy: 'rolling', status: 'pending_approval' }],
     },
   });
   mockApi.cicd.listApprovals.mockResolvedValue({

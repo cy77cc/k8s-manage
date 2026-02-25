@@ -70,11 +70,14 @@ func (r *Repository) ListCIRuns(ctx context.Context, serviceID uint) ([]model.CI
 	return rows, nil
 }
 
-func (r *Repository) GetDeploymentCDConfig(ctx context.Context, deploymentID uint, env string) (*model.CICDDeploymentCDConfig, error) {
+func (r *Repository) GetDeploymentCDConfig(ctx context.Context, deploymentID uint, env, runtimeType string) (*model.CICDDeploymentCDConfig, error) {
 	var row model.CICDDeploymentCDConfig
 	q := r.db.WithContext(ctx).Where("deployment_id = ?", deploymentID)
 	if env != "" {
 		q = q.Where("env = ?", env)
+	}
+	if runtimeType != "" {
+		q = q.Where("runtime_type = ?", runtimeType)
 	}
 	if err := q.Order("id DESC").First(&row).Error; err != nil {
 		return nil, err
@@ -84,9 +87,10 @@ func (r *Repository) GetDeploymentCDConfig(ctx context.Context, deploymentID uin
 
 func (r *Repository) UpsertDeploymentCDConfig(ctx context.Context, in model.CICDDeploymentCDConfig) (*model.CICDDeploymentCDConfig, error) {
 	var existing model.CICDDeploymentCDConfig
-	err := r.db.WithContext(ctx).Where("deployment_id = ? AND env = ?", in.DeploymentID, in.Env).First(&existing).Error
+	err := r.db.WithContext(ctx).Where("deployment_id = ? AND env = ? AND runtime_type = ?", in.DeploymentID, in.Env, in.RuntimeType).First(&existing).Error
 	if err == nil {
 		existing.Strategy = in.Strategy
+		existing.RuntimeType = in.RuntimeType
 		existing.StrategyConfigJSON = in.StrategyConfigJSON
 		existing.ApprovalRequired = in.ApprovalRequired
 		existing.UpdatedBy = in.UpdatedBy
@@ -123,13 +127,16 @@ func (r *Repository) SaveRelease(ctx context.Context, row *model.CICDRelease) er
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
-func (r *Repository) ListReleases(ctx context.Context, serviceID, deploymentID uint) ([]model.CICDRelease, error) {
+func (r *Repository) ListReleases(ctx context.Context, serviceID, deploymentID uint, runtimeType string) ([]model.CICDRelease, error) {
 	q := r.db.WithContext(ctx).Model(&model.CICDRelease{})
 	if serviceID > 0 {
 		q = q.Where("service_id = ?", serviceID)
 	}
 	if deploymentID > 0 {
 		q = q.Where("deployment_id = ?", deploymentID)
+	}
+	if runtimeType != "" {
+		q = q.Where("runtime_type = ?", runtimeType)
 	}
 	rows := make([]model.CICDRelease, 0)
 	if err := q.Order("id DESC").Find(&rows).Error; err != nil {

@@ -95,7 +95,7 @@ func (h *Handler) GetDeploymentCDConfig(c *gin.Context) {
 	if !h.authorize(c, "cicd:cd:read", "cicd:*") {
 		return
 	}
-	row, err := h.logic.GetDeploymentCDConfig(c.Request.Context(), uintFromParam(c, "deployment_id"), strings.TrimSpace(c.Query("env")))
+	row, err := h.logic.GetDeploymentCDConfig(c.Request.Context(), uintFromParam(c, "deployment_id"), strings.TrimSpace(c.Query("env")), strings.TrimSpace(c.Query("runtime_type")))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": 3004, "msg": err.Error()})
 		return
@@ -143,7 +143,7 @@ func (h *Handler) ListReleases(c *gin.Context) {
 	if !h.authorize(c, "cicd:cd:read", "cicd:audit:read", "cicd:*") {
 		return
 	}
-	rows, err := h.logic.ListReleases(c.Request.Context(), uintFromQuery(c, "service_id"), uintFromQuery(c, "deployment_id"))
+	rows, err := h.logic.ListReleases(c.Request.Context(), uintFromQuery(c, "service_id"), uintFromQuery(c, "deployment_id"), strings.TrimSpace(c.Query("runtime_type")))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
 		return

@@ -25,6 +25,7 @@ import type { ClusterBootstrapTask, DeployTarget, DeployRelease, Inspection } fr
 
 const envOptions = [{ value: 'development' }, { value: 'staging' }, { value: 'production' }];
 const strategyOptions = [{ value: 'rolling' }, { value: 'blue-green' }, { value: 'canary' }];
+const runtimeOptions = [{ value: 'k8s' }, { value: 'compose' }];
 
 type GovernanceForm = {
   service_id: number;
@@ -68,6 +69,8 @@ const DeploymentPage: React.FC = () => {
   const [hosts, setHosts] = React.useState<Host[]>([]);
   const [services, setServices] = React.useState<ServiceItem[]>([]);
   const [previewManifest, setPreviewManifest] = React.useState('');
+  const [runtimeFilter, setRuntimeFilter] = React.useState<'k8s' | 'compose' | undefined>(undefined);
+  const [selectedRelease, setSelectedRelease] = React.useState<DeployRelease | null>(null);
   const [previewWarnings, setPreviewWarnings] = React.useState<Array<{ code: string; message: string; level: string }>>([]);
   const [clusterModalOpen, setClusterModalOpen] = React.useState(false);
   const [bootstrapPreview, setBootstrapPreview] = React.useState<{ steps: string[]; expected_endpoint?: string } | null>(null);
@@ -85,7 +88,7 @@ const DeploymentPage: React.FC = () => {
     try {
       const [tRes, rRes, iRes, cRes, hRes, sRes] = await Promise.all([
         Api.deployment.getTargets(),
-        Api.deployment.getReleases(),
+        Api.deployment.getReleasesByRuntime({ runtime_type: runtimeFilter }),
         Api.deployment.listInspections(),
         Api.kubernetes.getClusterList({ page: 1, pageSize: 200 }),
         Api.hosts.getHostList({ page: 1, pageSize: 500 }),
@@ -113,7 +116,7 @@ const DeploymentPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [runtimeFilter]);
 
   React.useEffect(() => {
     void load();
@@ -138,6 +141,7 @@ const DeploymentPage: React.FC = () => {
     const payload: any = {
       name: v.name,
       target_type: v.target_type,
+      runtime_type: v.target_type,
       cluster_id: v.target_type === 'k8s' ? Number(v.cluster_id || 0) : 0,
       project_id: Number(localStorage.getItem('projectId') || 1),
       team_id: Number(localStorage.getItem('teamId') || 1),
@@ -299,6 +303,15 @@ const DeploymentPage: React.FC = () => {
                 </Form>
                 <Space style={{ marginBottom: 12 }}>
                   <Button type="primary" onClick={() => void createTarget()}>创建部署目标</Button>
+                  <Select
+                    data-testid="runtime-filter"
+                    allowClear
+                    style={{ width: 180 }}
+                    value={runtimeFilter}
+                    options={runtimeOptions}
+                    placeholder="筛选运行时"
+                    onChange={(v) => setRuntimeFilter((v || undefined) as 'k8s' | 'compose' | undefined)}
+                  />
                   <Tooltip title="Compose 目标直接复用主机管理里的主机组，K8s 目标复用集群管理能力。">
                     <Tag color="blue">主机/集群已联动</Tag>
                   </Tooltip>
@@ -311,6 +324,7 @@ const DeploymentPage: React.FC = () => {
                     { title: 'ID', dataIndex: 'id', width: 80 },
                     { title: '名称', dataIndex: 'name' },
                     { title: '类型', dataIndex: 'target_type', render: (v: string) => <Tag color={v === 'k8s' ? 'blue' : 'geekblue'}>{v}</Tag> },
+                    { title: 'Runtime', dataIndex: 'runtime_type', render: (v: string) => <Tag color={v === 'k8s' ? 'blue' : 'purple'}>{v}</Tag> },
                     {
                       title: '目标资源',
                       render: (_: unknown, r: DeployTarget) => (r.target_type === 'k8s'
@@ -338,13 +352,21 @@ const DeploymentPage: React.FC = () => {
                       <Form.Item name="target_id" label="部署目标" rules={[{ required: true }]}>
                         <Select showSearch options={targetOptions} placeholder="选择目标" optionFilterProp="label" />
                       </Form.Item>
+                      <Form.Item shouldUpdate noStyle>
+                        {({ getFieldValue }) => {
+                          const targetId = Number(getFieldValue('target_id') || 0);
+                          const target = targets.find((t) => t.id === targetId);
+                          if (!target) return null;
+                          if (target.target_type === 'k8s') {
+                            return <Form.Item name="variables_json" label="K8s 变量(JSON)"><Input.TextArea rows={6} placeholder='{"image_tag":"v1.2.3","replicas":"3"}' /></Form.Item>;
+                          }
+                          return <Form.Item name="variables_json" label="Compose 变量(JSON)"><Input.TextArea rows={6} placeholder='{"COMPOSE_PROJECT_NAME":"svc-a","IMAGE_TAG":"v1.2.3"}' /></Form.Item>;
+                        }}
+                      </Form.Item>
                       <Row gutter={12}>
                         <Col span={12}><Form.Item name="env" label="环境" initialValue="staging"><Select options={envOptions} /></Form.Item></Col>
                         <Col span={12}><Form.Item name="strategy" label="发布策略" initialValue="rolling"><Select options={strategyOptions} /></Form.Item></Col>
                       </Row>
-                      <Form.Item name="variables_json" label="模板变量(JSON)">
-                        <Input.TextArea rows={6} placeholder='{"image_tag":"v1.2.3","replicas":"3"}' />
-                      </Form.Item>
                       <Space>
                         <Button onClick={() => void preview()}>Preview</Button>
                         <Button type="primary" onClick={() => void apply()}>Apply</Button>
@@ -375,6 +397,18 @@ const DeploymentPage: React.FC = () => {
                       { title: 'Runtime', dataIndex: 'runtime_type', render: (v: string) => <Tag color={v === 'k8s' ? 'blue' : 'purple'}>{v}</Tag> },
                       { title: 'Strategy', dataIndex: 'strategy' },
                       { title: 'Status', dataIndex: 'status', render: (v: string) => <Tag color={v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'}>{v}</Tag> },
+                      {
+                        title: '诊断摘要',
+                        render: (_: unknown, row: DeployRelease) => {
+                          try {
+                            const parsed = JSON.parse(row.diagnostics_json || '[]');
+                            const first = Array.isArray(parsed) ? parsed[0] : parsed;
+                            return first?.summary || '-';
+                          } catch {
+                            return '-';
+                          }
+                        },
+                      },
                       { title: '创建时间', dataIndex: 'created_at', render: (v: string) => new Date(v).toLocaleString() },
                       {
                         title: '操作',
@@ -382,6 +416,7 @@ const DeploymentPage: React.FC = () => {
                           <Space>
                             <Button size="small" onClick={() => void rollback(row.id)}>Rollback</Button>
                             <Button size="small" onClick={() => void runInspection('post', row.id)}>AIOPS Post-check</Button>
+                            <Button size="small" onClick={() => setSelectedRelease(row)}>详情</Button>
                           </Space>
                         ),
                       },
@@ -505,6 +540,37 @@ const DeploymentPage: React.FC = () => {
           <Form.Item name="credential_ref" label="凭据引用"><Input placeholder="env:KUBECONFIG_PROD" /></Form.Item>
           <Form.Item name="description" label="描述"><Input.TextArea rows={3} /></Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={`发布详情 #${selectedRelease?.id || ''}`}
+        open={!!selectedRelease}
+        onCancel={() => setSelectedRelease(null)}
+        footer={null}
+        width={820}
+      >
+        <pre style={{ maxHeight: 420, overflow: 'auto' }}>
+          {selectedRelease ? JSON.stringify({
+            runtime_type: selectedRelease.runtime_type,
+            status: selectedRelease.status,
+            source_release_id: selectedRelease.source_release_id,
+            target_revision: selectedRelease.target_revision,
+            diagnostics: (() => {
+              try {
+                return JSON.parse(selectedRelease.diagnostics_json || '[]');
+              } catch {
+                return selectedRelease.diagnostics_json || [];
+              }
+            })(),
+            verification: (() => {
+              try {
+                return JSON.parse(selectedRelease.verification_json || '{}');
+              } catch {
+                return selectedRelease.verification_json || {};
+              }
+            })(),
+          }, null, 2) : ''}
+        </pre>
       </Modal>
     </div>
   );

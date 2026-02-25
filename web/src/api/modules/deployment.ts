@@ -11,6 +11,7 @@ export interface DeployTarget {
   id: number;
   name: string;
   target_type: 'k8s' | 'compose';
+  runtime_type: 'k8s' | 'compose';
   cluster_id: number;
   project_id: number;
   team_id: number;
@@ -37,6 +38,10 @@ export interface DeployRelease {
   strategy: string;
   revision_id: number;
   status: string;
+  diagnostics_json?: string;
+  verification_json?: string;
+  source_release_id?: number;
+  target_revision?: string;
   created_at: string;
 }
 
@@ -115,6 +120,12 @@ export const deploymentApi = {
     return apiService.post(`/deploy/releases/${id}/rollback`);
   },
   getReleases(params?: { service_id?: number; target_id?: number }): Promise<ApiResponse<PaginatedResponse<DeployRelease>>> {
+    return apiService.get('/deploy/releases', { params });
+  },
+  getReleaseDetail(id: number): Promise<ApiResponse<DeployRelease>> {
+    return apiService.get(`/deploy/releases/${id}`);
+  },
+  getReleasesByRuntime(params?: { service_id?: number; target_id?: number; runtime_type?: 'k8s' | 'compose' }): Promise<ApiResponse<PaginatedResponse<DeployRelease>>> {
     return apiService.get('/deploy/releases', { params });
   },
   getGovernance(serviceId: number, env?: string): Promise<ApiResponse<any>> {

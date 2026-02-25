@@ -1,6 +1,7 @@
 package deployment
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,12 +33,12 @@ func (h *Handler) ListTargets(c *gin.Context) {
 }
 
 func (h *Handler) CreateTarget(c *gin.Context) {
-	if !h.authorize(c, "deploy:target:write") {
-		return
-	}
 	var req TargetUpsertReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	if !h.authorize(c, "deploy:target:write") || !h.authorizeRuntime(c, req.TargetType, "apply") {
 		return
 	}
 	uid, _ := c.Get("uid")
@@ -63,12 +64,12 @@ func (h *Handler) GetTarget(c *gin.Context) {
 }
 
 func (h *Handler) UpdateTarget(c *gin.Context) {
-	if !h.authorize(c, "deploy:target:write") {
-		return
-	}
 	var req TargetUpsertReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	if !h.authorize(c, "deploy:target:write") || !h.authorizeRuntime(c, req.TargetType, "apply") {
 		return
 	}
 	resp, err := h.logic.UpdateTarget(c.Request.Context(), uintFromParam(c, "id"), req)
@@ -110,12 +111,17 @@ func (h *Handler) PutTargetNodes(c *gin.Context) {
 }
 
 func (h *Handler) PreviewRelease(c *gin.Context) {
-	if !h.authorize(c, "deploy:release:apply") {
-		return
-	}
 	var req ReleasePreviewReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	target, terr := h.logic.GetTarget(c.Request.Context(), req.TargetID)
+	if terr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": terr.Error()})
+		return
+	}
+	if !h.authorize(c, "deploy:release:apply") || !h.authorizeRuntime(c, target.RuntimeType, "apply") {
 		return
 	}
 	resp, err := h.logic.PreviewRelease(c.Request.Context(), req)
@@ -127,12 +133,17 @@ func (h *Handler) PreviewRelease(c *gin.Context) {
 }
 
 func (h *Handler) ApplyRelease(c *gin.Context) {
-	if !h.authorize(c, "deploy:release:apply") {
-		return
-	}
 	var req ReleasePreviewReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 2000, "msg": err.Error()})
+		return
+	}
+	target, terr := h.logic.GetTarget(c.Request.Context(), req.TargetID)
+	if terr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": terr.Error()})
+		return
+	}
+	if !h.authorize(c, "deploy:release:apply") || !h.authorizeRuntime(c, target.RuntimeType, "apply") {
 		return
 	}
 	uid, _ := c.Get("uid")
@@ -145,10 +156,16 @@ func (h *Handler) ApplyRelease(c *gin.Context) {
 }
 
 func (h *Handler) RollbackRelease(c *gin.Context) {
-	if !h.authorize(c, "deploy:release:rollback") {
+	row, err := h.logic.GetRelease(c.Request.Context(), uintFromParam(c, "id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
 		return
 	}
-	resp, err := h.logic.RollbackRelease(c.Request.Context(), uintFromParam(c, "id"))
+	if !h.authorize(c, "deploy:release:rollback") || !h.authorizeRuntime(c, row.RuntimeType, "rollback") {
+		return
+	}
+	uid, _ := c.Get("uid")
+	resp, err := h.logic.RollbackRelease(c.Request.Context(), uintFromParam(c, "id"), toUint(uid))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
 		return
@@ -157,10 +174,14 @@ func (h *Handler) RollbackRelease(c *gin.Context) {
 }
 
 func (h *Handler) ListReleases(c *gin.Context) {
+	runtime := strings.TrimSpace(c.Query("runtime_type"))
 	if !h.authorize(c, "deploy:release:read") {
 		return
 	}
-	rows, err := h.logic.ListReleases(c.Request.Context(), uintFromQuery(c, "service_id"), uintFromQuery(c, "target_id"))
+	if runtime != "" && !h.authorizeRuntime(c, runtime, "read") {
+		return
+	}
+	rows, err := h.logic.ListReleases(c.Request.Context(), uintFromQuery(c, "service_id"), uintFromQuery(c, "target_id"), runtime)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
 		return
@@ -169,12 +190,12 @@ func (h *Handler) ListReleases(c *gin.Context) {
 }
 
 func (h *Handler) GetRelease(c *gin.Context) {
-	if !h.authorize(c, "deploy:release:read") {
-		return
-	}
 	row, err := h.logic.GetRelease(c.Request.Context(), uintFromParam(c, "id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	if !h.authorize(c, "deploy:release:read") || !h.authorizeRuntime(c, row.RuntimeType, "read") {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": row})
@@ -288,11 +309,20 @@ func (h *Handler) hasPermission(uid uint64, code string) bool {
 		return false
 	}
 	for _, r := range rows {
-		if r.Code == code || r.Code == "*:*" || (strings.HasSuffix(code, ":read") && r.Code == "deploy:*") {
+		if r.Code == code || r.Code == "*:*" || r.Code == "deploy:*" || (strings.HasSuffix(code, ":read") && r.Code == "deploy:*") {
 			return true
 		}
 	}
 	return false
+}
+
+func (h *Handler) authorizeRuntime(c *gin.Context, runtime, action string) bool {
+	r := strings.TrimSpace(runtime)
+	if r == "" {
+		return true
+	}
+	code := fmt.Sprintf("deploy:%s:%s", r, action)
+	return h.authorize(c, code)
 }
 
 func (h *Handler) isAdmin(c *gin.Context) bool {

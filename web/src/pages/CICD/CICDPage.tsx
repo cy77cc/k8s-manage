@@ -119,6 +119,8 @@ const CICDPage: React.FC = () => {
 
   const saveCDConfig = async () => {
     if (!deploymentId) return;
+    const selectedTarget = targets.find((t) => Number(t.id) === Number(deploymentId));
+    const runtimeType = (selectedTarget?.runtime_type || selectedTarget?.target_type || 'k8s') as 'k8s' | 'compose';
     const v = await cdForm.validateFields();
     let strategyConfig = {};
     try {
@@ -127,8 +129,13 @@ const CICDPage: React.FC = () => {
       message.error('策略配置必须是 JSON 对象');
       return;
     }
+    if (runtimeType === 'compose' && v.strategy === 'canary') {
+      message.error('Compose 运行时不支持 canary 策略');
+      return;
+    }
     await Api.cicd.putDeploymentCDConfig(deploymentId, {
       env: String(v.env || 'staging'),
+      runtime_type: runtimeType,
       strategy: v.strategy,
       strategy_config: strategyConfig,
       approval_required: Boolean(v.approval_required),
@@ -138,10 +145,13 @@ const CICDPage: React.FC = () => {
 
   const triggerRelease = async () => {
     const v = await releaseForm.validateFields();
+    const selectedTarget = targets.find((t) => Number(t.id) === Number(v.deployment_id));
+    const runtimeType = (selectedTarget?.runtime_type || selectedTarget?.target_type || 'k8s') as 'k8s' | 'compose';
     await Api.cicd.triggerRelease({
       service_id: Number(v.service_id),
       deployment_id: Number(v.deployment_id),
       env: String(v.env),
+      runtime_type: runtimeType,
       version: String(v.version),
     });
     message.success('发布已触发');
