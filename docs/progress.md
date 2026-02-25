@@ -487,3 +487,63 @@
 1. 将 Helm 渲染切换为 SDK 路径并增加 chart 依赖/私仓异常分类。
 2. 为服务权限补充接口级测试（owner/team + prod approve）。
 3. 将服务详情页的部署审批流程接入 AI 审批中心统一入口。
+
+## 2026-02-25 (Cluster Management Phase-1: Lifecycle + Namespace + RBAC)
+
+### Scope
+
+- 按既定计划落地 cluster management Phase-1：生命周期管理、多租户命名空间隔离、发布策略、HPA、Quota/LimitRange 与生产审批门禁。
+
+### Completed
+
+- 数据模型与迁移：
+  - 新增模型：
+    - `ClusterNamespaceBinding`
+    - `ClusterReleaseRecord`
+    - `ClusterHPAPolicy`
+    - `ClusterQuotaPolicy`
+    - `ClusterDeployApproval`
+    - `ClusterOperationAudit`
+  - 新增 migration：`20260225_000006_cluster_lifecycle_phase1.sql`
+  - 补充 dev auto migrate 注册。
+- 后端 API 扩展（`/api/v1/clusters/:id/*`）：
+  - Namespaces: `GET/POST/DELETE` + bindings `GET/PUT`
+  - Rollouts: `GET/POST preview/apply` + `promote/abort/rollback`
+  - HPA: `GET/POST/PUT/DELETE`
+  - Quota/LimitRange: `GET/POST/PUT/DELETE`（Quota）+ `GET/POST`（LimitRange）
+  - Approval: `POST approvals`, `POST approvals/:ticket/confirm`
+- 后端策略层：
+  - 新增 `policy.go`：
+    - `k8s:*` 与兼容 `kubernetes:*` 权限判定
+    - team-namespace 读写校验（含 readonly）
+    - 生产环境动作审批门禁（`k8s:approve` 或 approved token）
+    - 操作审计落库
+- 旧集群接口回归增强：
+  - 基础读操作（nodes/pods/services/ingresses/events/logs）加 `k8s:read` 与 namespace 绑定校验。
+  - legacy deploy/apply 增加生产审批校验与审计。
+- 前端能力落地：
+  - `web/src/api/modules/kubernetes.ts` 扩展 phase-1 新接口与类型。
+  - 新增组件：
+    - `web/src/components/K8s/ClusterOverview.tsx`
+    - `web/src/components/K8s/NamespacePolicyPanel.tsx`
+    - `web/src/components/K8s/RolloutPanel.tsx`
+    - `web/src/components/K8s/HPAEditor.tsx`
+    - `web/src/components/K8s/QuotaEditor.tsx`
+  - `K8sPage.tsx` 接入新面板 tabs：Namespaces/Rollouts/HPA/Quotas。
+
+### Verification
+
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+### Known Gaps / Risks
+
+- Rollout promote/abort/rollback 依赖 `kubectl argo rollouts` plugin；缺失时返回 `rollout_cli_missing`。
+- 若集群未安装 Argo Rollouts CRD，rollout 接口返回 `rollout_crd_missing`。
+- 前端权限按钮仍以后端校验为主，后续可补精细按钮级隐藏策略。
+
+### Next Actions
+
+1. 增加 rollout/hpa/quota 的接口级单测与 e2e 场景回归。
+2. 补充 network/observability/storage 的 Phase-C 接口骨架与页面占位。
+3. 将 rollout 动作从 CLI 依赖逐步迁移到可控 controller/API 路径。

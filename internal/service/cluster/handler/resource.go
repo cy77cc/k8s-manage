@@ -23,6 +23,9 @@ type Handler struct{ svcCtx *svc.ServiceContext }
 func NewHandler(svcCtx *svc.ServiceContext) *Handler { return &Handler{svcCtx: svcCtx} }
 
 func (h *Handler) List(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	var list []model.Cluster
 	if err := h.svcCtx.DB.Find(&list).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
@@ -32,6 +35,9 @@ func (h *Handler) List(c *gin.Context) {
 }
 
 func (h *Handler) Create(c *gin.Context) {
+	if !h.authorize(c, "k8s:write", "kubernetes:write") {
+		return
+	}
 	var req struct {
 		Name        string `json:"name" binding:"required"`
 		Server      string `json:"server" binding:"required"`
@@ -51,6 +57,9 @@ func (h *Handler) Create(c *gin.Context) {
 }
 
 func (h *Handler) Get(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
@@ -59,6 +68,9 @@ func (h *Handler) Get(c *gin.Context) {
 }
 
 func (h *Handler) Nodes(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
@@ -86,6 +98,9 @@ func (h *Handler) Deployments(c *gin.Context) {
 }
 
 func (h *Handler) Pods(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
@@ -98,6 +113,9 @@ func (h *Handler) Pods(c *gin.Context) {
 	ns := c.Query("namespace")
 	if ns == "" {
 		ns = corev1.NamespaceAll
+	}
+	if ns != corev1.NamespaceAll && !h.namespaceReadable(c, cluster.ID, ns) {
+		return
 	}
 	items, err := cli.CoreV1().Pods(ns).List(c.Request.Context(), metav1.ListOptions{})
 	if err != nil {
@@ -112,6 +130,9 @@ func (h *Handler) Pods(c *gin.Context) {
 }
 
 func (h *Handler) Services(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
@@ -124,6 +145,9 @@ func (h *Handler) Services(c *gin.Context) {
 	ns := c.Query("namespace")
 	if ns == "" {
 		ns = corev1.NamespaceAll
+	}
+	if ns != corev1.NamespaceAll && !h.namespaceReadable(c, cluster.ID, ns) {
+		return
 	}
 	items, err := cli.CoreV1().Services(ns).List(c.Request.Context(), metav1.ListOptions{})
 	if err != nil {
@@ -142,6 +166,9 @@ func (h *Handler) Services(c *gin.Context) {
 }
 
 func (h *Handler) Ingresses(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
@@ -154,6 +181,9 @@ func (h *Handler) Ingresses(c *gin.Context) {
 	ns := c.Query("namespace")
 	if ns == "" {
 		ns = corev1.NamespaceAll
+	}
+	if ns != corev1.NamespaceAll && !h.namespaceReadable(c, cluster.ID, ns) {
+		return
 	}
 	items, err := cli.NetworkingV1().Ingresses(ns).List(c.Request.Context(), metav1.ListOptions{})
 	if err != nil {
@@ -168,6 +198,9 @@ func (h *Handler) Ingresses(c *gin.Context) {
 }
 
 func (h *Handler) Events(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
@@ -180,6 +213,9 @@ func (h *Handler) Events(c *gin.Context) {
 	ns := c.Query("namespace")
 	if ns == "" {
 		ns = corev1.NamespaceAll
+	}
+	if ns != corev1.NamespaceAll && !h.namespaceReadable(c, cluster.ID, ns) {
+		return
 	}
 	items, err := cli.CoreV1().Events(ns).List(c.Request.Context(), metav1.ListOptions{})
 	if err != nil {
@@ -194,6 +230,9 @@ func (h *Handler) Events(c *gin.Context) {
 }
 
 func (h *Handler) Logs(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
@@ -206,6 +245,9 @@ func (h *Handler) Logs(c *gin.Context) {
 	ns := c.Query("namespace")
 	if ns == "" {
 		ns = "default"
+	}
+	if !h.namespaceReadable(c, cluster.ID, ns) {
+		return
 	}
 	pod := c.Query("pod")
 	if pod == "" {
@@ -222,6 +264,9 @@ func (h *Handler) Logs(c *gin.Context) {
 }
 
 func (h *Handler) ConnectTest(c *gin.Context) {
+	if !h.authorize(c, "k8s:read", "kubernetes:read") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
@@ -241,6 +286,9 @@ func (h *Handler) ConnectTest(c *gin.Context) {
 }
 
 func (h *Handler) DeployPreview(c *gin.Context) {
+	if !h.authorize(c, "k8s:deploy", "kubernetes:write") {
+		return
+	}
 	var req struct {
 		Namespace string `json:"namespace" binding:"required"`
 		Name      string `json:"name" binding:"required"`
@@ -253,20 +301,31 @@ func (h *Handler) DeployPreview(c *gin.Context) {
 	}
 	if req.Replicas <= 0 {
 		req.Replicas = 1
+	}
+	cluster, ok := h.mustCluster(c)
+	if !ok {
+		return
+	}
+	if !h.namespaceWritable(c, cluster.ID, req.Namespace) {
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"summary": "preview only", "manifest": gin.H{"namespace": req.Namespace, "name": req.Name, "image": req.Image, "replicas": req.Replicas}}})
 }
 
 func (h *Handler) DeployApply(c *gin.Context) {
+	if !h.authorize(c, "k8s:deploy", "kubernetes:write") {
+		return
+	}
 	cluster, ok := h.mustCluster(c)
 	if !ok {
 		return
 	}
 	var req struct {
-		Namespace string `json:"namespace" binding:"required"`
-		Name      string `json:"name" binding:"required"`
-		Image     string `json:"image" binding:"required"`
-		Replicas  int32  `json:"replicas"`
+		Namespace     string `json:"namespace" binding:"required"`
+		Name          string `json:"name" binding:"required"`
+		Image         string `json:"image" binding:"required"`
+		Replicas      int32  `json:"replicas"`
+		ApprovalToken string `json:"approval_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
@@ -274,6 +333,12 @@ func (h *Handler) DeployApply(c *gin.Context) {
 	}
 	if req.Replicas <= 0 {
 		req.Replicas = 1
+	}
+	if !h.namespaceWritable(c, cluster.ID, req.Namespace) {
+		return
+	}
+	if !h.requireProdApproval(c, cluster.ID, req.Namespace, "deploy", req.ApprovalToken) {
+		return
 	}
 	yaml := fmt.Sprintf(`
 apiVersion: apps/v1
@@ -299,6 +364,7 @@ spec:
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
 	}
+	h.createAudit(cluster.ID, req.Namespace, "deploy.apply", "deployment", req.Name, "success", "legacy deployment applied", h.uidFromContext(c))
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"applied": true}})
 }
 

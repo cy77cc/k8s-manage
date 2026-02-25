@@ -26,5 +26,11 @@ func RunDevAutoMigrate(db *gorm.DB) error {
 		&model.Service{},
 		&model.ServiceHelmRelease{},
 		&model.ServiceRenderSnapshot{},
+		&model.ClusterNamespaceBinding{},
+		&model.ClusterReleaseRecord{},
+		&model.ClusterHPAPolicy{},
+		&model.ClusterQuotaPolicy{},
+		&model.ClusterDeployApproval{},
+		&model.ClusterOperationAudit{},
 	)
 }

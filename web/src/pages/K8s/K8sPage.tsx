@@ -3,6 +3,11 @@ import { Button, Card, Drawer, Form, Input, InputNumber, Modal, Space, Table, Ta
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Api } from '../../api';
 import type { Cluster, Node } from '../../api/modules/kubernetes';
+import ClusterOverview from '../../components/K8s/ClusterOverview';
+import NamespacePolicyPanel from '../../components/K8s/NamespacePolicyPanel';
+import RolloutPanel from '../../components/K8s/RolloutPanel';
+import HPAEditor from '../../components/K8s/HPAEditor';
+import QuotaEditor from '../../components/K8s/QuotaEditor';
 
 const K8sPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -154,7 +159,11 @@ const K8sPage: React.FC = () => {
         {dataSourceHint ? <Tag color={dataSourceHint.includes('live') ? 'success' : 'warning'}>data_source: {dataSourceHint}</Tag> : null}
         <Tabs
           items={[
-            { key: 'overview', label: 'Overview', children: <div>节点 {nodes.length} / Deployments {deployments.length} / Pods {pods.length}<div style={{ marginTop: 12 }}><Input placeholder="询问AI如何运维该集群" value={aiQuestion} onChange={(e) => setAiQuestion(e.target.value)} /><Space style={{ marginTop: 8 }}><Button onClick={aiAnalyze}>AI诊断</Button><Button type="primary" disabled={!k8sActionToken} onClick={executeAiAction}>执行AI建议</Button></Space><ul>{aiInsights.map((x, i) => <li key={i}>{x}</li>)}</ul></div></div> },
+            { key: 'overview', label: 'Overview', children: <div><ClusterOverview nodes={nodes} deployments={deployments} pods={pods} services={services} ingresses={ingresses} dataSourceHint={dataSourceHint} /><div style={{ marginTop: 12 }}><Input placeholder="询问AI如何运维该集群" value={aiQuestion} onChange={(e) => setAiQuestion(e.target.value)} /><Space style={{ marginTop: 8 }}><Button onClick={aiAnalyze}>AI诊断</Button><Button type="primary" disabled={!k8sActionToken} onClick={executeAiAction}>执行AI建议</Button></Space><ul>{aiInsights.map((x, i) => <li key={i}>{x}</li>)}</ul></div></div> },
+            { key: 'namespaces-policy', label: 'Namespaces', children: selectedCluster ? <NamespacePolicyPanel clusterId={String(selectedCluster.id)} /> : null },
+            { key: 'rollouts', label: 'Rollouts', children: selectedCluster ? <RolloutPanel clusterId={String(selectedCluster.id)} /> : null },
+            { key: 'hpa', label: 'HPA', children: selectedCluster ? <HPAEditor clusterId={String(selectedCluster.id)} /> : null },
+            { key: 'quota', label: 'Quotas', children: selectedCluster ? <QuotaEditor clusterId={String(selectedCluster.id)} /> : null },
             { key: 'nodes', label: 'Nodes', children: <Table rowKey="id" dataSource={nodes} columns={[{ title: '名称', dataIndex: 'name' }, { title: 'IP', dataIndex: 'ip' }, { title: '状态', dataIndex: 'status' }, { title: '角色', dataIndex: 'role' }, { title: 'Pods', dataIndex: 'pods' }]} pagination={false} /> },
             { key: 'namespaces', label: 'Namespaces', children: <Table rowKey="id" dataSource={[...new Set(deployments.map((d) => d.namespace))].map((n, idx) => ({ id: idx, name: n }))} columns={[{ title: '命名空间', dataIndex: 'name' }]} pagination={false} /> },
             { key: 'workloads', label: 'Workloads', children: <Table rowKey="id" dataSource={deployments} columns={[{ title: '命名空间', dataIndex: 'namespace' }, { title: '名称', dataIndex: 'name' }, { title: '镜像', dataIndex: 'image' }, { title: '副本', dataIndex: 'replicas' }, { title: '状态', dataIndex: 'status' }]} pagination={false} /> },

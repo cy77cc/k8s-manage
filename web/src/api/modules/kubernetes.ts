@@ -136,6 +136,58 @@ export interface IngressListParams {
   namespace?: string;
 }
 
+export interface NamespaceItem {
+  name: string;
+  status?: string;
+  labels?: Record<string, string>;
+  created_at?: string;
+}
+
+export interface NamespaceBinding {
+  id?: number;
+  cluster_id: number;
+  team_id: number;
+  namespace: string;
+  env?: string;
+  readonly?: boolean;
+}
+
+export interface RolloutItem {
+  name: string;
+  namespace: string;
+  strategy: string;
+  phase?: string;
+  ready_replicas?: number;
+  replicas?: number;
+  created_at?: string;
+}
+
+export interface HPAInput {
+  namespace: string;
+  name: string;
+  target_ref_kind: string;
+  target_ref_name: string;
+  min_replicas: number;
+  max_replicas: number;
+  cpu_utilization?: number;
+  memory_utilization?: number;
+}
+
+export interface QuotaInput {
+  namespace: string;
+  name: string;
+  hard: Record<string, string>;
+}
+
+export interface LimitRangeInput {
+  namespace: string;
+  name: string;
+  default?: Record<string, string>;
+  default_request?: Record<string, string>;
+  min?: Record<string, string>;
+  max?: Record<string, string>;
+}
+
 // Kubernetes管理API
 export const kubernetesApi = {
   async createCluster(payload: CreateClusterPayload): Promise<ApiResponse<Cluster>> {
@@ -225,8 +277,16 @@ export const kubernetesApi = {
   },
 
   // 后端当前提供 namespaces / deployments
-  async getClusterNamespaces(clusterId: string): Promise<ApiResponse<any[]>> {
-    return apiService.get(`/clusters/${clusterId}/namespaces`);
+  async getClusterNamespaces(clusterId: string): Promise<ApiResponse<PaginatedResponse<NamespaceItem>>> {
+    const response = await apiService.get<any>(`/clusters/${clusterId}/namespaces`);
+    const payload = response.data || {};
+    const list = (payload.list || []).map((x: any) => ({
+      name: x.name || x.metadata?.name,
+      status: x.status,
+      labels: x.labels || x.metadata?.labels || {},
+      created_at: x.created_at || x.createdAt,
+    }));
+    return { ...response, data: { list, total: Number(payload.total || list.length) } };
   },
   async getClusterDeployments(clusterId: string, namespace?: string): Promise<ApiResponse<any[]>> {
     return apiService.get(`/clusters/${clusterId}/deployments`, { params: { namespace } });
@@ -267,5 +327,101 @@ export const kubernetesApi = {
 
   async applyDeploy(clusterId: string, payload: { namespace: string; name: string; image: string; replicas: number }): Promise<ApiResponse<void>> {
     return apiService.post(`/clusters/${clusterId}/deploy/apply`, payload);
+  },
+
+  async createNamespace(clusterId: string, payload: { name: string; env?: string; labels?: Record<string, string> }): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/namespaces`, payload);
+  },
+
+  async deleteNamespace(clusterId: string, namespace: string): Promise<ApiResponse<void>> {
+    return apiService.delete(`/clusters/${clusterId}/namespaces/${encodeURIComponent(namespace)}`);
+  },
+
+  async getNamespaceBindings(clusterId: string, teamId?: string): Promise<ApiResponse<PaginatedResponse<NamespaceBinding>>> {
+    const response = await apiService.get<any>(`/clusters/${clusterId}/namespaces/bindings`, { params: { team_id: teamId } });
+    const payload = response.data || {};
+    return { ...response, data: { list: payload.list || [], total: Number(payload.total || 0) } };
+  },
+
+  async putNamespaceBindings(clusterId: string, teamId: string, bindings: Array<{ namespace: string; env?: string; readonly?: boolean }>): Promise<ApiResponse<PaginatedResponse<NamespaceBinding>>> {
+    const response = await apiService.put<any>(`/clusters/${clusterId}/namespaces/bindings/${teamId}`, { bindings });
+    const payload = response.data || {};
+    return { ...response, data: { list: payload.list || [], total: Number(payload.total || 0) } };
+  },
+
+  async listRollouts(clusterId: string, namespace?: string): Promise<ApiResponse<PaginatedResponse<RolloutItem>>> {
+    const response = await apiService.get<any>(`/clusters/${clusterId}/rollouts`, { params: { namespace } });
+    const payload = response.data || {};
+    return { ...response, data: { list: payload.list || [], total: Number(payload.total || 0) } };
+  },
+
+  async previewRollout(clusterId: string, payload: any): Promise<ApiResponse<{ manifest: string; strategy: string }>> {
+    return apiService.post(`/clusters/${clusterId}/rollouts/preview`, payload);
+  },
+
+  async applyRollout(clusterId: string, payload: any): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/rollouts/apply`, payload);
+  },
+
+  async promoteRollout(clusterId: string, name: string, payload: { namespace: string; full?: boolean; approval_token?: string }): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/rollouts/${encodeURIComponent(name)}/promote`, payload);
+  },
+
+  async abortRollout(clusterId: string, name: string, payload: { namespace: string; approval_token?: string }): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/rollouts/${encodeURIComponent(name)}/abort`, payload);
+  },
+
+  async rollbackRollout(clusterId: string, name: string, payload: { namespace: string; approval_token?: string }): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/rollouts/${encodeURIComponent(name)}/rollback`, payload);
+  },
+
+  async listHPA(clusterId: string, namespace?: string): Promise<ApiResponse<PaginatedResponse<any>>> {
+    const response = await apiService.get<any>(`/clusters/${clusterId}/hpa`, { params: { namespace } });
+    const payload = response.data || {};
+    return { ...response, data: { list: payload.list || [], total: Number(payload.total || 0) } };
+  },
+
+  async createHPA(clusterId: string, payload: HPAInput): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/hpa`, payload);
+  },
+
+  async updateHPA(clusterId: string, name: string, payload: HPAInput): Promise<ApiResponse<any>> {
+    return apiService.put(`/clusters/${clusterId}/hpa/${encodeURIComponent(name)}`, payload);
+  },
+
+  async deleteHPA(clusterId: string, name: string, namespace: string): Promise<ApiResponse<void>> {
+    return apiService.delete(`/clusters/${clusterId}/hpa/${encodeURIComponent(name)}`, { params: { namespace } });
+  },
+
+  async listQuotas(clusterId: string, namespace?: string): Promise<ApiResponse<PaginatedResponse<any>>> {
+    const response = await apiService.get<any>(`/clusters/${clusterId}/quotas`, { params: { namespace } });
+    const payload = response.data || {};
+    return { ...response, data: { list: payload.list || [], total: Number(payload.total || 0) } };
+  },
+
+  async applyQuota(clusterId: string, payload: QuotaInput): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/quotas`, payload);
+  },
+
+  async deleteQuota(clusterId: string, name: string, namespace: string): Promise<ApiResponse<void>> {
+    return apiService.delete(`/clusters/${clusterId}/quotas/${encodeURIComponent(name)}`, { params: { namespace } });
+  },
+
+  async listLimitRanges(clusterId: string, namespace?: string): Promise<ApiResponse<PaginatedResponse<any>>> {
+    const response = await apiService.get<any>(`/clusters/${clusterId}/limit-ranges`, { params: { namespace } });
+    const payload = response.data || {};
+    return { ...response, data: { list: payload.list || [], total: Number(payload.total || 0) } };
+  },
+
+  async createLimitRange(clusterId: string, payload: LimitRangeInput): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/limit-ranges`, payload);
+  },
+
+  async createClusterApproval(clusterId: string, payload: { namespace: string; action: string }): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/approvals`, payload);
+  },
+
+  async confirmClusterApproval(clusterId: string, ticket: string, status: 'approved' | 'rejected' = 'approved'): Promise<ApiResponse<any>> {
+    return apiService.post(`/clusters/${clusterId}/approvals/${encodeURIComponent(ticket)}/confirm`, { status });
   },
 };
