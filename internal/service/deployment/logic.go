@@ -78,17 +78,21 @@ func (l *Logic) GetTarget(ctx context.Context, id uint) (TargetResp, error) {
 		return TargetResp{}, err
 	}
 	resp := TargetResp{
-		ID:          row.ID,
-		Name:        row.Name,
-		TargetType:  row.TargetType,
-		RuntimeType: defaultIfEmpty(row.RuntimeType, row.TargetType),
-		ClusterID:   row.ClusterID,
-		ProjectID:   row.ProjectID,
-		TeamID:      row.TeamID,
-		Env:         row.Env,
-		Status:      row.Status,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		ID:              row.ID,
+		Name:            row.Name,
+		TargetType:      row.TargetType,
+		RuntimeType:     defaultIfEmpty(row.RuntimeType, row.TargetType),
+		ClusterID:       row.ClusterID,
+		ClusterSource:   l.compatClusterSource(row.ClusterSource, row.ClusterID, row.CredentialID),
+		CredentialID:    row.CredentialID,
+		BootstrapJobID:  row.BootstrapJobID,
+		ProjectID:       row.ProjectID,
+		TeamID:          row.TeamID,
+		Env:             row.Env,
+		Status:          row.Status,
+		ReadinessStatus: defaultIfEmpty(row.ReadinessStatus, "unknown"),
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
 	}
 	var nodes []model.DeploymentTargetNode
 	if err := l.svcCtx.DB.WithContext(ctx).Where("target_id = ?", row.ID).Find(&nodes).Error; err == nil {
@@ -110,20 +114,35 @@ func (l *Logic) GetTarget(ctx context.Context, id uint) (TargetResp, error) {
 func (l *Logic) CreateTarget(ctx context.Context, uid uint64, req TargetUpsertReq) (TargetResp, error) {
 	runtimeType := normalizedRuntime(req.TargetType, req.RuntimeType)
 	row := model.DeploymentTarget{
-		Name:        strings.TrimSpace(req.Name),
-		TargetType:  runtimeType,
-		RuntimeType: runtimeType,
-		ClusterID:   req.ClusterID,
-		ProjectID:   req.ProjectID,
-		TeamID:      req.TeamID,
-		Env:         defaultIfEmpty(req.Env, "staging"),
-		Status:      "active",
-		CreatedBy:   uint(uid),
+		Name:            strings.TrimSpace(req.Name),
+		TargetType:      runtimeType,
+		RuntimeType:     runtimeType,
+		ClusterID:       req.ClusterID,
+		ClusterSource:   l.compatClusterSource(strings.TrimSpace(req.ClusterSource), req.ClusterID, req.CredentialID),
+		CredentialID:    req.CredentialID,
+		BootstrapJobID:  strings.TrimSpace(req.BootstrapJobID),
+		ProjectID:       req.ProjectID,
+		TeamID:          req.TeamID,
+		Env:             defaultIfEmpty(req.Env, "staging"),
+		Status:          "active",
+		ReadinessStatus: "unknown",
+		CreatedBy:       uint(uid),
+	}
+	if strings.TrimSpace(row.BootstrapJobID) != "" {
+		var job model.EnvironmentInstallJob
+		if err := l.svcCtx.DB.WithContext(ctx).Select("id,status").Where("id = ?", row.BootstrapJobID).First(&job).Error; err != nil {
+			return TargetResp{}, fmt.Errorf("bootstrap job not found")
+		}
+		if strings.EqualFold(strings.TrimSpace(job.Status), "succeeded") {
+			row.ReadinessStatus = "ready"
+		} else {
+			row.ReadinessStatus = "bootstrap_pending"
+		}
 	}
 	if row.TargetType != "k8s" && row.TargetType != "compose" {
 		return TargetResp{}, fmt.Errorf("unsupported target_type: %s", row.TargetType)
 	}
-	if err := l.validateTargetUpsert(ctx, row.TargetType, row.ClusterID, req.Nodes); err != nil {
+	if err := l.validateTargetUpsert(ctx, row.TargetType, row.ClusterID, row.ClusterSource, row.CredentialID, req.Nodes); err != nil {
 		return TargetResp{}, err
 	}
 	if err := l.svcCtx.DB.WithContext(ctx).Create(&row).Error; err != nil {
@@ -155,6 +174,24 @@ func (l *Logic) UpdateTarget(ctx context.Context, id uint, req TargetUpsertReq) 
 	if req.ClusterID > 0 || row.TargetType == "k8s" {
 		row.ClusterID = req.ClusterID
 	}
+	if strings.TrimSpace(req.ClusterSource) != "" {
+		row.ClusterSource = strings.TrimSpace(req.ClusterSource)
+	}
+	if req.CredentialID > 0 || row.TargetType == "k8s" {
+		row.CredentialID = req.CredentialID
+	}
+	if strings.TrimSpace(req.BootstrapJobID) != "" {
+		row.BootstrapJobID = strings.TrimSpace(req.BootstrapJobID)
+		var job model.EnvironmentInstallJob
+		if err := l.svcCtx.DB.WithContext(ctx).Select("id,status").Where("id = ?", row.BootstrapJobID).First(&job).Error; err != nil {
+			return TargetResp{}, fmt.Errorf("bootstrap job not found")
+		}
+		if strings.EqualFold(strings.TrimSpace(job.Status), "succeeded") {
+			row.ReadinessStatus = "ready"
+		} else {
+			row.ReadinessStatus = "bootstrap_pending"
+		}
+	}
 	if req.ProjectID > 0 {
 		row.ProjectID = req.ProjectID
 	}
@@ -164,7 +201,8 @@ func (l *Logic) UpdateTarget(ctx context.Context, id uint, req TargetUpsertReq) 
 	if strings.TrimSpace(req.Env) != "" {
 		row.Env = req.Env
 	}
-	if err := l.validateTargetUpsert(ctx, row.TargetType, row.ClusterID, req.Nodes); err != nil {
+	row.ClusterSource = l.compatClusterSource(row.ClusterSource, row.ClusterID, row.CredentialID)
+	if err := l.validateTargetUpsert(ctx, row.TargetType, row.ClusterID, row.ClusterSource, row.CredentialID, req.Nodes); err != nil {
 		return TargetResp{}, err
 	}
 	if err := l.svcCtx.DB.WithContext(ctx).Save(&row).Error; err != nil {
@@ -720,8 +758,8 @@ func (l *Logic) resolveReleaseContext(ctx context.Context, req ReleasePreviewReq
 	if target.TargetType != "k8s" && target.TargetType != "compose" {
 		return nil, nil, "", fmt.Errorf("unsupported runtime target")
 	}
-	if target.TargetType == "k8s" && target.ClusterID == 0 {
-		return nil, nil, "", fmt.Errorf("k8s target missing cluster binding")
+	if target.TargetType == "k8s" && target.ClusterID == 0 && target.CredentialID == 0 {
+		return nil, nil, "", fmt.Errorf("k8s target missing cluster binding or credential")
 	}
 	if target.TargetType == "compose" {
 		var cnt int64
@@ -732,6 +770,9 @@ func (l *Logic) resolveReleaseContext(ctx context.Context, req ReleasePreviewReq
 		if cnt == 0 {
 			return nil, nil, "", fmt.Errorf("compose target has no active host node")
 		}
+	}
+	if rs := strings.TrimSpace(target.ReadinessStatus); rs != "" && rs != "ready" && rs != "unknown" {
+		return nil, nil, "", fmt.Errorf("target is not bootstrap ready: %s", rs)
 	}
 	manifest := strings.TrimSpace(defaultIfEmpty(svc.CustomYAML, svc.YamlContent))
 	if manifest == "" {
@@ -1076,20 +1117,37 @@ func (l *Logic) loadNodePrivateKey(ctx context.Context, node *model.Node) (strin
 	return plain, passphrase, nil
 }
 
-func (l *Logic) validateTargetUpsert(ctx context.Context, targetType string, clusterID uint, nodes []TargetNodeReq) error {
+func (l *Logic) validateTargetUpsert(ctx context.Context, targetType string, clusterID uint, clusterSource string, credentialID uint, nodes []TargetNodeReq) error {
 	switch targetType {
 	case "k8s":
-		if clusterID == 0 {
-			return fmt.Errorf("cluster_id is required for k8s target")
+		if clusterID == 0 && credentialID == 0 {
+			return fmt.Errorf("cluster_id or credential_id is required for k8s target")
 		}
-		var cluster model.Cluster
-		if err := l.svcCtx.DB.WithContext(ctx).Select("id,status").First(&cluster, clusterID).Error; err != nil {
-			return fmt.Errorf("cluster binding not found: %w", err)
+		if clusterID > 0 {
+			var cluster model.Cluster
+			if err := l.svcCtx.DB.WithContext(ctx).Select("id,status").First(&cluster, clusterID).Error; err != nil {
+				return fmt.Errorf("cluster binding not found: %w", err)
+			}
+		}
+		if credentialID > 0 {
+			var cred model.ClusterCredential
+			if err := l.svcCtx.DB.WithContext(ctx).Select("id,runtime_type,status").First(&cred, credentialID).Error; err != nil {
+				return fmt.Errorf("cluster credential not found: %w", err)
+			}
+			if !strings.EqualFold(strings.TrimSpace(cred.Status), "active") {
+				return fmt.Errorf("cluster credential is not active")
+			}
+		}
+		if clusterSource != "" && clusterSource != "platform_managed" && clusterSource != "external_managed" {
+			return fmt.Errorf("unsupported cluster_source: %s", clusterSource)
 		}
 		return nil
 	case "compose":
 		if clusterID != 0 {
 			return fmt.Errorf("compose target must not bind cluster_id")
+		}
+		if credentialID != 0 {
+			return fmt.Errorf("compose target must not bind credential_id")
 		}
 		if nodes != nil && len(nodes) == 0 {
 			return fmt.Errorf("compose target requires at least one host node")
@@ -1098,6 +1156,20 @@ func (l *Logic) validateTargetUpsert(ctx context.Context, targetType string, clu
 	default:
 		return fmt.Errorf("unsupported target_type: %s", targetType)
 	}
+}
+
+func (l *Logic) compatClusterSource(clusterSource string, clusterID, credentialID uint) string {
+	source := strings.TrimSpace(clusterSource)
+	if source != "" {
+		return source
+	}
+	if credentialID > 0 {
+		return "external_managed"
+	}
+	if clusterID > 0 {
+		return "platform_managed"
+	}
+	return "platform_managed"
 }
 
 func normalizedRuntime(targetType, runtimeType string) string {

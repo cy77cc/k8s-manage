@@ -1,5 +1,40 @@
 # Development Progress Log
 
+## 2026-02-26 (Environment Deployment + Credential Ingestion)
+
+### Scope
+
+- 完成 `enhance-deployment-management` 的核心实现：环境部署任务、运行时物料解析、集群凭据导入/注册、前端部署管理入口联动。
+
+### Completed
+
+- 数据模型与迁移：
+  - 新增迁移 `20260226_000016_environment_bootstrap_and_cluster_credentials.sql`。
+  - 新增表：`environment_install_jobs`、`environment_install_job_steps`、`cluster_credentials`。
+  - 扩展 `deployment_targets`：`cluster_source`、`credential_id`、`bootstrap_job_id`、`readiness_status`。
+- 后端能力：
+  - 新增环境部署任务 API：
+    - `POST /api/v1/deploy/environments/bootstrap`
+    - `GET /api/v1/deploy/environments/bootstrap/:job_id`
+  - 新增凭据治理 API：
+    - `POST /api/v1/deploy/credentials/platform/register`
+    - `POST /api/v1/deploy/credentials/import`
+    - `POST /api/v1/deploy/credentials/:id/test`
+    - `GET /api/v1/deploy/credentials`
+  - 实现 SSH 执行状态机（`queued/running/succeeded/failed`）及步骤级诊断日志。
+  - 实现 `script/runtime/<runtime>/<version>/manifest.json` 解析与 checksum 校验。
+  - 发布前置门禁增强：目标 `readiness_status` 非 ready 时拒绝发布。
+- 前端能力：
+  - `web/src/api/modules/deployment.ts` 新增环境部署与凭据相关 API 契约。
+  - `DeploymentPage` 新增环境部署任务、凭据注册/导入/连通性检测流程。
+  - `AICommandCenterPage` 增加“部署快速动作”，复用同一后端治理链路。
+- 物料规范：
+  - 新增 `script/runtime/README.md` 与 `k8s|compose/v0.1.0` 示例包、manifest、四阶段脚本。
+- 测试与验证：
+  - `go test ./internal/service/deployment -run Test -count=1` 通过。
+  - `npm --prefix web run build` 通过。
+  - `openspec validate --changes --json`：`enhance-deployment-management` 校验通过。
+
 ## 2026-02-26 (Deployment Blueprint Implementation - Apply Round 1)
 
 ### Scope

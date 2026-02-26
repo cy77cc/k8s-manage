@@ -2,8 +2,11 @@ package deployment
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"gorm.io/driver/sqlite"
@@ -25,6 +28,9 @@ func newDeploymentTestLogic(t *testing.T) *Logic {
 		&model.DeploymentRelease{},
 		&model.DeploymentReleaseApproval{},
 		&model.DeploymentReleaseAudit{},
+		&model.EnvironmentInstallJob{},
+		&model.EnvironmentInstallJobStep{},
+		&model.ClusterCredential{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -180,5 +186,100 @@ func TestApplyReleaseRejectsMismatchedPreviewToken(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected mismatched preview token to be rejected")
+	}
+}
+
+func TestPreviewReleaseRejectsNonReadyTarget(t *testing.T) {
+	logic := newDeploymentTestLogic(t)
+	ctx := context.Background()
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Node{ID: 6, Name: "n6", IP: "10.0.0.6", SSHUser: "root", Status: "active"}).Error; err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Service{ID: 401, Name: "svc-d", Env: "staging", YamlContent: "services:\n  app:\n    image: nginx:latest"}).Error; err != nil {
+		t.Fatalf("seed service: %v", err)
+	}
+	target, err := logic.CreateTarget(ctx, 1, TargetUpsertReq{
+		Name:       "compose-pending",
+		TargetType: "compose",
+		Env:        "staging",
+		Nodes:      []TargetNodeReq{{HostID: 6, Role: "manager", Weight: 100}},
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Model(&model.DeploymentTarget{}).Where("id = ?", target.ID).Update("readiness_status", "bootstrap_pending").Error; err != nil {
+		t.Fatalf("update readiness: %v", err)
+	}
+	_, err = logic.PreviewRelease(ctx, ReleasePreviewReq{ServiceID: 401, TargetID: target.ID, Env: "staging", Strategy: "rolling"})
+	if err == nil {
+		t.Fatalf("expected preview release to fail on non-ready target")
+	}
+}
+
+func TestImportExternalCredentialEncryptsPayload(t *testing.T) {
+	logic := newDeploymentTestLogic(t)
+	ctx := context.Background()
+	config.CFG.Security.EncryptionKey = "12345678901234567890123456789012"
+
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: local
+contexts:
+- context:
+    cluster: local
+    user: local-user
+  name: local
+current-context: local
+users:
+- name: local-user
+  user:
+    token: dummy`
+	resp, err := logic.ImportExternalCredential(ctx, 7, ClusterCredentialImportReq{
+		Name:        "ext-k8s",
+		RuntimeType: "k8s",
+		AuthMethod:  "kubeconfig",
+		Kubeconfig:  kubeconfig,
+	})
+	if err != nil {
+		t.Fatalf("import credential: %v", err)
+	}
+	if resp.ID == 0 {
+		t.Fatalf("expected credential id")
+	}
+	var row model.ClusterCredential
+	if err := logic.svcCtx.DB.WithContext(ctx).First(&row, resp.ID).Error; err != nil {
+		t.Fatalf("query credential: %v", err)
+	}
+	if row.KubeconfigEnc == "" || row.KubeconfigEnc == kubeconfig {
+		t.Fatalf("expected kubeconfig to be encrypted")
+	}
+}
+
+func TestStartEnvironmentBootstrapRejectsChecksumMismatch(t *testing.T) {
+	logic := newDeploymentTestLogic(t)
+	ctx := context.Background()
+	root := filepath.Join("script", "runtime", "k8s", "v-test-bad")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	if err := os.WriteFile(filepath.Join(root, "runtime-package.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write package: %v", err)
+	}
+	manifest := `{"runtime":"k8s","version":"v-test-bad","package_file":"runtime-package.txt","sha256":"deadbeef","install_command":"echo install"}`
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	_, err := logic.StartEnvironmentBootstrap(ctx, 1, EnvironmentBootstrapReq{
+		Name:           "bad",
+		RuntimeType:    "k8s",
+		PackageVersion: "v-test-bad",
+		ControlPlaneID: 1,
+	})
+	if err == nil {
+		t.Fatalf("expected checksum mismatch error")
 	}
 }

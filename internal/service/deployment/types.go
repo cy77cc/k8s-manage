@@ -9,14 +9,17 @@ type TargetNodeReq struct {
 }
 
 type TargetUpsertReq struct {
-	Name        string          `json:"name" binding:"required"`
-	TargetType  string          `json:"target_type" binding:"required"` // k8s|compose
-	RuntimeType string          `json:"runtime_type"`
-	ClusterID   uint            `json:"cluster_id"`
-	ProjectID   uint            `json:"project_id"`
-	TeamID      uint            `json:"team_id"`
-	Env         string          `json:"env"`
-	Nodes       []TargetNodeReq `json:"nodes"`
+	Name           string          `json:"name" binding:"required"`
+	TargetType     string          `json:"target_type" binding:"required"` // k8s|compose
+	RuntimeType    string          `json:"runtime_type"`
+	ClusterID      uint            `json:"cluster_id"`
+	ClusterSource  string          `json:"cluster_source"`
+	CredentialID   uint            `json:"credential_id"`
+	BootstrapJobID string          `json:"bootstrap_job_id"`
+	ProjectID      uint            `json:"project_id"`
+	TeamID         uint            `json:"team_id"`
+	Env            string          `json:"env"`
+	Nodes          []TargetNodeReq `json:"nodes"`
 }
 
 type TargetNodeResp struct {
@@ -29,18 +32,22 @@ type TargetNodeResp struct {
 }
 
 type TargetResp struct {
-	ID          uint             `json:"id"`
-	Name        string           `json:"name"`
-	TargetType  string           `json:"target_type"`
-	RuntimeType string           `json:"runtime_type"`
-	ClusterID   uint             `json:"cluster_id"`
-	ProjectID   uint             `json:"project_id"`
-	TeamID      uint             `json:"team_id"`
-	Env         string           `json:"env"`
-	Status      string           `json:"status"`
-	Nodes       []TargetNodeResp `json:"nodes,omitempty"`
-	CreatedAt   time.Time        `json:"created_at"`
-	UpdatedAt   time.Time        `json:"updated_at"`
+	ID              uint             `json:"id"`
+	Name            string           `json:"name"`
+	TargetType      string           `json:"target_type"`
+	RuntimeType     string           `json:"runtime_type"`
+	ClusterID       uint             `json:"cluster_id"`
+	ClusterSource   string           `json:"cluster_source"`
+	CredentialID    uint             `json:"credential_id"`
+	BootstrapJobID  string           `json:"bootstrap_job_id,omitempty"`
+	ProjectID       uint             `json:"project_id"`
+	TeamID          uint             `json:"team_id"`
+	Env             string           `json:"env"`
+	Status          string           `json:"status"`
+	ReadinessStatus string           `json:"readiness_status"`
+	Nodes           []TargetNodeResp `json:"nodes,omitempty"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
 }
 
 type ReleasePreviewReq struct {
@@ -135,4 +142,66 @@ type ClusterBootstrapApplyResp struct {
 	Status    string `json:"status"`
 	ClusterID uint   `json:"cluster_id,omitempty"`
 	TargetID  uint   `json:"target_id,omitempty"`
+}
+
+type EnvironmentBootstrapReq struct {
+	Name           string `json:"name" binding:"required"`
+	RuntimeType    string `json:"runtime_type" binding:"required"` // k8s|compose
+	PackageVersion string `json:"package_version" binding:"required"`
+	Env            string `json:"env"`
+	TargetID       uint   `json:"target_id"`
+	ClusterID      uint   `json:"cluster_id"`
+	ControlPlaneID uint   `json:"control_plane_host_id"`
+	WorkerIDs      []uint `json:"worker_host_ids"`
+	NodeIDs        []uint `json:"node_ids"`
+}
+
+type EnvironmentBootstrapResp struct {
+	JobID          string `json:"job_id"`
+	Status         string `json:"status"`
+	RuntimeType    string `json:"runtime_type"`
+	PackageVersion string `json:"package_version"`
+	TargetID       uint   `json:"target_id,omitempty"`
+}
+
+type ClusterCredentialImportReq struct {
+	Name        string `json:"name" binding:"required"`
+	RuntimeType string `json:"runtime_type"`
+	Source      string `json:"source"` // external_managed
+	AuthMethod  string `json:"auth_method"`
+	Endpoint    string `json:"endpoint"`
+	Kubeconfig  string `json:"kubeconfig"`
+	CACert      string `json:"ca_cert"`
+	Cert        string `json:"cert"`
+	Key         string `json:"key"`
+	Token       string `json:"token"`
+}
+
+type PlatformCredentialRegisterReq struct {
+	Name        string `json:"name"`
+	RuntimeType string `json:"runtime_type"`
+	ClusterID   uint   `json:"cluster_id" binding:"required"`
+}
+
+type ClusterCredentialResp struct {
+	ID              uint       `json:"id"`
+	Name            string     `json:"name"`
+	RuntimeType     string     `json:"runtime_type"`
+	Source          string     `json:"source"`
+	ClusterID       uint       `json:"cluster_id"`
+	Endpoint        string     `json:"endpoint"`
+	AuthMethod      string     `json:"auth_method"`
+	Status          string     `json:"status"`
+	LastTestAt      *time.Time `json:"last_test_at,omitempty"`
+	LastTestStatus  string     `json:"last_test_status,omitempty"`
+	LastTestMessage string     `json:"last_test_message,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type ClusterCredentialTestResp struct {
+	CredentialID uint   `json:"credential_id"`
+	Connected    bool   `json:"connected"`
+	Message      string `json:"message"`
+	LatencyMS    int64  `json:"latency_ms,omitempty"`
 }

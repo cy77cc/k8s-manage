@@ -13,10 +13,14 @@ export interface DeployTarget {
   target_type: 'k8s' | 'compose';
   runtime_type: 'k8s' | 'compose';
   cluster_id: number;
+  cluster_source?: 'platform_managed' | 'external_managed';
+  credential_id?: number;
+  bootstrap_job_id?: string;
   project_id: number;
   team_id: number;
   env: string;
   status: string;
+  readiness_status?: string;
   nodes?: Array<{
     host_id: number;
     name: string;
@@ -79,6 +83,36 @@ export interface ClusterBootstrapTask {
   updated_at: string;
 }
 
+export interface EnvironmentBootstrapJob {
+  id: string;
+  name: string;
+  runtime_type: 'k8s' | 'compose';
+  target_env: string;
+  status: string;
+  package_version: string;
+  package_path: string;
+  error_message?: string;
+  result_json?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClusterCredential {
+  id: number;
+  name: string;
+  runtime_type: 'k8s' | 'compose';
+  source: 'platform_managed' | 'external_managed';
+  cluster_id: number;
+  endpoint: string;
+  auth_method: string;
+  status: string;
+  last_test_at?: string;
+  last_test_status?: string;
+  last_test_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export const deploymentApi = {
   getTargets(): Promise<ApiResponse<PaginatedResponse<DeployTarget>>> {
     return apiService.get('/deploy/targets');
@@ -87,6 +121,9 @@ export const deploymentApi = {
     name: string;
     target_type: 'k8s' | 'compose';
     cluster_id?: number;
+    cluster_source?: 'platform_managed' | 'external_managed';
+    credential_id?: number;
+    bootstrap_job_id?: string;
     project_id?: number;
     team_id?: number;
     env?: string;
@@ -98,6 +135,9 @@ export const deploymentApi = {
     name: string;
     target_type: 'k8s' | 'compose';
     cluster_id: number;
+    cluster_source: 'platform_managed' | 'external_managed';
+    credential_id: number;
+    bootstrap_job_id: string;
     project_id: number;
     team_id: number;
     env: string;
@@ -178,5 +218,47 @@ export const deploymentApi = {
   },
   getClusterBootstrapTask(taskId: string): Promise<ApiResponse<ClusterBootstrapTask>> {
     return apiService.get(`/deploy/clusters/bootstrap/${encodeURIComponent(taskId)}`);
+  },
+  startEnvironmentBootstrap(payload: {
+    name: string;
+    runtime_type: 'k8s' | 'compose';
+    package_version: string;
+    env?: string;
+    target_id?: number;
+    cluster_id?: number;
+    control_plane_host_id?: number;
+    worker_host_ids?: number[];
+    node_ids?: number[];
+  }): Promise<ApiResponse<{ job_id: string; status: string; runtime_type: string; package_version: string; target_id?: number }>> {
+    return apiService.post('/deploy/environments/bootstrap', payload);
+  },
+  getEnvironmentBootstrapJob(jobId: string): Promise<ApiResponse<EnvironmentBootstrapJob>> {
+    return apiService.get(`/deploy/environments/bootstrap/${encodeURIComponent(jobId)}`);
+  },
+  registerPlatformCredential(payload: {
+    cluster_id: number;
+    name?: string;
+    runtime_type?: 'k8s' | 'compose';
+  }): Promise<ApiResponse<ClusterCredential>> {
+    return apiService.post('/deploy/credentials/platform/register', payload);
+  },
+  importExternalCredential(payload: {
+    name: string;
+    runtime_type?: 'k8s' | 'compose';
+    auth_method?: 'kubeconfig' | 'cert';
+    endpoint?: string;
+    kubeconfig?: string;
+    ca_cert?: string;
+    cert?: string;
+    key?: string;
+    token?: string;
+  }): Promise<ApiResponse<ClusterCredential>> {
+    return apiService.post('/deploy/credentials/import', payload);
+  },
+  testCredential(id: number): Promise<ApiResponse<{ credential_id: number; connected: boolean; message: string; latency_ms?: number }>> {
+    return apiService.post(`/deploy/credentials/${id}/test`);
+  },
+  listCredentials(params?: { runtime_type?: 'k8s' | 'compose' }): Promise<ApiResponse<PaginatedResponse<ClusterCredential>>> {
+    return apiService.get('/deploy/credentials', { params });
   },
 };

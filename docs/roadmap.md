@@ -53,7 +53,7 @@
 | K8s | `/api/v1/clusters/*` | In Progress (Phase-1 lifecycle + namespace isolation + rollout/hpa/quota 已落地) |
 | Services | `/api/v1/services/*` | In Progress |
 | Deployment Management | `/api/v1/deploy/*` + `/api/v1/aiops/*` | In Progress |
-| Environment Provisioning (Planned) | `/api/v1/environments/*` | Planned |
+| Environment Provisioning | `/api/v1/deploy/environments/*` + `/api/v1/deploy/credentials/*` | In Progress |
 | Global Approval Inbox (Planned) | `/api/v1/approvals/inbox*` | Planned |
 | Settings-RBAC | `/api/v1/rbac/*` | In Progress |
 | Global AI Assistant | `/api/v1/ai/*` | In Progress |

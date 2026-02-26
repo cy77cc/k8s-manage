@@ -29,6 +29,12 @@ func RegisterDeploymentHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext)
 		g.POST("/clusters/bootstrap/preview", h.PreviewClusterBootstrap)
 		g.POST("/clusters/bootstrap/apply", h.ApplyClusterBootstrap)
 		g.GET("/clusters/bootstrap/:task_id", h.GetClusterBootstrapTask)
+		g.POST("/environments/bootstrap", h.StartEnvironmentBootstrap)
+		g.GET("/environments/bootstrap/:job_id", h.GetEnvironmentBootstrapJob)
+		g.POST("/credentials/platform/register", h.RegisterPlatformCredential)
+		g.POST("/credentials/import", h.ImportExternalCredential)
+		g.POST("/credentials/:id/test", h.TestCredential)
+		g.GET("/credentials", h.ListCredentials)
 	}
 
 	sg := v1.Group("/services", middleware.JWTAuth())

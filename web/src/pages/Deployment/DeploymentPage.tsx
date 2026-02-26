@@ -22,7 +22,7 @@ import { Api } from '../../api';
 import type { Cluster } from '../../api/modules/kubernetes';
 import type { Host } from '../../api/modules/hosts';
 import type { ServiceItem } from '../../api/modules/services';
-import type { ClusterBootstrapTask, DeployTarget, DeployRelease, DeployReleaseTimelineEvent, Inspection } from '../../api/modules/deployment';
+import type { ClusterBootstrapTask, ClusterCredential, DeployTarget, DeployRelease, DeployReleaseTimelineEvent, EnvironmentBootstrapJob, Inspection } from '../../api/modules/deployment';
 
 const envOptions = [{ value: 'development' }, { value: 'staging' }, { value: 'production' }];
 const strategyOptions = [{ value: 'rolling' }, { value: 'blue-green' }, { value: 'canary' }];
@@ -85,6 +85,8 @@ const DeploymentPage: React.FC = () => {
   const [clusterModalOpen, setClusterModalOpen] = React.useState(false);
   const [bootstrapPreview, setBootstrapPreview] = React.useState<{ steps: string[]; expected_endpoint?: string } | null>(null);
   const [bootstrapTasks, setBootstrapTasks] = React.useState<ClusterBootstrapTask[]>([]);
+  const [environmentJobs, setEnvironmentJobs] = React.useState<EnvironmentBootstrapJob[]>([]);
+  const [credentials, setCredentials] = React.useState<ClusterCredential[]>([]);
 
   const [targetForm] = Form.useForm();
   const [releaseForm] = Form.useForm();
@@ -92,17 +94,20 @@ const DeploymentPage: React.FC = () => {
   const [governanceForm] = Form.useForm<GovernanceForm>();
   const [inspectionForm] = Form.useForm();
   const [bootstrapForm] = Form.useForm();
+  const [environmentForm] = Form.useForm();
+  const [credentialForm] = Form.useForm();
 
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, rRes, iRes, cRes, hRes, sRes] = await Promise.all([
+      const [tRes, rRes, iRes, cRes, hRes, sRes, credRes] = await Promise.all([
         Api.deployment.getTargets(),
         Api.deployment.getReleasesByRuntime({ runtime_type: runtimeFilter }),
         Api.deployment.listInspections(),
         Api.kubernetes.getClusterList({ page: 1, pageSize: 200 }),
         Api.hosts.getHostList({ page: 1, pageSize: 500 }),
         Api.services.getList({ page: 1, pageSize: 500 }),
+        Api.deployment.listCredentials(),
       ]);
       setTargets(tRes.data.list || []);
       setReleases(rRes.data.list || []);
@@ -110,6 +115,7 @@ const DeploymentPage: React.FC = () => {
       setClusters(cRes.data.list || []);
       setHosts(hRes.data.list || []);
       setServices(sRes.data.list || []);
+      setCredentials(credRes.data.list || []);
       const taskId = String(localStorage.getItem('clusterBootstrapTaskId') || '').trim();
       if (taskId) {
         try {
@@ -120,6 +126,17 @@ const DeploymentPage: React.FC = () => {
         }
       } else {
         setBootstrapTasks([]);
+      }
+      const envTaskId = String(localStorage.getItem('environmentBootstrapJobId') || '').trim();
+      if (envTaskId) {
+        try {
+          const task = await Api.deployment.getEnvironmentBootstrapJob(envTaskId);
+          setEnvironmentJobs([task.data]);
+        } catch {
+          setEnvironmentJobs([]);
+        }
+      } else {
+        setEnvironmentJobs([]);
       }
     } catch (err) {
       message.error(err instanceof Error ? err.message : '加载部署管理失败');
@@ -290,6 +307,71 @@ const DeploymentPage: React.FC = () => {
     });
     localStorage.setItem('clusterBootstrapTaskId', resp.data.task_id);
     message.success(`建群任务已启动: ${resp.data.task_id}`);
+    await load();
+  };
+
+  const applyEnvironmentBootstrap = async () => {
+    const v = await environmentForm.validateFields();
+    const payload: any = {
+      name: String(v.name),
+      runtime_type: String(v.runtime_type),
+      package_version: String(v.package_version),
+      env: String(v.env || 'staging'),
+      target_id: Number(v.target_id || 0),
+    };
+    if (payload.runtime_type === 'k8s') {
+      payload.control_plane_host_id = Number(v.control_plane_host_id || 0);
+      payload.worker_host_ids = (v.worker_host_ids || []).map((x: number) => Number(x));
+    } else {
+      payload.node_ids = (v.node_ids || []).map((x: number) => Number(x));
+    }
+    const resp = await Api.deployment.startEnvironmentBootstrap(payload);
+    localStorage.setItem('environmentBootstrapJobId', resp.data.job_id);
+    message.success(`环境部署任务已启动: ${resp.data.job_id}`);
+    await load();
+  };
+
+  const registerPlatformCredential = async () => {
+    const clusterId = Number(credentialForm.getFieldValue('platform_cluster_id') || 0);
+    if (!clusterId) {
+      message.warning('请选择平台集群');
+      return;
+    }
+    await Api.deployment.registerPlatformCredential({
+      cluster_id: clusterId,
+      name: String(credentialForm.getFieldValue('platform_name') || ''),
+      runtime_type: 'k8s',
+    });
+    message.success('平台凭据注册成功');
+    await load();
+  };
+
+  const importExternalCredential = async () => {
+    const v = await credentialForm.validateFields(['external_name', 'auth_method', 'kubeconfig', 'endpoint', 'ca_cert', 'cert', 'key', 'token']);
+    const authMethod = String(v.auth_method || 'kubeconfig');
+    const payload: any = {
+      name: String(v.external_name),
+      runtime_type: 'k8s',
+      auth_method: authMethod,
+      endpoint: String(v.endpoint || ''),
+      kubeconfig: String(v.kubeconfig || ''),
+      ca_cert: String(v.ca_cert || ''),
+      cert: String(v.cert || ''),
+      key: String(v.key || ''),
+      token: String(v.token || ''),
+    };
+    await Api.deployment.importExternalCredential(payload);
+    message.success('外部凭据导入成功');
+    await load();
+  };
+
+  const testCredential = async (id: number) => {
+    const resp = await Api.deployment.testCredential(id);
+    if (resp.data.connected) {
+      message.success(`凭据 #${id} 连通成功 (${resp.data.latency_ms || 0}ms)`);
+    } else {
+      message.warning(`凭据 #${id} 连通失败: ${resp.data.message}`);
+    }
     await load();
   };
 
@@ -573,6 +655,99 @@ const DeploymentPage: React.FC = () => {
                         { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'}>{v}</Tag> },
                         { title: '错误', dataIndex: 'error_message', render: (v: string) => v || '-' },
                         { title: '更新时间', dataIndex: 'updated_at', render: (v: string) => (v ? new Date(v).toLocaleString() : '-') },
+                      ]}
+                    />
+                  </Card>
+                </Col>
+                <Col span={24} style={{ marginTop: 12 }}>
+                  <Card size="small" title="环境部署（SSH + 二进制安装）">
+                    <Form form={environmentForm} layout="vertical" initialValues={{ runtime_type: 'k8s', package_version: 'v0.1.0', env: 'staging' }}>
+                      <Row gutter={12}>
+                        <Col span={6}><Form.Item name="name" label="任务名称" rules={[{ required: true }]}><Input placeholder="env-bootstrap-a" /></Form.Item></Col>
+                        <Col span={4}><Form.Item name="runtime_type" label="Runtime" rules={[{ required: true }]}><Select options={runtimeOptions} /></Form.Item></Col>
+                        <Col span={4}><Form.Item name="package_version" label="版本" rules={[{ required: true }]}><Input placeholder="v0.1.0" /></Form.Item></Col>
+                        <Col span={4}><Form.Item name="env" label="环境"><Select options={envOptions} /></Form.Item></Col>
+                        <Col span={6}><Form.Item name="target_id" label="绑定目标"><Select allowClear options={targetOptions} placeholder="可选" /></Form.Item></Col>
+                      </Row>
+                      <Form.Item shouldUpdate noStyle>
+                        {({ getFieldValue }) => {
+                          const runtime = getFieldValue('runtime_type') || 'k8s';
+                          if (runtime === 'k8s') {
+                            return (
+                              <Row gutter={12}>
+                                <Col span={8}><Form.Item name="control_plane_host_id" label="控制平面节点" rules={[{ required: true }]}><Select options={hostOptions} showSearch optionFilterProp="label" /></Form.Item></Col>
+                                <Col span={16}><Form.Item name="worker_host_ids" label="工作节点"><Select mode="multiple" options={hostOptions} showSearch optionFilterProp="label" /></Form.Item></Col>
+                              </Row>
+                            );
+                          }
+                          return (
+                            <Row gutter={12}>
+                              <Col span={24}><Form.Item name="node_ids" label="Compose 节点" rules={[{ required: true }]}><Select mode="multiple" options={hostOptions} showSearch optionFilterProp="label" /></Form.Item></Col>
+                            </Row>
+                          );
+                        }}
+                      </Form.Item>
+                      <Space>
+                        <Button type="primary" onClick={() => void applyEnvironmentBootstrap()}>启动环境部署</Button>
+                      </Space>
+                    </Form>
+                    <Table
+                      style={{ marginTop: 12 }}
+                      rowKey="id"
+                      dataSource={environmentJobs}
+                      pagination={false}
+                      columns={[
+                        { title: '任务ID', dataIndex: 'id' },
+                        { title: 'Runtime', dataIndex: 'runtime_type', render: (v: string) => <Tag>{v}</Tag> },
+                        { title: '版本', dataIndex: 'package_version' },
+                        { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'}>{v}</Tag> },
+                        { title: '错误', dataIndex: 'error_message', render: (v: string) => v || '-' },
+                        { title: '更新时间', dataIndex: 'updated_at', render: (v: string) => (v ? new Date(v).toLocaleString() : '-') },
+                      ]}
+                    />
+                  </Card>
+                </Col>
+                <Col span={24} style={{ marginTop: 12 }}>
+                  <Card size="small" title="集群凭据（平台注册 / 外部导入）">
+                    <Form form={credentialForm} layout="vertical" initialValues={{ auth_method: 'kubeconfig' }}>
+                      <Row gutter={12}>
+                        <Col span={8}><Form.Item name="platform_cluster_id" label="平台注册集群"><Select allowClear options={clusterOptions} placeholder="选择现有集群" /></Form.Item></Col>
+                        <Col span={8}><Form.Item name="platform_name" label="平台注册名称"><Input placeholder="可选，默认集群名" /></Form.Item></Col>
+                        <Col span={8}><Space style={{ marginTop: 30 }}><Button onClick={() => void registerPlatformCredential()}>注册平台凭据</Button></Space></Col>
+                      </Row>
+                      <Row gutter={12}>
+                        <Col span={6}><Form.Item name="external_name" label="外部凭据名称" rules={[{ required: true }]}><Input placeholder="external-prod-k8s" /></Form.Item></Col>
+                        <Col span={4}><Form.Item name="auth_method" label="认证方式" rules={[{ required: true }]}><Select options={[{ value: 'kubeconfig' }, { value: 'cert' }]} /></Form.Item></Col>
+                        <Col span={14}><Form.Item shouldUpdate noStyle>{({ getFieldValue }) => {
+                          const auth = getFieldValue('auth_method') || 'kubeconfig';
+                          if (auth === 'kubeconfig') {
+                            return <Form.Item name="kubeconfig" label="Kubeconfig" rules={[{ required: true }]}><Input.TextArea rows={4} /></Form.Item>;
+                          }
+                          return (
+                            <Row gutter={8}>
+                              <Col span={24}><Form.Item name="endpoint" label="Endpoint" rules={[{ required: true }]}><Input placeholder="https://10.0.0.10:6443" /></Form.Item></Col>
+                              <Col span={8}><Form.Item name="ca_cert" label="CA Cert" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item></Col>
+                              <Col span={8}><Form.Item name="cert" label="Client Cert" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item></Col>
+                              <Col span={8}><Form.Item name="key" label="Client Key" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item></Col>
+                            </Row>
+                          );
+                        }}</Form.Item></Col>
+                      </Row>
+                      <Space><Button type="primary" onClick={() => void importExternalCredential()}>导入外部凭据</Button></Space>
+                    </Form>
+                    <Table
+                      style={{ marginTop: 12 }}
+                      rowKey="id"
+                      dataSource={credentials}
+                      pagination={false}
+                      columns={[
+                        { title: 'ID', dataIndex: 'id', width: 80 },
+                        { title: '名称', dataIndex: 'name' },
+                        { title: '来源', dataIndex: 'source', render: (v: string) => <Tag color={v === 'platform_managed' ? 'blue' : 'purple'}>{v}</Tag> },
+                        { title: 'Endpoint', dataIndex: 'endpoint', render: (v: string) => v || '-' },
+                        { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'active' ? 'success' : 'default'}>{v}</Tag> },
+                        { title: '最近检测', render: (_: unknown, r: ClusterCredential) => r.last_test_status ? `${r.last_test_status} ${r.last_test_message || ''}` : '-' },
+                        { title: '操作', render: (_: unknown, r: ClusterCredential) => <Button size="small" onClick={() => void testCredential(r.id)}>连通性检测</Button> },
                       ]}
                     />
                   </Card>

@@ -3,18 +3,22 @@ package model
 import "time"
 
 type DeploymentTarget struct {
-	ID          uint      `gorm:"primaryKey;column:id" json:"id"`
-	Name        string    `gorm:"column:name;type:varchar(128);not null" json:"name"`
-	TargetType  string    `gorm:"column:target_type;type:varchar(16);not null;index" json:"target_type"` // k8s|compose
-	RuntimeType string    `gorm:"column:runtime_type;type:varchar(16);not null;default:'k8s';index" json:"runtime_type"`
-	ClusterID   uint      `gorm:"column:cluster_id;default:0;index" json:"cluster_id"`
-	ProjectID   uint      `gorm:"column:project_id;default:0;index" json:"project_id"`
-	TeamID      uint      `gorm:"column:team_id;default:0;index" json:"team_id"`
-	Env         string    `gorm:"column:env;type:varchar(32);default:'staging';index" json:"env"`
-	Status      string    `gorm:"column:status;type:varchar(32);default:'active'" json:"status"`
-	CreatedBy   uint      `gorm:"column:created_by;default:0" json:"created_by"`
-	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID              uint      `gorm:"primaryKey;column:id" json:"id"`
+	Name            string    `gorm:"column:name;type:varchar(128);not null" json:"name"`
+	TargetType      string    `gorm:"column:target_type;type:varchar(16);not null;index" json:"target_type"` // k8s|compose
+	RuntimeType     string    `gorm:"column:runtime_type;type:varchar(16);not null;default:'k8s';index" json:"runtime_type"`
+	ClusterID       uint      `gorm:"column:cluster_id;default:0;index" json:"cluster_id"`
+	ClusterSource   string    `gorm:"column:cluster_source;type:varchar(32);not null;default:'platform_managed';index" json:"cluster_source"`
+	CredentialID    uint      `gorm:"column:credential_id;default:0;index" json:"credential_id"`
+	BootstrapJobID  string    `gorm:"column:bootstrap_job_id;type:varchar(64);default:''" json:"bootstrap_job_id"`
+	ProjectID       uint      `gorm:"column:project_id;default:0;index" json:"project_id"`
+	TeamID          uint      `gorm:"column:team_id;default:0;index" json:"team_id"`
+	Env             string    `gorm:"column:env;type:varchar(32);default:'staging';index" json:"env"`
+	Status          string    `gorm:"column:status;type:varchar(32);default:'active'" json:"status"`
+	ReadinessStatus string    `gorm:"column:readiness_status;type:varchar(32);default:'unknown'" json:"readiness_status"`
+	CreatedBy       uint      `gorm:"column:created_by;default:0" json:"created_by"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (DeploymentTarget) TableName() string { return "deployment_targets" }
