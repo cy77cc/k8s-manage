@@ -38,6 +38,7 @@ import ConfigMultiEnvPage from './pages/ConfigCenter/ConfigMultiEnvPage';
 import AuditLogsPage from './pages/ConfigCenter/AuditLogsPage';
 import LoginPage from './pages/Auth/LoginPage';
 import RegisterPage from './pages/Auth/RegisterPage';
+import AICommandCenterPage from './pages/AI/AICommandCenterPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -113,6 +114,7 @@ const ProtectedApp: React.FC = () => {
           <Route path="/cmdb/assets" element={withAuth('cmdb', 'read', <CMDBPage />)} />
           <Route path="/automation" element={withAuth('automation', 'read', <AutomationPage />)} />
           <Route path="/cicd" element={withAuth('cicd', 'read', <CICDPage />)} />
+          <Route path="/ai" element={withAuth('ai', 'read', <AICommandCenterPage />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppLayout>

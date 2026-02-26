@@ -371,6 +371,27 @@ func (l *Logic) ServiceTimeline(ctx context.Context, serviceID uint) ([]cicdv1.R
 	return out, nil
 }
 
+func (l *Logic) ListAuditEvents(ctx context.Context, serviceID uint, traceID, commandID string, limit int) ([]cicdv1.ReleaseTimelineEventResp, error) {
+	rows, err := l.repo.ListAuditEvents(ctx, serviceID, strings.TrimSpace(traceID), strings.TrimSpace(commandID), limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]cicdv1.ReleaseTimelineEventResp, 0, len(rows))
+	for i := range rows {
+		out = append(out, cicdv1.ReleaseTimelineEventResp{
+			ID:           rows[i].ID,
+			ServiceID:    rows[i].ServiceID,
+			DeploymentID: rows[i].DeploymentID,
+			ReleaseID:    rows[i].ReleaseID,
+			EventType:    rows[i].EventType,
+			ActorID:      rows[i].ActorID,
+			Payload:      parseAnyJSON(rows[i].PayloadJSON),
+			CreatedAt:    rows[i].CreatedAt,
+		})
+	}
+	return out, nil
+}
+
 func (l *Logic) invalidateTimelineCache(ctx context.Context, serviceID uint) {
 	if serviceID == 0 || l.svcCtx.Rdb == nil {
 		return
@@ -379,14 +400,23 @@ func (l *Logic) invalidateTimelineCache(ctx context.Context, serviceID uint) {
 }
 
 func (l *Logic) writeAudit(ctx context.Context, serviceID, deploymentID, releaseID uint, eventType string, actor uint, payload any) error {
-	_, err := l.repo.CreateAuditEvent(ctx, model.CICDAuditEvent{
+	rec := model.CICDAuditEvent{
 		ServiceID:    serviceID,
 		DeploymentID: deploymentID,
 		ReleaseID:    releaseID,
 		EventType:    eventType,
 		ActorID:      actor,
 		PayloadJSON:  mustJSON(payload),
-	})
+	}
+	if meta, ok := commandAuditContextFromContext(ctx); ok {
+		rec.CommandID = meta.CommandID
+		rec.Intent = meta.Intent
+		rec.PlanHash = meta.PlanHash
+		rec.TraceID = meta.TraceID
+		rec.ApprovalContext = mustJSONOrEmpty(meta.ApprovalContext)
+		rec.ExecutionSummary = strings.TrimSpace(meta.Summary)
+	}
+	_, err := l.repo.CreateAuditEvent(ctx, rec)
 	return err
 }
 

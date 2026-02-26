@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Input, Button, Avatar, Space, Typography, Card, Tag, Collapse, Alert } from 'antd';
-import { SendOutlined, MessageOutlined, ToolOutlined, BulbOutlined, WarningOutlined } from '@ant-design/icons';
+import { Input, Button, Avatar, Space, Typography, Card, Tag, Collapse, Alert, Tooltip } from 'antd';
+import { SendOutlined, MessageOutlined, ToolOutlined, BulbOutlined, WarningOutlined, ArrowDownOutlined, PlusOutlined, HistoryOutlined, PushpinOutlined, DeleteOutlined, DownloadOutlined, CopyOutlined, FileMarkdownOutlined, CodeOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -96,6 +96,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [followupLoadingId, setFollowupLoadingId] = useState('');
   const [activeAssistantMessageId, setActiveAssistantMessageId] = useState('');
   const [recRevealMap, setRecRevealMap] = useState<Record<string, number>>({});
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [sessionList, setSessionList] = useState<AISession[]>([]);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionKeyword, setSessionKeyword] = useState('');
+  const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>([]);
+  const [activeAnchorId, setActiveAnchorId] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -152,9 +158,42 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const loadSessions = async () => {
+    if (sessionId) return;
+    setSessionLoading(true);
+    try {
+      const res = await Api.ai.getSessions(scene);
+      const list = (res.data || []).slice().sort((a, b) => {
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+      setSessionList(list);
+    } catch (error) {
+      console.error('加载会话列表失败:', error);
+    } finally {
+      setSessionLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadSession();
   }, [sessionId, scene]);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [sessionId, scene]);
+
+  useEffect(() => {
+    const key = `ai:pinned:sessions:${scene}`;
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        setPinnedSessionIds(parsed.filter((id) => typeof id === 'string'));
+      }
+    } catch {
+      setPinnedSessionIds([]);
+    }
+  }, [scene]);
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) {
@@ -167,6 +206,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     shouldAutoScrollRef.current = nearBottom;
+    setShowScrollBottom(!nearBottom);
+    const anchors = messages
+      .filter((msg) => msg.role === 'user')
+      .map((msg) => ({ id: msg.id, top: (document.getElementById(`msg-${msg.id}`)?.offsetTop || 0) }));
+    const current = anchors
+      .filter((item) => item.top <= el.scrollTop + 90)
+      .sort((a, b) => b.top - a.top)[0];
+    if (current?.id) {
+      setActiveAnchorId(current.id);
+    }
+  };
+
+  const scrollToBottom = () => {
+    shouldAutoScrollRef.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowScrollBottom(false);
   };
 
   const patchAssistantMessage = (assistantID: string, turnID: string | undefined, patch: (item: LocalMessage) => LocalMessage) => {
@@ -322,6 +377,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           onDone: (done) => {
             latestSession = done.session;
             setCurrentSession(done.session);
+            void loadSessions();
             const turnID = done.turn_id || activeTurnID;
 
             if (done.turn_recommendations && done.turn_recommendations.length > 0) {
@@ -414,6 +470,181 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     await sendMessage(lastPrompt);
   };
 
+  const handleOpenSession = async (id: string) => {
+    try {
+      const response = await Api.ai.getSessionDetail(id);
+      setMessages((response.data.messages || []) as LocalMessage[]);
+      setCurrentSession(response.data);
+      setStreamState('idle');
+      setStreamError('');
+      setStreamNotice('');
+    } catch (error) {
+      console.error('加载会话详情失败:', error);
+    }
+  };
+
+  const handleNewSession = () => {
+    setCurrentSession(null);
+    setMessages([]);
+    setInputValue('');
+    setStreamState('idle');
+    setStreamError('');
+    setStreamNotice('');
+  };
+
+  const persistPinnedSessions = (ids: string[]) => {
+    setPinnedSessionIds(ids);
+    localStorage.setItem(`ai:pinned:sessions:${scene}`, JSON.stringify(ids));
+  };
+
+  const togglePinSession = (id: string) => {
+    if (pinnedSessionIds.includes(id)) {
+      persistPinnedSessions(pinnedSessionIds.filter((x) => x !== id));
+      return;
+    }
+    persistPinnedSessions([id, ...pinnedSessionIds]);
+  };
+
+  const deleteSession = async (id: string) => {
+    try {
+      await Api.ai.deleteSession(id);
+      if (currentSession?.id === id) {
+        handleNewSession();
+      }
+      persistPinnedSessions(pinnedSessionIds.filter((x) => x !== id));
+      await loadSessions();
+    } catch (error) {
+      console.error('删除会话失败:', error);
+    }
+  };
+
+  const visibleSessions = sessionList.filter((item) => {
+    const key = sessionKeyword.trim().toLowerCase();
+    if (!key) return true;
+    return `${item.title} ${item.id}`.toLowerCase().includes(key);
+  });
+
+  const sortSessions = (items: AISession[]) => {
+    return items.slice().sort((a, b) => {
+      const pinA = pinnedSessionIds.includes(a.id) ? 1 : 0;
+      const pinB = pinnedSessionIds.includes(b.id) ? 1 : 0;
+      if (pinA !== pinB) return pinB - pinA;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
+  };
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+  const groupedSessions = {
+    today: [] as AISession[],
+    yesterday: [] as AISession[],
+    earlier: [] as AISession[],
+  };
+  sortSessions(visibleSessions).forEach((item) => {
+    const ts = new Date(item.updatedAt).getTime();
+    if (ts >= startOfToday) {
+      groupedSessions.today.push(item);
+    } else if (ts >= startOfYesterday) {
+      groupedSessions.yesterday.push(item);
+    } else {
+      groupedSessions.earlier.push(item);
+    }
+  });
+
+  const messageAnchors = messages
+    .filter((msg) => msg.role === 'user')
+    .map((msg, idx) => ({
+      id: msg.id,
+      label: `#${idx + 1} ${(msg.content || '').slice(0, 28) || '用户输入'}${(msg.content || '').length > 28 ? '...' : ''}`,
+    }));
+
+  useEffect(() => {
+    if (!messageAnchors.length) {
+      setActiveAnchorId('');
+      return;
+    }
+    if (!activeAnchorId) {
+      setActiveAnchorId(messageAnchors[0].id);
+    }
+  }, [messageAnchors, activeAnchorId]);
+
+  const jumpToMessage = (id: string) => {
+    const target = document.getElementById(`msg-${id}`);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveAnchorId(id);
+  };
+
+  const buildSessionMarkdown = () => {
+    const title = currentSession?.title || 'AI Session';
+    const lines = [`# ${title}`, '', `- Scene: ${scene}`, `- Session: ${currentSession?.id || '-'}`, `- ExportedAt: ${new Date().toISOString()}`, ''];
+    messages.forEach((msg) => {
+      const role = msg.role === 'assistant' ? 'Assistant' : msg.role === 'user' ? 'User' : 'System';
+      lines.push(`## ${role} @ ${new Date(msg.timestamp).toLocaleString()}`);
+      lines.push('');
+      lines.push(msg.content || '');
+      lines.push('');
+      if (msg.thinking) {
+        lines.push('<details><summary>Thinking</summary>');
+        lines.push('');
+        lines.push(msg.thinking);
+        lines.push('');
+        lines.push('</details>');
+        lines.push('');
+      }
+    });
+    return lines.join('\n');
+  };
+
+  const downloadText = (filename: string, content: string, type = 'text/plain;charset=utf-8') => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportMarkdown = () => {
+    const sid = currentSession?.id || `session-${Date.now()}`;
+    downloadText(`${sid}.md`, buildSessionMarkdown(), 'text/markdown;charset=utf-8');
+  };
+
+  const exportJSON = () => {
+    const sid = currentSession?.id || `session-${Date.now()}`;
+    const payload = {
+      session: currentSession,
+      scene,
+      exportedAt: new Date().toISOString(),
+      messages,
+    };
+    downloadText(`${sid}.json`, JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
+  };
+
+  const copyReplaySummary = async () => {
+    const latestAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    const latestUser = [...messages].reverse().find((m) => m.role === 'user');
+    const summary = [
+      `会话: ${currentSession?.title || 'AI Session'} (${currentSession?.id || '-'})`,
+      `场景: ${scene}`,
+      `时间: ${new Date().toLocaleString()}`,
+      `最新用户输入: ${(latestUser?.content || '-').slice(0, 180)}`,
+      `最新助手回复: ${(latestAssistant?.content || '-').slice(0, 260)}`,
+      `消息总数: ${messages.length}`,
+    ].join('\n');
+    try {
+      await navigator.clipboard.writeText(summary);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = summary;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  };
+
   const handleRecommendationFollowup = async (rec: EmbeddedRecommendation) => {
     const prompt = (rec.followup_prompt || rec.content || '').trim();
     if (!prompt || loading) return;
@@ -453,8 +684,120 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         },
       }}
     >
-      <div ref={scrollContainerRef} onScroll={handleScroll} className="ai-chat-message-scroll">
-        <div className="ai-chat-stream-list">
+      <div className="ai-chat-shell">
+        {!sessionId ? (
+          <aside className="ai-chat-session-sidebar">
+            <div className="ai-chat-session-header">
+              <Space>
+                <HistoryOutlined />
+                <Text strong>会话目录</Text>
+              </Space>
+              <Tooltip title="新会话">
+                <Button size="small" type="text" icon={<PlusOutlined />} onClick={handleNewSession} />
+              </Tooltip>
+            </div>
+            <Input
+              size="small"
+              placeholder="搜索会话"
+              value={sessionKeyword}
+              onChange={(e) => setSessionKeyword(e.target.value)}
+            />
+            <div className="ai-chat-session-list-wrap">
+              {sessionLoading ? <Text type="secondary">加载中...</Text> : null}
+              {!sessionLoading && visibleSessions.length === 0 ? <Text type="secondary">暂无会话</Text> : null}
+              {[
+                { key: 'today', title: '今天', list: groupedSessions.today },
+                { key: 'yesterday', title: '昨天', list: groupedSessions.yesterday },
+                { key: 'earlier', title: '更早', list: groupedSessions.earlier },
+              ].map((group) => (
+                group.list.length > 0 ? (
+                  <div key={group.key} className="ai-chat-session-group">
+                    <div className="ai-chat-session-group-title">{group.title}</div>
+                    {group.list.map((item) => {
+                      const active = currentSession?.id === item.id;
+                      const pinned = pinnedSessionIds.includes(item.id);
+                      return (
+                        <div key={item.id} className={`ai-chat-session-item ${active ? 'is-active' : ''}`}>
+                          <button type="button" className="ai-chat-session-btn" onClick={() => void handleOpenSession(item.id)}>
+                            <span className="ai-chat-session-title">{item.title || 'AI Session'}</span>
+                            <span className="ai-chat-session-time">{new Date(item.updatedAt).toLocaleString()}</span>
+                          </button>
+                          <div className="ai-chat-session-actions">
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<PushpinOutlined />}
+                              className={pinned ? 'is-pinned' : ''}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePinSession(item.id);
+                              }}
+                            />
+                            <Button
+                              size="small"
+                              type="text"
+                              danger
+                              icon={<DeleteOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void deleteSession(item.id);
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null
+              ))}
+            </div>
+          </aside>
+        ) : null}
+
+        <div className="ai-chat-main-pane">
+          {messages.length > 0 ? (
+            <div className="ai-chat-ops-bar">
+              <Space size={6}>
+                <Tooltip title="导出 Markdown">
+                  <Button size="small" icon={<FileMarkdownOutlined />} onClick={exportMarkdown}>
+                    Markdown
+                  </Button>
+                </Tooltip>
+                <Tooltip title="导出 JSON">
+                  <Button size="small" icon={<CodeOutlined />} onClick={exportJSON}>
+                    JSON
+                  </Button>
+                </Tooltip>
+                <Tooltip title="复制回放摘要">
+                  <Button size="small" type="primary" icon={<CopyOutlined />} onClick={() => void copyReplaySummary()}>
+                    复制摘要
+                  </Button>
+                </Tooltip>
+              </Space>
+              <Tag icon={<DownloadOutlined />} color="blue">
+                可导出
+              </Tag>
+            </div>
+          ) : null}
+          {messageAnchors.length > 1 ? (
+            <div className="ai-chat-anchor-nav">
+              <div className="ai-chat-anchor-title">轮次导航</div>
+              <div className="ai-chat-anchor-list">
+                {messageAnchors.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`ai-chat-anchor-btn ${activeAnchorId === item.id ? 'is-active' : ''}`}
+                    onClick={() => jumpToMessage(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <div ref={scrollContainerRef} onScroll={handleScroll} className="ai-chat-message-scroll">
+            <div className="ai-chat-stream-list">
           {messages.map((message) => {
             const isAssistant = message.role === 'assistant';
             const isUser = message.role === 'user';
@@ -465,6 +808,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
             return (
               <div key={message.id} className={`ai-chat-message-row ${isUser ? 'ai-chat-message-row-user' : 'ai-chat-message-row-assistant'}`}>
+                <span id={`msg-${message.id}`} className="ai-chat-anchor-target" />
                 {isAssistant ? (
                   <>
                     <Avatar icon={<MessageOutlined />} className="ai-chat-avatar ai-chat-avatar-assistant" />
@@ -596,50 +940,65 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 ) : null}
               </div>
             );
-          })}
-        </div>
+            })}
+            </div>
 
-        {streamNotice ? (
-          <div className="ai-chat-stream-notice">
-            <Alert type="info" showIcon message={streamNotice} />
+            {streamNotice ? (
+              <div className="ai-chat-stream-notice">
+                <Alert type="info" showIcon message={streamNotice} />
+              </div>
+            ) : null}
+
+            {showScrollBottom ? (
+              <Button
+                className="ai-scroll-bottom-btn"
+                type="primary"
+                shape="round"
+                size="small"
+                icon={<ArrowDownOutlined />}
+                onClick={scrollToBottom}
+              >
+                回到底部
+              </Button>
+            ) : null}
+
+            <div ref={messagesEndRef} />
           </div>
-        ) : null}
 
-        <div ref={messagesEndRef} />
-      </div>
+          {(streamState === 'timeout' || streamState === 'error') ? (
+            <div style={{ padding: '8px 16px 0' }}>
+              <Alert
+                type={streamState === 'timeout' ? 'warning' : 'error'}
+                showIcon
+                icon={<WarningOutlined />}
+                message={streamState === 'timeout' ? '工具执行可能超时' : '流式对话发生错误'}
+                description={streamError || '你可以重试本轮对话。'}
+                action={<Button size="small" onClick={() => void handleRetry()}>重试本轮</Button>}
+              />
+            </div>
+          ) : null}
 
-      {(streamState === 'timeout' || streamState === 'error') ? (
-        <div style={{ padding: '8px 16px 0' }}>
-          <Alert
-            type={streamState === 'timeout' ? 'warning' : 'error'}
-            showIcon
-            icon={<WarningOutlined />}
-            message={streamState === 'timeout' ? '工具执行可能超时' : '流式对话发生错误'}
-            description={streamError || '你可以重试本轮对话。'}
-            action={<Button size="small" onClick={() => void handleRetry()}>重试本轮</Button>}
-          />
-        </div>
-      ) : null}
-
-      <div className="ai-chat-input-wrap">
-        <Input.TextArea
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="请输入您的问题..."
-          rows={3}
-          disabled={loading}
-        />
-        <div className="ai-chat-send-row">
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            onClick={() => void handleSend()}
-            loading={loading}
-            disabled={!inputValue.trim() || loading}
-          >
-            发送
-          </Button>
+          <div className="ai-chat-input-wrap">
+            <Input.TextArea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="请输入您的问题..."
+              autoSize={{ minRows: 2, maxRows: 6 }}
+              disabled={loading}
+            />
+            <div className="ai-chat-send-row">
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={() => void handleSend()}
+                loading={loading}
+                disabled={!inputValue.trim() || loading}
+              >
+                发送
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </Card>

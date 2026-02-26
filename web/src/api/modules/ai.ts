@@ -92,6 +92,47 @@ export interface AIActionExecuteParams {
   approval_token: string;
 }
 
+export interface AICommandPreviewParams {
+  command: string;
+  scene?: string;
+  params?: Record<string, any>;
+}
+
+export interface AICommandExecuteParams {
+  command_id?: string;
+  command?: string;
+  scene?: string;
+  params?: Record<string, any>;
+  confirm: boolean;
+  approval_token?: string;
+}
+
+export interface AICommandResult {
+  status: 'previewed' | 'blocked' | 'succeeded' | 'failed';
+  summary: string;
+  artifacts: Record<string, any>;
+  trace_id: string;
+  next_actions: string[];
+  plan?: Record<string, any>;
+  missing?: string[];
+  prompts?: Record<string, string>;
+  risk: 'readonly' | 'low' | 'high';
+}
+
+export interface AICommandHistoryItem {
+  id: string;
+  command: string;
+  intent: string;
+  status: string;
+  risk: string;
+  trace_id: string;
+  plan_hash: string;
+  execution_summary: string;
+  created_at: string;
+  plan?: Record<string, any>;
+  result?: Record<string, any>;
+}
+
 interface SSEMetaEvent {
   sessionId: string;
   createdAt: string;
@@ -455,5 +496,25 @@ export const aiApi = {
 
   async confirmApproval(id: string, approve: boolean): Promise<ApiResponse<ApprovalTicket>> {
     return apiService.post(`/ai/approvals/${id}/confirm`, { approve });
+  },
+
+  async getCommandSuggestions(): Promise<ApiResponse<Array<{ command: string; hint?: string }>>> {
+    return apiService.get('/ai/commands/suggestions');
+  },
+
+  async previewCommand(params: AICommandPreviewParams): Promise<ApiResponse<AICommandResult>> {
+    return apiService.post('/ai/commands/preview', params);
+  },
+
+  async executeCommand(params: AICommandExecuteParams): Promise<ApiResponse<AICommandResult>> {
+    return apiService.post('/ai/commands/execute', params);
+  },
+
+  async getCommandHistory(limit = 20): Promise<ApiResponse<{ list: AICommandHistoryItem[]; total: number }>> {
+    return apiService.get('/ai/commands/history', { params: { limit } });
+  },
+
+  async getCommandHistoryDetail(id: string): Promise<ApiResponse<{ record: AICommandHistoryItem; audit_events: any[] }>> {
+    return apiService.get(`/ai/commands/history/${id}`);
   },
 };

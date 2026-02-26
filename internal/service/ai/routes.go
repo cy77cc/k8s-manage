@@ -28,5 +28,10 @@ func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.POST("/k8s/actions/execute", h.actionExecute)
 		g.POST("/actions/preview", h.actionPreview)
 		g.POST("/actions/execute", h.actionExecute)
+		g.GET("/commands/suggestions", h.commandSuggestions)
+		g.POST("/commands/preview", h.previewCommand)
+		g.POST("/commands/execute", h.executeCommand)
+		g.GET("/commands/history", h.listCommandHistory)
+		g.GET("/commands/history/:id", h.getCommandHistory)
 	}
 }

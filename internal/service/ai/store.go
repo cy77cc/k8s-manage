@@ -321,3 +321,56 @@ func (s *memoryStore) getExecution(id string) (*executionRecord, bool) {
 	cp := *rec
 	return &cp, true
 }
+
+func (s *memoryStore) saveCommandRecord(uid uint64, cc commandContext, status string, result map[string]any, approvalContext map[string]any, summary string) error {
+	if !s.dbEnabled() {
+		return nil
+	}
+	resultRaw := "{}"
+	if result != nil {
+		resultRaw = mustJSON(result)
+	}
+	rec := model.AICommandExecution{
+		ID:               cc.CommandID,
+		UserID:           uid,
+		Scene:            cc.Scene,
+		CommandText:      cc.Text,
+		Intent:           cc.Intent,
+		PlanHash:         cc.PlanHash,
+		Risk:             string(cc.Risk),
+		Status:           strings.TrimSpace(status),
+		TraceID:          cc.TraceID,
+		ParamsJSON:       mustJSON(cc.Params),
+		MissingJSON:      mustJSON(cc.Missing),
+		PlanJSON:         mustJSON(cc.Plan),
+		ResultJSON:       resultRaw,
+		ApprovalContext:  mustJSON(approvalContext),
+		ExecutionSummary: strings.TrimSpace(summary),
+	}
+	return s.db.Save(&rec).Error
+}
+
+func (s *memoryStore) getCommandRecord(uid uint64, id string) (*model.AICommandExecution, error) {
+	if !s.dbEnabled() {
+		return nil, errors.New("db unavailable")
+	}
+	var rec model.AICommandExecution
+	if err := s.db.Where("id = ? AND user_id = ?", strings.TrimSpace(id), uid).First(&rec).Error; err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+func (s *memoryStore) listCommandRecords(uid uint64, limit int) ([]model.AICommandExecution, error) {
+	if !s.dbEnabled() {
+		return nil, errors.New("db unavailable")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	rows := make([]model.AICommandExecution, 0)
+	if err := s.db.Where("user_id = ?", uid).Order("created_at DESC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}

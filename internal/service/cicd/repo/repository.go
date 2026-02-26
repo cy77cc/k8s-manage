@@ -177,3 +177,24 @@ func (r *Repository) ListAuditEventsByService(ctx context.Context, serviceID uin
 	}
 	return rows, nil
 }
+
+func (r *Repository) ListAuditEvents(ctx context.Context, serviceID uint, traceID, commandID string, limit int) ([]model.CICDAuditEvent, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	q := r.db.WithContext(ctx).Model(&model.CICDAuditEvent{})
+	if serviceID > 0 {
+		q = q.Where("service_id = ?", serviceID)
+	}
+	if traceID != "" {
+		q = q.Where("trace_id = ?", traceID)
+	}
+	if commandID != "" {
+		q = q.Where("command_id = ?", commandID)
+	}
+	rows := make([]model.CICDAuditEvent, 0)
+	if err := q.Order("id DESC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}

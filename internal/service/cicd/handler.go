@@ -229,6 +229,30 @@ func (h *Handler) ServiceTimeline(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"list": rows, "total": len(rows)}})
 }
 
+func (h *Handler) ListAuditEvents(c *gin.Context) {
+	if !h.authorize(c, "cicd:audit:read", "cicd:*") {
+		return
+	}
+	limit := 100
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	rows, err := h.logic.ListAuditEvents(
+		c.Request.Context(),
+		uintFromQuery(c, "service_id"),
+		strings.TrimSpace(c.Query("trace_id")),
+		strings.TrimSpace(c.Query("command_id")),
+		limit,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"list": rows, "total": len(rows)}})
+}
+
 func (h *Handler) authorize(c *gin.Context, codes ...string) bool {
 	if h.isAdmin(c) {
 		return true

@@ -43,6 +43,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     { key: '/cmdb/assets', icon: <CloudServerOutlined />, label: t('menu.cmdb') },
     { key: '/automation', icon: <ToolOutlined />, label: t('menu.automation') },
     { key: '/cicd', icon: <ToolOutlined />, label: 'CI/CD' },
+    { key: '/ai', icon: <ToolOutlined />, label: 'AI命令中心' },
     { key: '/config', icon: <SettingOutlined />, label: t('menu.config') },
     { key: '/tasks', icon: <ClockCircleOutlined />, label: t('menu.tasks') },
     { key: '/deployment', icon: <CloudOutlined />, label: '部署管理' },

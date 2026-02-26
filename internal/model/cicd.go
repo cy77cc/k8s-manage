@@ -82,14 +82,20 @@ type CICDReleaseApproval struct {
 func (CICDReleaseApproval) TableName() string { return "cicd_release_approvals" }
 
 type CICDAuditEvent struct {
-	ID           uint      `gorm:"primaryKey;column:id" json:"id"`
-	ServiceID    uint      `gorm:"column:service_id;not null;default:0;index" json:"service_id"`
-	DeploymentID uint      `gorm:"column:deployment_id;not null;default:0;index" json:"deployment_id"`
-	ReleaseID    uint      `gorm:"column:release_id;not null;default:0;index" json:"release_id"`
-	EventType    string    `gorm:"column:event_type;type:varchar(64);not null;index" json:"event_type"`
-	ActorID      uint      `gorm:"column:actor_id;not null;default:0;index" json:"actor_id"`
-	PayloadJSON  string    `gorm:"column:payload_json;type:longtext" json:"payload_json"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
+	ID               uint      `gorm:"primaryKey;column:id" json:"id"`
+	ServiceID        uint      `gorm:"column:service_id;not null;default:0;index" json:"service_id"`
+	DeploymentID     uint      `gorm:"column:deployment_id;not null;default:0;index" json:"deployment_id"`
+	ReleaseID        uint      `gorm:"column:release_id;not null;default:0;index" json:"release_id"`
+	EventType        string    `gorm:"column:event_type;type:varchar(64);not null;index" json:"event_type"`
+	ActorID          uint      `gorm:"column:actor_id;not null;default:0;index" json:"actor_id"`
+	CommandID        string    `gorm:"column:command_id;type:varchar(96);index" json:"command_id"`
+	Intent           string    `gorm:"column:intent;type:varchar(128);index" json:"intent"`
+	PlanHash         string    `gorm:"column:plan_hash;type:varchar(96);index" json:"plan_hash"`
+	TraceID          string    `gorm:"column:trace_id;type:varchar(96);index" json:"trace_id"`
+	ApprovalContext  string    `gorm:"column:approval_context;type:longtext" json:"approval_context"`
+	ExecutionSummary string    `gorm:"column:execution_summary;type:text" json:"execution_summary"`
+	PayloadJSON      string    `gorm:"column:payload_json;type:longtext" json:"payload_json"`
+	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
 }
 
 func (CICDAuditEvent) TableName() string { return "cicd_audit_events" }

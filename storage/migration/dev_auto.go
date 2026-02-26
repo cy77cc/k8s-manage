@@ -21,6 +21,7 @@ func RunDevAutoMigrate(db *gorm.DB) error {
 		&model.HostVirtualizationTask{},
 		&model.AIChatSession{},
 		&model.AIChatMessage{},
+		&model.AICommandExecution{},
 		&model.HostProbeSession{},
 		&model.Project{},
 		&model.Service{},

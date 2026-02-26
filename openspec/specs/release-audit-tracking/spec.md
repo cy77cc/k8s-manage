@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+Define immutable end-to-end release audit requirements for CI/CD operations, including approval, rollback, and AI-assisted command execution context.
 
+## Requirements
 ### Requirement: End-to-end release audit trail
 The system SHALL persist an immutable audit trail for CI/CD operations, including configuration changes, triggers, approvals, release execution, and rollback actions.
 

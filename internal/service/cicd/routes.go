@@ -27,5 +27,6 @@ func RegisterCICDHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.GET("/releases/:id/approvals", h.ListApprovals)
 
 		g.GET("/services/:service_id/timeline", h.ServiceTimeline)
+		g.GET("/audits", h.ListAuditEvents)
 	}
 }
