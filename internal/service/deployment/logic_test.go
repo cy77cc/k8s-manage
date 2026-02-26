@@ -50,6 +50,20 @@ func TestApplyReleaseProductionRequiresApproval(t *testing.T) {
 		t.Fatalf("create target: %v", err)
 	}
 	resp, err := logic.ApplyRelease(ctx, 7, ReleasePreviewReq{ServiceID: 201, TargetID: target.ID, Env: "production", Strategy: "rolling"})
+	if err == nil {
+		t.Fatalf("expected apply without preview token to fail")
+	}
+	preview, err := logic.PreviewRelease(ctx, ReleasePreviewReq{ServiceID: 201, TargetID: target.ID, Env: "production", Strategy: "rolling"})
+	if err != nil {
+		t.Fatalf("preview release: %v", err)
+	}
+	resp, err = logic.ApplyRelease(ctx, 7, ReleasePreviewReq{
+		ServiceID:    201,
+		TargetID:     target.ID,
+		Env:          "production",
+		Strategy:     "rolling",
+		PreviewToken: preview.PreviewToken,
+	})
 	if err != nil {
 		t.Fatalf("apply release: %v", err)
 	}
@@ -106,7 +120,17 @@ func TestApplyReleasePersistsFailureDiagnostics(t *testing.T) {
 	if err := logic.svcCtx.DB.WithContext(ctx).Delete(&model.Cluster{}, cluster.ID).Error; err != nil {
 		t.Fatalf("delete cluster: %v", err)
 	}
-	_, err = logic.ApplyRelease(ctx, 1, ReleasePreviewReq{ServiceID: 101, TargetID: target.ID, Env: "staging", Strategy: "rolling"})
+	preview, err := logic.PreviewRelease(ctx, ReleasePreviewReq{ServiceID: 101, TargetID: target.ID, Env: "staging", Strategy: "rolling"})
+	if err != nil {
+		t.Fatalf("preview release: %v", err)
+	}
+	_, err = logic.ApplyRelease(ctx, 1, ReleasePreviewReq{
+		ServiceID:    101,
+		TargetID:     target.ID,
+		Env:          "staging",
+		Strategy:     "rolling",
+		PreviewToken: preview.PreviewToken,
+	})
 	if err == nil {
 		t.Fatalf("expected apply release to fail")
 	}
@@ -122,5 +146,39 @@ func TestApplyReleasePersistsFailureDiagnostics(t *testing.T) {
 	}
 	if rows[0].DiagnosticsJSON == "" || rows[0].DiagnosticsJSON == "[]" {
 		t.Fatalf("expected diagnostics payload")
+	}
+}
+
+func TestApplyReleaseRejectsMismatchedPreviewToken(t *testing.T) {
+	logic := newDeploymentTestLogic(t)
+	ctx := context.Background()
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Node{ID: 3, Name: "n3", IP: "10.0.0.3", SSHUser: "root", Status: "active"}).Error; err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Service{ID: 301, Name: "svc-c", Env: "staging", YamlContent: "services:\n  app:\n    image: nginx:latest"}).Error; err != nil {
+		t.Fatalf("seed service: %v", err)
+	}
+	target, err := logic.CreateTarget(ctx, 1, TargetUpsertReq{
+		Name:       "compose-staging",
+		TargetType: "compose",
+		Env:        "staging",
+		Nodes:      []TargetNodeReq{{HostID: 3, Role: "manager", Weight: 100}},
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	preview, err := logic.PreviewRelease(ctx, ReleasePreviewReq{ServiceID: 301, TargetID: target.ID, Env: "staging", Strategy: "rolling"})
+	if err != nil {
+		t.Fatalf("preview release: %v", err)
+	}
+	_, err = logic.ApplyRelease(ctx, 1, ReleasePreviewReq{
+		ServiceID:    301,
+		TargetID:     target.ID,
+		Env:          "staging",
+		Strategy:     "canary",
+		PreviewToken: preview.PreviewToken,
+	})
+	if err == nil {
+		t.Fatalf("expected mismatched preview token to be rejected")
 	}
 }

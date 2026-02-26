@@ -77,6 +77,7 @@ const DeploymentPage: React.FC = () => {
   const [hosts, setHosts] = React.useState<Host[]>([]);
   const [services, setServices] = React.useState<ServiceItem[]>([]);
   const [previewManifest, setPreviewManifest] = React.useState('');
+  const [previewToken, setPreviewToken] = React.useState('');
   const [runtimeFilter, setRuntimeFilter] = React.useState<'k8s' | 'compose' | undefined>(undefined);
   const [selectedRelease, setSelectedRelease] = React.useState<DeployRelease | null>(null);
   const [previewWarnings, setPreviewWarnings] = React.useState<Array<{ code: string; message: string; level: string }>>([]);
@@ -174,11 +175,16 @@ const DeploymentPage: React.FC = () => {
       variables,
     });
     setPreviewManifest(resp.data.resolved_manifest || '');
+    setPreviewToken(resp.data.preview_token || '');
     setPreviewWarnings(resp.data.warnings || []);
   };
 
   const apply = async () => {
     const v = await releaseForm.validateFields();
+    if (!previewToken) {
+      message.warning('请先执行 Preview，再执行 Apply');
+      return;
+    }
     const variables = parseVariables(v.variables_json);
     const resp = await Api.deployment.applyRelease({
       service_id: Number(v.service_id),
@@ -186,12 +192,14 @@ const DeploymentPage: React.FC = () => {
       env: v.env || 'staging',
       strategy: v.strategy || 'rolling',
       variables,
+      preview_token: previewToken,
     });
     if (resp.data.approval_required) {
       message.warning(`release #${resp.data.release_id} 已进入审批，ticket: ${resp.data.approval_ticket || '-'}`);
     } else {
       message.success(`发布已执行，release #${resp.data.release_id}`);
     }
+    setPreviewToken('');
     await load();
   };
 

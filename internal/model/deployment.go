@@ -33,25 +33,28 @@ type DeploymentTargetNode struct {
 func (DeploymentTargetNode) TableName() string { return "deployment_target_nodes" }
 
 type DeploymentRelease struct {
-	ID                 uint      `gorm:"primaryKey;column:id" json:"id"`
-	ServiceID          uint      `gorm:"column:service_id;not null;index" json:"service_id"`
-	TargetID           uint      `gorm:"column:target_id;not null;index" json:"target_id"`
-	NamespaceOrProject string    `gorm:"column:namespace_or_project;type:varchar(128);default:''" json:"namespace_or_project"`
-	RuntimeType        string    `gorm:"column:runtime_type;type:varchar(16);not null;index" json:"runtime_type"` // k8s|compose
-	Strategy           string    `gorm:"column:strategy;type:varchar(16);default:'rolling'" json:"strategy"`
-	RevisionID         uint      `gorm:"column:revision_id;default:0;index" json:"revision_id"`
-	SourceReleaseID    uint      `gorm:"column:source_release_id;default:0;index" json:"source_release_id"`
-	TargetRevision     string    `gorm:"column:target_revision;type:varchar(128);default:''" json:"target_revision"`
-	Status             string    `gorm:"column:status;type:varchar(32);default:'pending_approval';index" json:"status"`
-	ManifestSnapshot   string    `gorm:"column:manifest_snapshot;type:longtext" json:"manifest_snapshot"`
-	RuntimeContextJSON string    `gorm:"column:runtime_context_json;type:longtext" json:"runtime_context_json"`
-	ChecksJSON         string    `gorm:"column:checks_json;type:longtext" json:"checks_json"`
-	WarningsJSON       string    `gorm:"column:warnings_json;type:longtext" json:"warnings_json"`
-	DiagnosticsJSON    string    `gorm:"column:diagnostics_json;type:longtext" json:"diagnostics_json"`
-	VerificationJSON   string    `gorm:"column:verification_json;type:longtext" json:"verification_json"`
-	Operator           uint      `gorm:"column:operator;default:0;index" json:"operator"`
-	CreatedAt          time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
-	UpdatedAt          time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID                 uint       `gorm:"primaryKey;column:id" json:"id"`
+	ServiceID          uint       `gorm:"column:service_id;not null;index" json:"service_id"`
+	TargetID           uint       `gorm:"column:target_id;not null;index" json:"target_id"`
+	NamespaceOrProject string     `gorm:"column:namespace_or_project;type:varchar(128);default:''" json:"namespace_or_project"`
+	RuntimeType        string     `gorm:"column:runtime_type;type:varchar(16);not null;index" json:"runtime_type"` // k8s|compose
+	Strategy           string     `gorm:"column:strategy;type:varchar(16);default:'rolling'" json:"strategy"`
+	RevisionID         uint       `gorm:"column:revision_id;default:0;index" json:"revision_id"`
+	SourceReleaseID    uint       `gorm:"column:source_release_id;default:0;index" json:"source_release_id"`
+	TargetRevision     string     `gorm:"column:target_revision;type:varchar(128);default:''" json:"target_revision"`
+	PreviewContextHash string     `gorm:"column:preview_context_hash;type:varchar(128);default:''" json:"preview_context_hash"`
+	PreviewTokenHash   string     `gorm:"column:preview_token_hash;type:varchar(128);default:''" json:"preview_token_hash"`
+	PreviewExpiresAt   *time.Time `gorm:"column:preview_expires_at" json:"preview_expires_at"`
+	Status             string     `gorm:"column:status;type:varchar(32);default:'pending_approval';index" json:"status"`
+	ManifestSnapshot   string     `gorm:"column:manifest_snapshot;type:longtext" json:"manifest_snapshot"`
+	RuntimeContextJSON string     `gorm:"column:runtime_context_json;type:longtext" json:"runtime_context_json"`
+	ChecksJSON         string     `gorm:"column:checks_json;type:longtext" json:"checks_json"`
+	WarningsJSON       string     `gorm:"column:warnings_json;type:longtext" json:"warnings_json"`
+	DiagnosticsJSON    string     `gorm:"column:diagnostics_json;type:longtext" json:"diagnostics_json"`
+	VerificationJSON   string     `gorm:"column:verification_json;type:longtext" json:"verification_json"`
+	Operator           uint       `gorm:"column:operator;default:0;index" json:"operator"`
+	CreatedAt          time.Time  `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (DeploymentRelease) TableName() string { return "deployment_releases" }
@@ -71,12 +74,14 @@ type DeploymentReleaseApproval struct {
 func (DeploymentReleaseApproval) TableName() string { return "deployment_release_approvals" }
 
 type DeploymentReleaseAudit struct {
-	ID         uint      `gorm:"primaryKey;column:id" json:"id"`
-	ReleaseID  uint      `gorm:"column:release_id;not null;index" json:"release_id"`
-	Action     string    `gorm:"column:action;type:varchar(64);not null;index" json:"action"`
-	Actor      uint      `gorm:"column:actor;default:0" json:"actor"`
-	DetailJSON string    `gorm:"column:detail_json;type:longtext" json:"detail_json"`
-	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
+	ID            uint      `gorm:"primaryKey;column:id" json:"id"`
+	ReleaseID     uint      `gorm:"column:release_id;not null;index" json:"release_id"`
+	CorrelationID string    `gorm:"column:correlation_id;type:varchar(96);index" json:"correlation_id"`
+	TraceID       string    `gorm:"column:trace_id;type:varchar(96);index" json:"trace_id"`
+	Action        string    `gorm:"column:action;type:varchar(64);not null;index" json:"action"`
+	Actor         uint      `gorm:"column:actor;default:0" json:"actor"`
+	DetailJSON    string    `gorm:"column:detail_json;type:longtext" json:"detail_json"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
 }
 
 func (DeploymentReleaseAudit) TableName() string { return "deployment_release_audits" }

@@ -114,7 +114,7 @@ export const deploymentApi = {
     env?: string;
     strategy?: string;
     variables?: Record<string, string>;
-  }): Promise<ApiResponse<{ resolved_manifest: string; checks: Array<{ code: string; message: string; level: string }>; warnings: Array<{ code: string; message: string; level: string }>; runtime: string }>> {
+  }): Promise<ApiResponse<{ resolved_manifest: string; checks: Array<{ code: string; message: string; level: string }>; warnings: Array<{ code: string; message: string; level: string }>; runtime: string; preview_token?: string; preview_expires_at?: string }>> {
     return apiService.post('/deploy/releases/preview', payload);
   },
   applyRelease(payload: {
@@ -123,7 +123,8 @@ export const deploymentApi = {
     env?: string;
     strategy?: string;
     variables?: Record<string, string>;
-  }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; approval_required?: boolean; approval_ticket?: string; lifecycle_state?: string }>> {
+    preview_token?: string;
+  }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; approval_required?: boolean; approval_ticket?: string; lifecycle_state?: string; reason_code?: string }>> {
     return apiService.post('/deploy/releases/apply', payload);
   },
   approveRelease(id: number, payload?: { comment?: string }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; lifecycle_state?: string }>> {

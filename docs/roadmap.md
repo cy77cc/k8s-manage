@@ -40,7 +40,7 @@
 | Hosts | In Progress | CRUD + action + ssh exec + batch + onboarding token flow + cloud/kvm/credentials mvp |
 | Clusters / K8s | In Progress | Phase-1新增 namespaces/bindings、rollouts(argo)、hpa、quota/limit-range、prod审批门禁 |
 | Services | In Progress | Service Studio(双栏) + template vars(`{{var}}`) + revisions + env variable sets + deploy target + release records + k8s deploy preview/apply |
-| Deployment Management | In Progress | 统一 Deploy Target(`k8s|compose`) + releases preview/apply/rollback + governance + aiops inspections |
+| Deployment Management | In Progress | 蓝图化重构：统一能力域(Target/Release/Governance/Observability/AI Bridge) + 全局审批收件箱 + preview-first 发布契约（后端 `preview_token` 强校验、release timeline 关联ID、lifecycle_state 响应统一）+ 环境部署(SSH+binary) + 可选 LVS/VIP 引导 |
 | RBAC | In Progress | admin 全量放行（含 `*:*`）+ users/roles/permissions 列表统一 `data.list/total` + 关联写入事务化 |
 | AI | In Progress | Eino + Ollama(`glm-5:cloud`) + 控制面（capabilities/tools/approvals/executions）+ SSE tool events + typed tool schema hardening + param resolver/retry |
 
@@ -53,6 +53,8 @@
 | K8s | `/api/v1/clusters/*` | In Progress (Phase-1 lifecycle + namespace isolation + rollout/hpa/quota 已落地) |
 | Services | `/api/v1/services/*` | In Progress |
 | Deployment Management | `/api/v1/deploy/*` + `/api/v1/aiops/*` | In Progress |
+| Environment Provisioning (Planned) | `/api/v1/environments/*` | Planned |
+| Global Approval Inbox (Planned) | `/api/v1/approvals/inbox*` | Planned |
 | Settings-RBAC | `/api/v1/rbac/*` | In Progress |
 | Global AI Assistant | `/api/v1/ai/*` | In Progress |
 | Node legacy adapter | `/api/v1/node/add` | In Progress (deprecated, delegating to host domain) |
@@ -70,3 +72,6 @@
 - AI tool calling 参数治理：`runtime context > session memory > safety defaults`，缺参仅重试一次。
 - 服务管理采用双配置模式：`standard`（模板）与 `custom`（YAML 编辑）。
 - 服务权限颗粒度固定：`service:read|write|deploy|approve`，`production` 发布需 `service:approve`。
+- 部署入口体验策略：默认面向项目组用户，统一 `preview -> confirm -> apply`，审批集中到全局收件箱。
+- 集群接入模型采用双模式：`platform_managed`（平台创建并保存访问材料）与 `external_managed`（kubeconfig/cert 导入）。
+- 环境部署支持 `k8s|compose` 的 SSH + binary/offline 物料模式，`LVS+VIP` 作为可选后置引导能力。

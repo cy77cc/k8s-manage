@@ -149,6 +149,10 @@ func (h *Handler) ApplyRelease(c *gin.Context) {
 	uid, _ := c.Get("uid")
 	resp, err := h.logic.ApplyRelease(c.Request.Context(), toUint(uid), req)
 	if err != nil {
+		if strings.TrimSpace(resp.ReasonCode) != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error(), "data": gin.H{"reason_code": resp.ReasonCode}})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
 		return
 	}
@@ -243,7 +247,11 @@ func (h *Handler) ListReleases(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"list": rows, "total": len(rows)}})
+	list := make([]ReleaseSummaryResp, 0, len(rows))
+	for i := range rows {
+		list = append(list, h.toReleaseSummary(rows[i]))
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"list": list, "total": len(list)}})
 }
 
 func (h *Handler) GetRelease(c *gin.Context) {
@@ -255,7 +263,7 @@ func (h *Handler) GetRelease(c *gin.Context) {
 	if !h.authorize(c, "deploy:release:read") || !h.authorizeRuntime(c, row.RuntimeType, "read") {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": row})
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": h.toReleaseSummary(*row)})
 }
 
 func (h *Handler) GetGovernance(c *gin.Context) {
@@ -392,6 +400,27 @@ func (h *Handler) isAdmin(c *gin.Context) bool {
 		return true
 	}
 	return false
+}
+
+func (h *Handler) toReleaseSummary(row model.DeploymentRelease) ReleaseSummaryResp {
+	return ReleaseSummaryResp{
+		ID:                 row.ID,
+		ServiceID:          row.ServiceID,
+		TargetID:           row.TargetID,
+		NamespaceOrProject: row.NamespaceOrProject,
+		RuntimeType:        row.RuntimeType,
+		Strategy:           row.Strategy,
+		RevisionID:         row.RevisionID,
+		SourceReleaseID:    row.SourceReleaseID,
+		TargetRevision:     row.TargetRevision,
+		Status:             row.Status,
+		LifecycleState:     h.logic.releaseLifecycleState(row.Status),
+		DiagnosticsJSON:    row.DiagnosticsJSON,
+		VerificationJSON:   row.VerificationJSON,
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
+		PreviewExpiresAt:   row.PreviewExpiresAt,
+	}
 }
 
 func toUint(v any) uint64 {

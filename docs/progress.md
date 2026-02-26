@@ -1,5 +1,36 @@
 # Development Progress Log
 
+## 2026-02-26 (Deployment Blueprint Implementation - Apply Round 1)
+
+### Scope
+
+- 落地部署蓝图实现第一批任务：`preview -> apply` 后端强约束、release 查询契约统一、timeline 关联字段与前端参数对齐。
+
+### Completed
+
+- Deployment 数据与审计结构补充：
+  - 新增迁移 `20260226_000015_deployment_preview_and_timeline_correlation.sql`。
+  - `deployment_releases` 增加 `preview_context_hash` / `preview_token_hash` / `preview_expires_at`。
+  - `deployment_release_audits` 增加 `correlation_id` / `trace_id` 与索引。
+- 后端发布流程增强：
+  - `PreviewRelease` 返回 `preview_token` + `preview_expires_at`。
+  - `ApplyRelease` 强制校验 token（签名、TTL、上下文哈希、参数一致性），并返回 `reason_code`（如 `preview_required`/`preview_expired`/`preview_mismatch`）。
+  - `releaseLifecycleState` 明确覆盖 `pending_approval/applying/failed/rejected/rollback`。
+- 查询契约与时间线响应增强：
+  - release list/detail 响应统一补齐 `lifecycle_state`。
+  - timeline 响应补充 `correlation_id`/`trace_id`。
+- 前端对齐：
+  - `web/src/api/modules/deployment.ts` 增加 `preview_token`/`reason_code` 契约。
+  - `DeploymentPage` 强制 “先 Preview 再 Apply”，并在 Apply 携带 `preview_token`。
+- 测试回归：
+  - `internal/service/deployment` 单测更新为先 preview 再 apply。
+  - 新增 token 失配拒绝测试。
+
+### Verification
+
+- `go test ./internal/service/deployment -count=1` 通过。
+- `npm --prefix web run test -- DeploymentPage` 通过。
+
 ## 2026-02-24
 
 ### Scope
@@ -392,6 +423,41 @@
 
 - `go test ./internal/service/deployment -count=1` 通过。
 - `cd web && npm run test:run -- src/pages/Deployment/DeploymentPage.test.tsx` 通过。
+
+## 2026-02-26 (Deployment Management Blueprint Redesign)
+
+### Scope
+
+- 形成部署管理蓝图化能力定义，统一 Target/Release/Governance/Observability/AI Bridge。
+- 补齐 `preview-first` 契约、全局审批收件箱、三端一致时间线语义。
+- 规划环境部署能力（`k8s|compose`，SSH + binary/offline）与可选 `LVS+VIP` 引导能力。
+
+### Completed
+
+- Blueprint 文档输出：
+  - `docs/product/deployment-management-blueprint.md`
+  - 能力域地图、跨运行时抽象契约、入口体验策略、审批矩阵、事件分类、环境部署与集群接入模型。
+- 实施计划输出：
+  - `docs/fullstack/deployment-management-blueprint-implementation-plan.md`
+  - 细化 backend/frontend/domain 迁移顺序、兼容映射与交付检查点。
+- 回归清单输出：
+  - `docs/qa/deployment-management-blueprint-regression.md`
+  - 覆盖 OpenSpec 校验、API 契约、UI 状态、审批路径、环境部署与异常注入。
+- OpenSpec change（`redesign-deployment-management-blueprint`）任务清单 16/16 完成并同步。
+
+### Key Decisions
+
+- 发布动作统一执行 `preview -> confirm -> apply`，禁止绕过预览。
+- 审批入口统一到 AI/全局审批收件箱，不按页面来源拆分。
+- 默认入口面向项目组普通用户，平台级高级能力按需下沉。
+- 集群接入采用 `platform_managed` 与 `external_managed` 双模式。
+- `LVS+VIP` 作为可选网络入口能力，推荐单 VIP + keepalived/ipvsadm + 6443 健康检查 + 3 次重试。
+
+### Next Actions
+
+1. 按实施计划新增 `environments/*` 与 `approvals/inbox*` 后端 API 与数据模型。
+2. 落地 script bundle 校验与 SSH hook 执行框架（含 checksum/signature）。
+3. 完成 Deployment/AI/Inbox 三端联动实现与回归自动化用例。
 
 ## 2026-02-24 (Team: Host Platform Expansion - SSH/Credentials/Cloud/KVM)
 
