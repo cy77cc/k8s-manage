@@ -25,8 +25,8 @@ const MonitorPage: React.FC = () => {
       ]);
       setAlerts(alertRes.data.list || []);
       setRules(ruleRes.data.list || []);
-      setCpuMetrics(cpuRes.data || []);
-      setMemMetrics(memRes.data || []);
+      setCpuMetrics(cpuRes.data?.series || []);
+      setMemMetrics(memRes.data?.series || []);
     } finally {
       setLoading(false);
     }
@@ -115,4 +115,3 @@ const MonitorPage: React.FC = () => {
 };
 
 export default MonitorPage;
-
