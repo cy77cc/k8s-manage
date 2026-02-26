@@ -23,7 +23,7 @@ func (s *memoryStore) appendMessage(userID uint64, scene, sessionID string, mess
 	}
 
 	if !s.dbEnabled() {
-		return &aiSession{ID: sid, Scene: scene, Title: "AI Session", Messages: []map[string]any{message}, CreatedAt: now, UpdatedAt: now}, nil
+		return &aiSession{ID: sid, Scene: scene, Title: defaultAISessionTitle, Messages: []map[string]any{message}, CreatedAt: now, UpdatedAt: now}, nil
 	}
 
 	var sess model.AIChatSession
@@ -45,7 +45,7 @@ func (s *memoryStore) appendMessage(userID uint64, scene, sessionID string, mess
 		if exists > 0 {
 			return nil, errors.New("session not found")
 		}
-		sess = model.AIChatSession{ID: sid, UserID: userID, Scene: scene, Title: "AI Session", CreatedAt: now, UpdatedAt: now}
+		sess = model.AIChatSession{ID: sid, UserID: userID, Scene: scene, Title: defaultAISessionTitle, CreatedAt: now, UpdatedAt: now}
 		if createErr := s.db.Create(&sess).Error; createErr != nil {
 			return nil, createErr
 		}
@@ -156,6 +156,33 @@ func (s *memoryStore) deleteSession(userID uint64, id string) {
 		}
 		return tx.Where("id = ? AND user_id = ?", sess.ID, userID).Delete(&model.AIChatSession{}).Error
 	})
+}
+
+func (s *memoryStore) updateSessionTitle(userID uint64, id, title string) (*aiSession, error) {
+	if !s.dbEnabled() {
+		return nil, errors.New("db unavailable")
+	}
+	sid := strings.TrimSpace(id)
+	if sid == "" {
+		return nil, errors.New("session id is required")
+	}
+	nextTitle := normalizeSessionTitle(title)
+	if nextTitle == "" {
+		return nil, errors.New("title is required")
+	}
+	var sess model.AIChatSession
+	if err := s.db.Where("id = ? AND user_id = ?", sid, userID).First(&sess).Error; err != nil {
+		return nil, err
+	}
+	sess.Title = nextTitle
+	if err := s.db.Save(&sess).Error; err != nil {
+		return nil, err
+	}
+	loaded := s.mustLoadSession(userID, sid)
+	if loaded == nil {
+		return nil, errors.New("session not found")
+	}
+	return loaded, nil
 }
 
 func (s *memoryStore) mustLoadSession(userID uint64, id string) *aiSession {

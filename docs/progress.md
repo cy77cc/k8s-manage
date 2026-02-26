@@ -359,6 +359,40 @@
 2. 在服务详情页增加 deployment target 直接选择器与治理策略快捷入口。
 3. 增加 deploy/governance/aiops 端到端回归用例（含权限与审批路径）。
 
+## 2026-02-26 (Deployment Management Lifecycle & Approval)
+
+### Scope
+
+- 对齐 Deployment Release 生命周期到 `preview -> approved -> applied -> rollback`。
+- 为生产环境发布补齐审批门禁、审批记录与审计时间线。
+- 在部署页面补齐审批动作入口与 release timeline 展示。
+
+### Completed
+
+- 后端发布状态机升级（`internal/service/deployment/logic.go`）：
+  - 新增 `previewed/applying/applied/rollback` 状态。
+  - `ApplyRelease` 在 production 环境进入 `pending_approval`，并创建审批记录。
+  - 新增 `ApproveRelease` / `RejectRelease`，审批通过后继续执行发布。
+  - `RollbackRelease` 输出 lifecycle `rollback`。
+- 审批与审计持久化：
+  - 新增模型：`deployment_release_approvals`、`deployment_release_audits`。
+  - `storage/migration/dev_auto.go` 纳入自动迁移。
+  - 发布链路写入 `release.previewed/pending_approval/approved/applying/applied/failed/rollback_*` 审计事件。
+- API 扩展：
+  - `POST /api/v1/deploy/releases/:id/approve`
+  - `POST /api/v1/deploy/releases/:id/reject`
+  - `GET /api/v1/deploy/releases/:id/timeline`
+  - `apply` 返回增加 `approval_required/approval_ticket/lifecycle_state`。
+- 前端部署页增强（`web/src/pages/Deployment/DeploymentPage.tsx`）：
+  - release 列表在 `pending_approval` 状态显示 `Approve/Reject` 操作。
+  - 详情弹窗增加 timeline 视图，显示审批与执行事件。
+  - 状态色彩映射支持 `applied/rollback/rejected`。
+
+### Verification
+
+- `go test ./internal/service/deployment -count=1` 通过。
+- `cd web && npm run test:run -- src/pages/Deployment/DeploymentPage.test.tsx` 通过。
+
 ## 2026-02-24 (Team: Host Platform Expansion - SSH/Credentials/Cloud/KVM)
 
 ### Team

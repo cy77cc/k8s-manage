@@ -305,6 +305,14 @@ func (h *handler) chat(c *gin.Context) {
 		emitFinal("error", gin.H{"message": err.Error()})
 		return
 	}
+	if strings.TrimSpace(session.Title) == "" || strings.EqualFold(strings.TrimSpace(session.Title), defaultAISessionTitle) {
+		firstUserContent := firstUserMessageContent(session.Messages)
+		if firstUserContent != "" {
+			if renamed, renameErr := h.store.updateSessionTitle(uid, sid, inferSessionTitle(firstUserContent)); renameErr == nil && renamed != nil {
+				session = renamed
+			}
+		}
+	}
 	turnSuggestions := h.refreshSuggestions(uid, scene, content)
 	streamState := resolveStreamState(fatalErr, summary)
 	if fatalErr != nil {
@@ -321,6 +329,19 @@ func (h *handler) chat(c *gin.Context) {
 		"tool_summary":         summary,
 		"turn_recommendations": recommendationPayload(turnSuggestions),
 	})
+}
+
+func firstUserMessageContent(messages []map[string]any) string {
+	for _, msg := range messages {
+		if strings.TrimSpace(toString(msg["role"])) != "user" {
+			continue
+		}
+		content := strings.TrimSpace(toString(msg["content"]))
+		if content != "" {
+			return content
+		}
+	}
+	return ""
 }
 
 func recommendationPayload(items []recommendationRecord) []gin.H {

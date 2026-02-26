@@ -56,6 +56,31 @@ type DeploymentRelease struct {
 
 func (DeploymentRelease) TableName() string { return "deployment_releases" }
 
+type DeploymentReleaseApproval struct {
+	ID          uint      `gorm:"primaryKey;column:id" json:"id"`
+	ReleaseID   uint      `gorm:"column:release_id;not null;index" json:"release_id"`
+	Ticket      string    `gorm:"column:ticket;type:varchar(96);not null;uniqueIndex" json:"ticket"`
+	Decision    string    `gorm:"column:decision;type:varchar(32);not null;default:'pending';index" json:"decision"` // pending|approved|rejected
+	Comment     string    `gorm:"column:comment;type:varchar(1024);default:''" json:"comment"`
+	RequestedBy uint      `gorm:"column:requested_by;default:0" json:"requested_by"`
+	ApproverID  uint      `gorm:"column:approver_id;default:0" json:"approver_id"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (DeploymentReleaseApproval) TableName() string { return "deployment_release_approvals" }
+
+type DeploymentReleaseAudit struct {
+	ID         uint      `gorm:"primaryKey;column:id" json:"id"`
+	ReleaseID  uint      `gorm:"column:release_id;not null;index" json:"release_id"`
+	Action     string    `gorm:"column:action;type:varchar(64);not null;index" json:"action"`
+	Actor      uint      `gorm:"column:actor;default:0" json:"actor"`
+	DetailJSON string    `gorm:"column:detail_json;type:longtext" json:"detail_json"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
+}
+
+func (DeploymentReleaseAudit) TableName() string { return "deployment_release_audits" }
+
 type ServiceGovernancePolicy struct {
 	ID                   uint      `gorm:"primaryKey;column:id" json:"id"`
 	ServiceID            uint      `gorm:"column:service_id;not null;index:idx_service_env_governance,priority:1" json:"service_id"`

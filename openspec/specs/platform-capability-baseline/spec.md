@@ -1,7 +1,7 @@
 # platform-capability-baseline Specification
 
 ## Purpose
-TBD - created by archiving change migrate-docs-to-openspec-baseline. Update Purpose after archive.
+Maintain a stable baseline of `/api/v1` platform capabilities and link it to a per-domain delivery status snapshot.
 ## Requirements
 ### Requirement: API V1 Domain Surface SHALL Be Baseline Documented
 The platform SHALL maintain a baseline capability specification for the `/api/v1` domains currently wired by the backend service, including user/auth, host, cluster, service, deployment, RBAC, AI, AIOPS, monitoring, project, and node compatibility routes.
@@ -31,3 +31,9 @@ The baseline SHALL record capability status using at least `Done` and `In Progre
 - **WHEN** a snapshot is synchronized into OpenSpec
 - **THEN** each major platform domain SHALL include a status marker and evidence reference
 
+### Requirement: Baseline SHALL Link Domain Status Matrix Snapshot
+The baseline specification SHALL reference the latest per-domain status matrix snapshot so reviewers can trace baseline capability statements to operational status evidence.
+
+#### Scenario: Baseline links status matrix
+- **WHEN** maintainers review baseline capability coverage
+- **THEN** they SHALL find the linked snapshot at `docs/platform-status-matrix.md` created from change `migrate-docs-to-openspec-baseline`

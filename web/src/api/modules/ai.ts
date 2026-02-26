@@ -420,6 +420,11 @@ export const aiApi = {
     return apiService.delete(`/ai/sessions/${id}`);
   },
 
+  // 重命名对话会话
+  async updateSessionTitle(id: string, title: string): Promise<ApiResponse<AISession>> {
+    return apiService.patch(`/ai/sessions/${id}`, { title });
+  },
+
   // AI分析
   async analyze(params: AIAnalysisParams): Promise<ApiResponse<AIAnalysis>> {
     return apiService.post('/ai/analyze', params);

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func (h *handler) listSessions(c *gin.Context) {
@@ -58,6 +60,36 @@ func (h *handler) deleteSession(c *gin.Context) {
 	}
 	h.store.deleteSession(uid, c.Param("id"))
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+}
+
+func (h *handler) updateSessionTitle(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": gin.H{"message": "unauthorized"}})
+		return
+	}
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	title := normalizeSessionTitle(req.Title)
+	if title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": "title is required"}})
+		return
+	}
+	session, err := h.store.updateSessionTitle(uid, c.Param("id"), title)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": gin.H{"message": "session not found"}})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": session})
 }
 
 func (h *handler) analyze(c *gin.Context) {

@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -14,6 +15,24 @@ import (
 
 type Logic struct {
 	svcCtx *svc.ServiceContext
+}
+
+type MetricQuery struct {
+	Metric         string
+	Start          time.Time
+	End            time.Time
+	GranularitySec int
+	Source         string
+}
+
+type MetricQueryResult struct {
+	Window struct {
+		Start          time.Time `json:"start"`
+		End            time.Time `json:"end"`
+		GranularitySec int       `json:"granularity_sec"`
+	} `json:"window"`
+	Dimensions map[string]any   `json:"dimensions"`
+	Series     []map[string]any `json:"series"`
 }
 
 var collectorOnce sync.Once
@@ -52,7 +71,7 @@ func (l *Logic) ListAlerts(ctx context.Context, severity, status string, page, p
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []model.AlertEvent
+	rows := make([]model.AlertEvent, 0, pageSize)
 	offset := (page - 1) * pageSize
 	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
 		return nil, 0, err
@@ -64,12 +83,15 @@ func (l *Logic) ListRules(ctx context.Context, page, pageSize int) ([]model.Aler
 	if err := l.ensureDefaultRules(ctx); err != nil {
 		return nil, 0, err
 	}
+	if err := l.ensureDefaultChannels(ctx); err != nil {
+		return nil, 0, err
+	}
 	q := l.svcCtx.DB.WithContext(ctx).Model(&model.AlertRule{})
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []model.AlertRule
+	rows := make([]model.AlertRule, 0, pageSize)
 	offset := (page - 1) * pageSize
 	if err := q.Order("id ASC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
 		return nil, 0, err
@@ -78,6 +100,13 @@ func (l *Logic) ListRules(ctx context.Context, page, pageSize int) ([]model.Aler
 }
 
 func (l *Logic) CreateRule(ctx context.Context, rule model.AlertRule) (*model.AlertRule, error) {
+	rule.State = boolToRuleState(rule.Enabled)
+	if rule.WindowSec <= 0 {
+		rule.WindowSec = 3600
+	}
+	if rule.GranularitySec <= 0 {
+		rule.GranularitySec = 60
+	}
 	if err := l.svcCtx.DB.WithContext(ctx).Create(&rule).Error; err != nil {
 		return nil, err
 	}
@@ -87,6 +116,11 @@ func (l *Logic) CreateRule(ctx context.Context, rule model.AlertRule) (*model.Al
 func (l *Logic) UpdateRule(ctx context.Context, id uint, payload map[string]any) (*model.AlertRule, error) {
 	if len(payload) == 0 {
 		return nil, fmt.Errorf("empty update payload")
+	}
+	if v, ok := payload["enabled"]; ok {
+		if b, ok := v.(bool); ok {
+			payload["state"] = boolToRuleState(b)
+		}
 	}
 	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.AlertRule{}).Where("id = ?", id).Updates(payload).Error; err != nil {
 		return nil, err
@@ -98,27 +132,147 @@ func (l *Logic) UpdateRule(ctx context.Context, id uint, payload map[string]any)
 	return &row, nil
 }
 
-func (l *Logic) GetMetrics(ctx context.Context, metric string, start, end time.Time) ([]map[string]any, error) {
-	var rows []model.MetricPoint
-	if err := l.svcCtx.DB.WithContext(ctx).
-		Where("metric = ? AND collected_at >= ? AND collected_at <= ?", metric, start, end).
-		Order("collected_at ASC").
-		Limit(2000).
-		Find(&rows).Error; err != nil {
+func (l *Logic) SetRuleEnabled(ctx context.Context, id uint, enabled bool) (*model.AlertRule, error) {
+	payload := map[string]any{
+		"enabled": enabled,
+		"state":   boolToRuleState(enabled),
+	}
+	return l.UpdateRule(ctx, id, payload)
+}
+
+func (l *Logic) ListRuleEvaluations(ctx context.Context, ruleID uint, page, pageSize int) ([]model.AlertRuleEvaluation, int64, error) {
+	q := l.svcCtx.DB.WithContext(ctx).Model(&model.AlertRuleEvaluation{}).Where("rule_id = ?", ruleID)
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	rows := make([]model.AlertRuleEvaluation, 0, pageSize)
+	offset := (page - 1) * pageSize
+	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
+func (l *Logic) GetMetrics(ctx context.Context, query MetricQuery) (*MetricQueryResult, error) {
+	if query.Metric == "" {
+		return nil, fmt.Errorf("metric is required")
+	}
+	if query.GranularitySec <= 0 {
+		query.GranularitySec = 60
+	}
+	q := l.svcCtx.DB.WithContext(ctx).
+		Where("metric = ? AND collected_at >= ? AND collected_at <= ?", query.Metric, query.Start, query.End)
+	if strings.TrimSpace(query.Source) != "" {
+		q = q.Where("source = ?", strings.TrimSpace(query.Source))
+	}
+	rows := make([]model.MetricPoint, 0, 2000)
+	if err := q.Order("collected_at ASC").Limit(2000).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make([]map[string]any, 0, len(rows))
+	out := &MetricQueryResult{
+		Dimensions: map[string]any{
+			"metric": query.Metric,
+			"source": strings.TrimSpace(query.Source),
+		},
+		Series: make([]map[string]any, 0, len(rows)),
+	}
+	out.Window.Start = query.Start
+	out.Window.End = query.End
+	out.Window.GranularitySec = query.GranularitySec
 	for _, row := range rows {
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"timestamp": row.Collected,
 			"value":     row.Value,
-		})
+			"source":    row.Source,
+		}
+		if strings.TrimSpace(row.DimensionsJSON) != "" {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(row.DimensionsJSON), &m); err == nil {
+				item["dimensions"] = m
+			}
+		}
+		out.Series = append(out.Series, item)
 	}
 	return out, nil
 }
 
+func (l *Logic) ListChannels(ctx context.Context) ([]model.AlertNotificationChannel, error) {
+	if err := l.ensureDefaultChannels(ctx); err != nil {
+		return nil, err
+	}
+	rows := make([]model.AlertNotificationChannel, 0, 16)
+	err := l.svcCtx.DB.WithContext(ctx).Order("id ASC").Find(&rows).Error
+	return rows, err
+}
+
+func (l *Logic) CreateChannel(ctx context.Context, channel model.AlertNotificationChannel) (*model.AlertNotificationChannel, error) {
+	channel.Type = strings.ToLower(strings.TrimSpace(channel.Type))
+	if channel.Type == "" {
+		channel.Type = "log"
+	}
+	if strings.TrimSpace(channel.Name) == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if _, err := buildNotifier(channel.Type); err != nil {
+		return nil, err
+	}
+	if err := l.svcCtx.DB.WithContext(ctx).Create(&channel).Error; err != nil {
+		return nil, err
+	}
+	return &channel, nil
+}
+
+func (l *Logic) UpdateChannel(ctx context.Context, id uint, payload map[string]any) (*model.AlertNotificationChannel, error) {
+	if len(payload) == 0 {
+		return nil, fmt.Errorf("empty update payload")
+	}
+	if v, ok := payload["type"]; ok {
+		if s, ok := v.(string); ok {
+			if _, err := buildNotifier(strings.ToLower(strings.TrimSpace(s))); err != nil {
+				return nil, err
+			}
+			payload["type"] = strings.ToLower(strings.TrimSpace(s))
+		}
+	}
+	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.AlertNotificationChannel{}).Where("id = ?", id).Updates(payload).Error; err != nil {
+		return nil, err
+	}
+	var row model.AlertNotificationChannel
+	if err := l.svcCtx.DB.WithContext(ctx).First(&row, id).Error; err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (l *Logic) ListDeliveries(ctx context.Context, alertID uint, channelType, status string, page, pageSize int) ([]model.AlertNotificationDelivery, int64, error) {
+	q := l.svcCtx.DB.WithContext(ctx).Model(&model.AlertNotificationDelivery{})
+	if alertID > 0 {
+		q = q.Where("alert_id = ?", alertID)
+	}
+	if strings.TrimSpace(channelType) != "" {
+		q = q.Where("channel_type = ?", strings.TrimSpace(channelType))
+	}
+	if strings.TrimSpace(status) != "" {
+		q = q.Where("status = ?", strings.TrimSpace(status))
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	rows := make([]model.AlertNotificationDelivery, 0, pageSize)
+	offset := (page - 1) * pageSize
+	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
 func (l *Logic) collectSnapshot(ctx context.Context) error {
 	if err := l.ensureDefaultRules(ctx); err != nil {
+		return err
+	}
+	if err := l.ensureDefaultChannels(ctx); err != nil {
 		return err
 	}
 	now := time.Now()
@@ -162,18 +316,19 @@ func (l *Logic) collectSnapshot(ctx context.Context) error {
 	deployFail := float64(failedDeploy + failedServiceRelease)
 
 	points := []model.MetricPoint{
-		{Metric: "cpu_usage", Source: "host", Value: cpuUsage, Collected: now},
-		{Metric: "memory_usage", Source: "host", Value: memUsage, Collected: now},
-		{Metric: "disk_usage", Source: "host", Value: diskUsage, Collected: now},
-		{Metric: "k8s_node_not_ready", Source: "k8s", Value: k8sNotReady, Collected: now},
-		{Metric: "pod_crashloop_count", Source: "k8s", Value: podCrashLoop, Collected: now},
-		{Metric: "deploy_failed_count", Source: "deploy", Value: deployFail, Collected: now},
-		{Metric: "hosts_total", Source: "host", Value: float64(totalHosts), Collected: now},
-		{Metric: "hosts_offline", Source: "host", Value: float64(offlineHosts), Collected: now},
-		{Metric: "clusters_total", Source: "k8s", Value: float64(totalClusters), Collected: now},
+		{Metric: "cpu_usage", Source: "host", DimensionsJSON: `{"scope":"global","kind":"host"}`, Value: cpuUsage, Collected: now},
+		{Metric: "memory_usage", Source: "host", DimensionsJSON: `{"scope":"global","kind":"host"}`, Value: memUsage, Collected: now},
+		{Metric: "disk_usage", Source: "host", DimensionsJSON: `{"scope":"global","kind":"host"}`, Value: diskUsage, Collected: now},
+		{Metric: "k8s_node_not_ready", Source: "k8s", DimensionsJSON: `{"scope":"global","kind":"cluster"}`, Value: k8sNotReady, Collected: now},
+		{Metric: "pod_crashloop_count", Source: "k8s", DimensionsJSON: `{"scope":"global","kind":"workload"}`, Value: podCrashLoop, Collected: now},
+		{Metric: "deploy_failed_count", Source: "deploy", DimensionsJSON: `{"scope":"global","kind":"release"}`, Value: deployFail, Collected: now},
+		{Metric: "hosts_total", Source: "host", DimensionsJSON: `{"scope":"global","kind":"host"}`, Value: float64(totalHosts), Collected: now},
+		{Metric: "hosts_offline", Source: "host", DimensionsJSON: `{"scope":"global","kind":"host"}`, Value: float64(offlineHosts), Collected: now},
+		{Metric: "clusters_total", Source: "k8s", DimensionsJSON: `{"scope":"global","kind":"cluster"}`, Value: float64(totalClusters), Collected: now},
 	}
 	for _, p := range points {
-		if err := l.svcCtx.DB.WithContext(ctx).Create(&p).Error; err != nil {
+		item := p
+		if err := l.svcCtx.DB.WithContext(ctx).Create(&item).Error; err != nil {
 			return err
 		}
 	}
@@ -194,7 +349,7 @@ func (l *Logic) collectSnapshot(ctx context.Context) error {
 }
 
 func (l *Logic) evaluateRules(ctx context.Context, values map[string]float64) error {
-	var rules []model.AlertRule
+	rules := make([]model.AlertRule, 0, 32)
 	if err := l.svcCtx.DB.WithContext(ctx).Where("enabled = 1").Find(&rules).Error; err != nil {
 		return err
 	}
@@ -206,15 +361,36 @@ func (l *Logic) evaluateRules(ctx context.Context, values map[string]float64) er
 		}
 		triggered := compareValue(val, rule.Operator, rule.Threshold)
 		source := fmt.Sprintf("%s/%s", rule.Source, rule.Metric)
+
+		prevState := "normal"
+		var firing model.AlertEvent
+		err := l.svcCtx.DB.WithContext(ctx).
+			Where("rule_id = ? AND source = ? AND status = ?", rule.ID, source, "firing").
+			Order("id DESC").
+			First(&firing).Error
+		if err == nil {
+			prevState = "firing"
+		}
+		nextState := "normal"
 		if triggered {
-			var existed model.AlertEvent
-			err := l.svcCtx.DB.WithContext(ctx).
-				Where("rule_id = ? AND source = ? AND status = ?", rule.ID, source, "firing").
-				Order("id DESC").
-				First(&existed).Error
-			if err == nil {
-				continue
-			}
+			nextState = "firing"
+		}
+		eval := model.AlertRuleEvaluation{
+			RuleID:      rule.ID,
+			Metric:      rule.Metric,
+			Operator:    rule.Operator,
+			Value:       val,
+			Threshold:   rule.Threshold,
+			Triggered:   triggered,
+			PrevState:   prevState,
+			NextState:   nextState,
+			EvaluatedAt: now,
+		}
+		if err := l.svcCtx.DB.WithContext(ctx).Create(&eval).Error; err != nil {
+			return err
+		}
+
+		if triggered && prevState != "firing" {
 			event := model.AlertEvent{
 				RuleID:      rule.ID,
 				Title:       rule.Name,
@@ -230,16 +406,73 @@ func (l *Logic) evaluateRules(ctx context.Context, values map[string]float64) er
 			if err := l.svcCtx.DB.WithContext(ctx).Create(&event).Error; err != nil {
 				return err
 			}
+			if err := l.deliverAlert(ctx, event); err != nil {
+				return err
+			}
 			continue
 		}
-		if err := l.svcCtx.DB.WithContext(ctx).
-			Model(&model.AlertEvent{}).
-			Where("rule_id = ? AND source = ? AND status = ?", rule.ID, source, "firing").
-			Updates(map[string]any{"status": "resolved", "resolved_at": now}).Error; err != nil {
+
+		if !triggered && prevState == "firing" {
+			if err := l.svcCtx.DB.WithContext(ctx).
+				Model(&model.AlertEvent{}).
+				Where("id = ?", firing.ID).
+				Updates(map[string]any{"status": "resolved", "resolved_at": now}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (l *Logic) deliverAlert(ctx context.Context, alert model.AlertEvent) error {
+	channels := make([]model.AlertNotificationChannel, 0, 8)
+	if err := l.svcCtx.DB.WithContext(ctx).Where("enabled = 1").Find(&channels).Error; err != nil {
+		return err
+	}
+	payload := NotificationPayload{
+		AlertID:   alert.ID,
+		RuleID:    alert.RuleID,
+		Title:     alert.Title,
+		Message:   alert.Message,
+		Severity:  alert.Severity,
+		Metric:    alert.Metric,
+		Value:     alert.Value,
+		Threshold: alert.Threshold,
+	}
+	for _, ch := range channels {
+		notifier, err := buildNotifier(ch.Type)
+		if err != nil {
+			if err := l.recordDelivery(ctx, alert, ch, DeliveryResult{Status: "failed", Error: err.Error()}); err != nil {
+				return err
+			}
+			continue
+		}
+		result := notifier.Send(ctx, ch, payload)
+		if strings.TrimSpace(result.Status) == "" {
+			result.Status = "sent"
+		}
+		if err := l.recordDelivery(ctx, alert, ch, result); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (l *Logic) recordDelivery(ctx context.Context, alert model.AlertEvent, channel model.AlertNotificationChannel, result DeliveryResult) error {
+	row := model.AlertNotificationDelivery{
+		AlertID:      alert.ID,
+		RuleID:       alert.RuleID,
+		ChannelID:    channel.ID,
+		ChannelType:  channel.Type,
+		Target:       channel.Target,
+		Status:       strings.TrimSpace(result.Status),
+		ErrorMessage: strings.TrimSpace(result.Error),
+		DeliveredAt:  time.Now(),
+	}
+	if row.Status == "" {
+		row.Status = "sent"
+	}
+	return l.svcCtx.DB.WithContext(ctx).Create(&row).Error
 }
 
 func (l *Logic) ensureDefaultRules(ctx context.Context) error {
@@ -251,12 +484,12 @@ func (l *Logic) ensureDefaultRules(ctx context.Context) error {
 		return nil
 	}
 	rules := []model.AlertRule{
-		{Name: "主机 CPU 高使用", Metric: "cpu_usage", Operator: "gt", Threshold: 85, DurationSec: 300, Severity: "warning", Source: "host", Scope: "global", Enabled: true},
-		{Name: "主机内存高使用", Metric: "memory_usage", Operator: "gt", Threshold: 90, DurationSec: 300, Severity: "critical", Source: "host", Scope: "global", Enabled: true},
-		{Name: "主机磁盘高使用", Metric: "disk_usage", Operator: "gt", Threshold: 90, DurationSec: 600, Severity: "critical", Source: "host", Scope: "global", Enabled: true},
-		{Name: "K8s 节点异常", Metric: "k8s_node_not_ready", Operator: "gt", Threshold: 0, DurationSec: 180, Severity: "critical", Source: "k8s", Scope: "global", Enabled: true},
-		{Name: "Pod CrashLoopBackOff", Metric: "pod_crashloop_count", Operator: "gt", Threshold: 0, DurationSec: 180, Severity: "warning", Source: "k8s", Scope: "global", Enabled: true},
-		{Name: "发布失败告警", Metric: "deploy_failed_count", Operator: "gt", Threshold: 0, DurationSec: 60, Severity: "critical", Source: "deploy", Scope: "global", Enabled: true},
+		{Name: "主机 CPU 高使用", Metric: "cpu_usage", Operator: "gt", Threshold: 85, DurationSec: 300, WindowSec: 3600, GranularitySec: 60, Severity: "warning", Source: "host", Scope: "global", Enabled: true, State: "enabled"},
+		{Name: "主机内存高使用", Metric: "memory_usage", Operator: "gt", Threshold: 90, DurationSec: 300, WindowSec: 3600, GranularitySec: 60, Severity: "critical", Source: "host", Scope: "global", Enabled: true, State: "enabled"},
+		{Name: "主机磁盘高使用", Metric: "disk_usage", Operator: "gt", Threshold: 90, DurationSec: 600, WindowSec: 3600, GranularitySec: 60, Severity: "critical", Source: "host", Scope: "global", Enabled: true, State: "enabled"},
+		{Name: "K8s 节点异常", Metric: "k8s_node_not_ready", Operator: "gt", Threshold: 0, DurationSec: 180, WindowSec: 3600, GranularitySec: 60, Severity: "critical", Source: "k8s", Scope: "global", Enabled: true, State: "enabled"},
+		{Name: "Pod CrashLoopBackOff", Metric: "pod_crashloop_count", Operator: "gt", Threshold: 0, DurationSec: 180, WindowSec: 3600, GranularitySec: 60, Severity: "warning", Source: "k8s", Scope: "global", Enabled: true, State: "enabled"},
+		{Name: "发布失败告警", Metric: "deploy_failed_count", Operator: "gt", Threshold: 0, DurationSec: 60, WindowSec: 3600, GranularitySec: 60, Severity: "critical", Source: "deploy", Scope: "global", Enabled: true, State: "enabled"},
 	}
 	for _, rule := range rules {
 		item := rule
@@ -265,6 +498,24 @@ func (l *Logic) ensureDefaultRules(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (l *Logic) ensureDefaultChannels(ctx context.Context) error {
+	var count int64
+	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.AlertNotificationChannel{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	row := model.AlertNotificationChannel{
+		Name:     "default-log",
+		Type:     "log",
+		Provider: "builtin",
+		Target:   "stdout",
+		Enabled:  true,
+	}
+	return l.svcCtx.DB.WithContext(ctx).Create(&row).Error
 }
 
 func (l *Logic) cleanupOldMetrics(ctx context.Context, olderThan time.Time) error {
@@ -296,4 +547,11 @@ func normalizeSeverity(v string) string {
 	default:
 		return "warning"
 	}
+}
+
+func boolToRuleState(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
 }

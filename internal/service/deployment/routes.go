@@ -19,9 +19,12 @@ func RegisterDeploymentHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext)
 
 		g.POST("/releases/preview", h.PreviewRelease)
 		g.POST("/releases/apply", h.ApplyRelease)
+		g.POST("/releases/:id/approve", h.ApproveRelease)
+		g.POST("/releases/:id/reject", h.RejectRelease)
 		g.POST("/releases/:id/rollback", h.RollbackRelease)
 		g.GET("/releases", h.ListReleases)
 		g.GET("/releases/:id", h.GetRelease)
+		g.GET("/releases/:id/timeline", h.ListReleaseTimeline)
 
 		g.POST("/clusters/bootstrap/preview", h.PreviewClusterBootstrap)
 		g.POST("/clusters/bootstrap/apply", h.ApplyClusterBootstrap)

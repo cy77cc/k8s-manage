@@ -23,10 +23,49 @@ func newDeploymentTestLogic(t *testing.T) *Logic {
 		&model.DeploymentTarget{},
 		&model.DeploymentTargetNode{},
 		&model.DeploymentRelease{},
+		&model.DeploymentReleaseApproval{},
+		&model.DeploymentReleaseAudit{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return NewLogic(&svc.ServiceContext{DB: db})
+}
+
+func TestApplyReleaseProductionRequiresApproval(t *testing.T) {
+	logic := newDeploymentTestLogic(t)
+	ctx := context.Background()
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Node{ID: 2, Name: "n2", IP: "10.0.0.2", SSHUser: "root", Status: "active"}).Error; err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Service{ID: 201, Name: "svc-b", Env: "production", YamlContent: "services:\n  app:\n    image: nginx:latest"}).Error; err != nil {
+		t.Fatalf("seed service: %v", err)
+	}
+	target, err := logic.CreateTarget(ctx, 1, TargetUpsertReq{
+		Name:       "compose-prod",
+		TargetType: "compose",
+		Env:        "production",
+		Nodes:      []TargetNodeReq{{HostID: 2, Role: "manager", Weight: 100}},
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	resp, err := logic.ApplyRelease(ctx, 7, ReleasePreviewReq{ServiceID: 201, TargetID: target.ID, Env: "production", Strategy: "rolling"})
+	if err != nil {
+		t.Fatalf("apply release: %v", err)
+	}
+	if !resp.ApprovalRequired {
+		t.Fatalf("expected approval required")
+	}
+	if resp.Status != releaseStatusPendingApproval {
+		t.Fatalf("expected pending approval, got %s", resp.Status)
+	}
+	events, err := logic.ListReleaseTimeline(ctx, resp.ReleaseID)
+	if err != nil {
+		t.Fatalf("list timeline: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatalf("expected timeline events")
+	}
 }
 
 func TestCreateComposeTargetRejectUnavailableNode(t *testing.T) {

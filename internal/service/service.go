@@ -8,6 +8,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/middleware"
 	"github.com/cy77cc/k8s-manage/internal/service/ai"
 	"github.com/cy77cc/k8s-manage/internal/service/aiops"
+	"github.com/cy77cc/k8s-manage/internal/service/automation"
 	"github.com/cy77cc/k8s-manage/internal/service/cicd"
 	"github.com/cy77cc/k8s-manage/internal/service/cluster"
 	"github.com/cy77cc/k8s-manage/internal/service/cmdb"
@@ -18,6 +19,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/service/project"
 	"github.com/cy77cc/k8s-manage/internal/service/rbac"
 	servicemgr "github.com/cy77cc/k8s-manage/internal/service/service"
+	"github.com/cy77cc/k8s-manage/internal/service/topology"
 	"github.com/cy77cc/k8s-manage/internal/service/user"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	webui "github.com/cy77cc/k8s-manage/web"
@@ -36,11 +38,13 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	project.RegisterProjectHandlers(v1, serverCtx)
 	servicemgr.RegisterServiceHandlers(v1, serverCtx)
 	cicd.RegisterCICDHandlers(v1, serverCtx)
+	automation.RegisterAutomationHandlers(v1, serverCtx)
 	host.RegisterHostHandlers(v1, serverCtx)
 	cluster.RegisterClusterHandlers(v1, serverCtx)
 	deployment.RegisterDeploymentHandlers(v1, serverCtx)
 	monitoring.RegisterMonitoringHandlers(v1, serverCtx)
 	cmdb.RegisterCMDBHandlers(v1, serverCtx)
+	topology.RegisterTopologyHandlers(v1, serverCtx)
 	rbac.RegisterRBACHandlers(v1, serverCtx)
 	ai.RegisterAIHandlers(v1, serverCtx)
 	aiops.RegisterAIOPSHandlers(v1, serverCtx)

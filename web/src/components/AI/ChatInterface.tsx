@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Input, Button, Avatar, Space, Typography, Card, Tag, Collapse, Alert, Tooltip } from 'antd';
-import { SendOutlined, MessageOutlined, ToolOutlined, BulbOutlined, WarningOutlined, ArrowDownOutlined, PlusOutlined, HistoryOutlined, PushpinOutlined, DeleteOutlined, DownloadOutlined, CopyOutlined, FileMarkdownOutlined, CodeOutlined } from '@ant-design/icons';
+import { SendOutlined, MessageOutlined, ToolOutlined, BulbOutlined, WarningOutlined, ArrowDownOutlined, PlusOutlined, HistoryOutlined, PushpinOutlined, DeleteOutlined, DownloadOutlined, CopyOutlined, FileMarkdownOutlined, CodeOutlined, EditOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -102,6 +102,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>([]);
   const [activeAnchorId, setActiveAnchorId] = useState('');
+  const [pendingNewSessionId, setPendingNewSessionId] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -294,16 +295,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     let latestSession: AISession | undefined;
     let activeTurnID = '';
 
+    const requestSessionID = pendingNewSessionId || currentSession?.id;
+
     try {
       await Api.ai.chatStream(
         {
-          sessionId: currentSession?.id,
+          sessionId: requestSessionID,
           message: messageText,
           context: { scene },
         },
         {
           onMeta: (meta) => {
             activeTurnID = meta.turn_id || activeTurnID;
+            if (requestSessionID && meta.sessionId === requestSessionID) {
+              setPendingNewSessionId('');
+            }
             setCurrentSession((prev) => {
               if (prev?.id === meta.sessionId) {
                 return prev;
@@ -475,6 +481,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       const response = await Api.ai.getSessionDetail(id);
       setMessages((response.data.messages || []) as LocalMessage[]);
       setCurrentSession(response.data);
+      setPendingNewSessionId('');
       setStreamState('idle');
       setStreamError('');
       setStreamNotice('');
@@ -484,6 +491,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   const handleNewSession = () => {
+    setPendingNewSessionId(`sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     setCurrentSession(null);
     setMessages([]);
     setInputValue('');
@@ -515,6 +523,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       await loadSessions();
     } catch (error) {
       console.error('删除会话失败:', error);
+    }
+  };
+
+  const renameSession = async (item: AISession) => {
+    const nextTitle = window.prompt('请输入会话名称（1-64字）', item.title || 'AI Session');
+    if (nextTitle === null) return;
+    const trimmed = nextTitle.trim();
+    if (!trimmed) return;
+    try {
+      const res = await Api.ai.updateSessionTitle(item.id, trimmed);
+      const updated = res.data;
+      setSessionList((prev) => prev.map((session) => (session.id === updated.id ? { ...session, ...updated } : session)));
+      if (currentSession?.id === updated.id) {
+        setCurrentSession((prev) => (prev ? { ...prev, title: updated.title, updatedAt: updated.updatedAt } : prev));
+      }
+    } catch (error) {
+      console.error('重命名会话失败:', error);
     }
   };
 
@@ -731,6 +756,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                               onClick={(e) => {
                                 e.stopPropagation();
                                 togglePinSession(item.id);
+                              }}
+                            />
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<EditOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void renameSession(item);
                               }}
                             />
                             <Button

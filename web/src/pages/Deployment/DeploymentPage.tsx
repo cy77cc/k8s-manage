@@ -14,6 +14,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Timeline,
   Tooltip,
   message,
 } from 'antd';
@@ -21,7 +22,7 @@ import { Api } from '../../api';
 import type { Cluster } from '../../api/modules/kubernetes';
 import type { Host } from '../../api/modules/hosts';
 import type { ServiceItem } from '../../api/modules/services';
-import type { ClusterBootstrapTask, DeployTarget, DeployRelease, Inspection } from '../../api/modules/deployment';
+import type { ClusterBootstrapTask, DeployTarget, DeployRelease, DeployReleaseTimelineEvent, Inspection } from '../../api/modules/deployment';
 
 const envOptions = [{ value: 'development' }, { value: 'staging' }, { value: 'production' }];
 const strategyOptions = [{ value: 'rolling' }, { value: 'blue-green' }, { value: 'canary' }];
@@ -60,6 +61,13 @@ const parseVariables = (raw?: string): Record<string, string> => {
   return out;
 };
 
+const releaseStatusColor = (status?: string): string => {
+  if (status === 'applied' || status === 'succeeded' || status === 'rollback' || status === 'rolled_back') return 'success';
+  if (status === 'failed' || status === 'rejected') return 'error';
+  if (status === 'pending_approval') return 'warning';
+  return 'processing';
+};
+
 const DeploymentPage: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   const [targets, setTargets] = React.useState<DeployTarget[]>([]);
@@ -72,6 +80,7 @@ const DeploymentPage: React.FC = () => {
   const [runtimeFilter, setRuntimeFilter] = React.useState<'k8s' | 'compose' | undefined>(undefined);
   const [selectedRelease, setSelectedRelease] = React.useState<DeployRelease | null>(null);
   const [previewWarnings, setPreviewWarnings] = React.useState<Array<{ code: string; message: string; level: string }>>([]);
+  const [releaseTimeline, setReleaseTimeline] = React.useState<DeployReleaseTimelineEvent[]>([]);
   const [clusterModalOpen, setClusterModalOpen] = React.useState(false);
   const [bootstrapPreview, setBootstrapPreview] = React.useState<{ steps: string[]; expected_endpoint?: string } | null>(null);
   const [bootstrapTasks, setBootstrapTasks] = React.useState<ClusterBootstrapTask[]>([]);
@@ -178,7 +187,23 @@ const DeploymentPage: React.FC = () => {
       strategy: v.strategy || 'rolling',
       variables,
     });
-    message.success(`发布已执行，release #${resp.data.release_id}`);
+    if (resp.data.approval_required) {
+      message.warning(`release #${resp.data.release_id} 已进入审批，ticket: ${resp.data.approval_ticket || '-'}`);
+    } else {
+      message.success(`发布已执行，release #${resp.data.release_id}`);
+    }
+    await load();
+  };
+
+  const approveRelease = async (releaseId: number) => {
+    await Api.deployment.approveRelease(releaseId, {});
+    message.success(`release #${releaseId} 已审批并执行`);
+    await load();
+  };
+
+  const rejectRelease = async (releaseId: number) => {
+    await Api.deployment.rejectRelease(releaseId, {});
+    message.success(`release #${releaseId} 已拒绝`);
     await load();
   };
 
@@ -186,6 +211,16 @@ const DeploymentPage: React.FC = () => {
     await Api.deployment.rollbackRelease(releaseId);
     message.success(`回滚任务已提交，来源 release #${releaseId}`);
     await load();
+  };
+
+  const showReleaseDetail = async (row: DeployRelease) => {
+    setSelectedRelease(row);
+    try {
+      const timelineResp = await Api.deployment.getReleaseTimeline(row.id);
+      setReleaseTimeline(timelineResp.data.list || []);
+    } catch {
+      setReleaseTimeline([]);
+    }
   };
 
   const runInspection = async (stage: 'pre' | 'post' | 'periodic', releaseId?: number) => {
@@ -396,7 +431,7 @@ const DeploymentPage: React.FC = () => {
                       { title: 'Target', dataIndex: 'target_id' },
                       { title: 'Runtime', dataIndex: 'runtime_type', render: (v: string) => <Tag color={v === 'k8s' ? 'blue' : 'purple'}>{v}</Tag> },
                       { title: 'Strategy', dataIndex: 'strategy' },
-                      { title: 'Status', dataIndex: 'status', render: (v: string) => <Tag color={v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'}>{v}</Tag> },
+                      { title: 'Status', dataIndex: 'status', render: (v: string) => <Tag color={releaseStatusColor(v)}>{v}</Tag> },
                       {
                         title: '诊断摘要',
                         render: (_: unknown, row: DeployRelease) => {
@@ -414,9 +449,16 @@ const DeploymentPage: React.FC = () => {
                         title: '操作',
                         render: (_: unknown, row: DeployRelease) => (
                           <Space>
-                            <Button size="small" onClick={() => void rollback(row.id)}>Rollback</Button>
+                            {row.status === 'pending_approval' ? (
+                              <>
+                                <Button size="small" type="primary" onClick={() => void approveRelease(row.id)}>Approve</Button>
+                                <Button size="small" danger onClick={() => void rejectRelease(row.id)}>Reject</Button>
+                              </>
+                            ) : (
+                              <Button size="small" onClick={() => void rollback(row.id)}>Rollback</Button>
+                            )}
                             <Button size="small" onClick={() => void runInspection('post', row.id)}>AIOPS Post-check</Button>
-                            <Button size="small" onClick={() => setSelectedRelease(row)}>详情</Button>
+                            <Button size="small" onClick={() => void showReleaseDetail(row)}>详情</Button>
                           </Space>
                         ),
                       },
@@ -545,7 +587,10 @@ const DeploymentPage: React.FC = () => {
       <Modal
         title={`发布详情 #${selectedRelease?.id || ''}`}
         open={!!selectedRelease}
-        onCancel={() => setSelectedRelease(null)}
+        onCancel={() => {
+          setSelectedRelease(null);
+          setReleaseTimeline([]);
+        }}
         footer={null}
         width={820}
       >
@@ -571,6 +616,14 @@ const DeploymentPage: React.FC = () => {
             })(),
           }, null, 2) : ''}
         </pre>
+        <Card size="small" title="Release Timeline" style={{ marginTop: 12 }}>
+          <Timeline
+            items={releaseTimeline.map((item) => ({
+              color: item.action.includes('failed') || item.action.includes('rejected') ? 'red' : 'blue',
+              children: `${new Date(item.created_at).toLocaleString()} · ${item.action}${item.actor ? ` · actor#${item.actor}` : ''}`,
+            }))}
+          />
+        </Card>
       </Modal>
     </div>
   );

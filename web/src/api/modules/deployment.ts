@@ -38,10 +38,20 @@ export interface DeployRelease {
   strategy: string;
   revision_id: number;
   status: string;
+  lifecycle_state?: string;
   diagnostics_json?: string;
   verification_json?: string;
   source_release_id?: number;
   target_revision?: string;
+  created_at: string;
+}
+
+export interface DeployReleaseTimelineEvent {
+  id: number;
+  release_id: number;
+  action: string;
+  actor: number;
+  detail: Record<string, any> | null;
   created_at: string;
 }
 
@@ -113,8 +123,14 @@ export const deploymentApi = {
     env?: string;
     strategy?: string;
     variables?: Record<string, string>;
-  }): Promise<ApiResponse<{ release_id: number; status: string }>> {
+  }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; approval_required?: boolean; approval_ticket?: string; lifecycle_state?: string }>> {
     return apiService.post('/deploy/releases/apply', payload);
+  },
+  approveRelease(id: number, payload?: { comment?: string }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; lifecycle_state?: string }>> {
+    return apiService.post(`/deploy/releases/${id}/approve`, payload || {});
+  },
+  rejectRelease(id: number, payload?: { comment?: string }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; lifecycle_state?: string }>> {
+    return apiService.post(`/deploy/releases/${id}/reject`, payload || {});
   },
   rollbackRelease(id: number): Promise<ApiResponse<{ release_id: number; status: string }>> {
     return apiService.post(`/deploy/releases/${id}/rollback`);
@@ -124,6 +140,9 @@ export const deploymentApi = {
   },
   getReleaseDetail(id: number): Promise<ApiResponse<DeployRelease>> {
     return apiService.get(`/deploy/releases/${id}`);
+  },
+  getReleaseTimeline(id: number): Promise<ApiResponse<PaginatedResponse<DeployReleaseTimelineEvent>>> {
+    return apiService.get(`/deploy/releases/${id}/timeline`);
   },
   getReleasesByRuntime(params?: { service_id?: number; target_id?: number; runtime_type?: 'k8s' | 'compose' }): Promise<ApiResponse<PaginatedResponse<DeployRelease>>> {
     return apiService.get('/deploy/releases', { params });

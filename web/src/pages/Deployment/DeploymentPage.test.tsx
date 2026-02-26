@@ -12,7 +12,10 @@ const mockApi = vi.hoisted(() => ({
     createTarget: vi.fn(),
     previewRelease: vi.fn(),
     applyRelease: vi.fn(),
+    approveRelease: vi.fn(),
+    rejectRelease: vi.fn(),
     rollbackRelease: vi.fn(),
+    getReleaseTimeline: vi.fn(),
     runInspection: vi.fn(),
     getGovernance: vi.fn(),
     putGovernance: vi.fn(),
@@ -58,7 +61,8 @@ const seed = () => {
   mockApi.services.getList.mockResolvedValue({ data: { list: [{ id: 101, name: 'svc-a' }] } });
   mockApi.deployment.createTarget.mockResolvedValue({ data: {} });
   mockApi.deployment.previewRelease.mockResolvedValue({ data: { resolved_manifest: '', checks: [], warnings: [], runtime: 'k8s' } });
-  mockApi.deployment.applyRelease.mockResolvedValue({ data: { release_id: 1, status: 'succeeded', runtime_type: 'k8s' } });
+  mockApi.deployment.applyRelease.mockResolvedValue({ data: { release_id: 1, status: 'applied', runtime_type: 'k8s' } });
+  mockApi.deployment.getReleaseTimeline.mockResolvedValue({ data: { list: [] } });
 };
 
 describe('DeploymentPage', () => {

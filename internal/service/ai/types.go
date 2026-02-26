@@ -16,6 +16,8 @@ type chatRequest struct {
 	Context   map[string]any `json:"context"`
 }
 
+const defaultAISessionTitle = "AI Session"
+
 type aiSession struct {
 	ID        string           `json:"id"`
 	Scene     string           `json:"scene,omitempty"`

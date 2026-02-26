@@ -60,9 +60,25 @@ type ReleasePreviewResp struct {
 }
 
 type ReleaseApplyResp struct {
-	ReleaseID   uint   `json:"release_id"`
-	Status      string `json:"status"`
-	RuntimeType string `json:"runtime_type"`
+	ReleaseID        uint   `json:"release_id"`
+	Status           string `json:"status"`
+	RuntimeType      string `json:"runtime_type"`
+	ApprovalRequired bool   `json:"approval_required,omitempty"`
+	ApprovalTicket   string `json:"approval_ticket,omitempty"`
+	LifecycleState   string `json:"lifecycle_state,omitempty"`
+}
+
+type ReleaseDecisionReq struct {
+	Comment string `json:"comment"`
+}
+
+type ReleaseTimelineEventResp struct {
+	ID        uint      `json:"id"`
+	ReleaseID uint      `json:"release_id"`
+	Action    string    `json:"action"`
+	Actor     uint      `json:"actor"`
+	Detail    any       `json:"detail"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type GovernanceReq struct {

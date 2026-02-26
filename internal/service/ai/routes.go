@@ -20,6 +20,7 @@ func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.GET("/sessions", h.listSessions)
 		g.GET("/sessions/current", h.currentSession)
 		g.GET("/sessions/:id", h.getSession)
+		g.PATCH("/sessions/:id", h.updateSessionTitle)
 		g.DELETE("/sessions/:id", h.deleteSession)
 		g.POST("/analyze", h.analyze)
 		g.POST("/recommendations", h.recommendations)

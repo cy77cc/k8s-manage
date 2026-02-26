@@ -173,6 +173,63 @@ func (h *Handler) RollbackRelease(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
 }
 
+func (h *Handler) ApproveRelease(c *gin.Context) {
+	row, err := h.logic.GetRelease(c.Request.Context(), uintFromParam(c, "id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	if !h.authorize(c, "deploy:release:approve", "deploy:release:apply") || !h.authorizeRuntime(c, row.RuntimeType, "apply") {
+		return
+	}
+	var req ReleaseDecisionReq
+	_ = c.ShouldBindJSON(&req)
+	uid, _ := c.Get("uid")
+	resp, err := h.logic.ApproveRelease(c.Request.Context(), row.ID, toUint(uid), req.Comment)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) RejectRelease(c *gin.Context) {
+	row, err := h.logic.GetRelease(c.Request.Context(), uintFromParam(c, "id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	if !h.authorize(c, "deploy:release:approve", "deploy:release:apply") || !h.authorizeRuntime(c, row.RuntimeType, "apply") {
+		return
+	}
+	var req ReleaseDecisionReq
+	_ = c.ShouldBindJSON(&req)
+	uid, _ := c.Get("uid")
+	resp, err := h.logic.RejectRelease(c.Request.Context(), row.ID, toUint(uid), req.Comment)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": resp})
+}
+
+func (h *Handler) ListReleaseTimeline(c *gin.Context) {
+	row, err := h.logic.GetRelease(c.Request.Context(), uintFromParam(c, "id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	if !h.authorize(c, "deploy:release:read") || !h.authorizeRuntime(c, row.RuntimeType, "read") {
+		return
+	}
+	list, err := h.logic.ListReleaseTimeline(c.Request.Context(), row.ID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 3000, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"list": list, "total": len(list)}})
+}
+
 func (h *Handler) ListReleases(c *gin.Context) {
 	runtime := strings.TrimSpace(c.Query("runtime_type"))
 	if !h.authorize(c, "deploy:release:read") {

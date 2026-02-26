@@ -116,6 +116,12 @@ class ApiService {
     return response.data;
   }
 
+  // PATCH请求
+  async patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+    const response = await this.instance.patch<ApiResponse<T>>(url, data, config);
+    return response.data;
+  }
+
   // DELETE请求
   async delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
     const response = await this.instance.delete<ApiResponse<T>>(url, config);
