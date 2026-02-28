@@ -39,6 +39,7 @@ import AuditLogsPage from './pages/ConfigCenter/AuditLogsPage';
 import LoginPage from './pages/Auth/LoginPage';
 import RegisterPage from './pages/Auth/RegisterPage';
 import AICommandCenterPage from './pages/AI/AICommandCenterPage';
+import HelpCenterPage from './pages/Help/HelpCenterPage';
 import AccessDeniedPage from './components/Auth/AccessDeniedPage';
 import LegacyGovernanceRedirect from './components/Auth/LegacyGovernanceRedirect';
 
@@ -130,6 +131,7 @@ const ProtectedApp: React.FC = () => {
           <Route path="/automation" element={withAuth('automation', 'read', <AutomationPage />)} />
           <Route path="/cicd" element={withAuth('cicd', 'read', <CICDPage />)} />
           <Route path="/ai" element={withAuth('ai', 'read', <AICommandCenterPage />)} />
+          <Route path="/help" element={<HelpCenterPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppLayout>

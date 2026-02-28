@@ -115,3 +115,14 @@ make run
 
 - 服务启动后访问 `/` 会直接加载前端页面。
 - API 统一前缀为 `/api/v1`。
+
+## 帮助文档与 AI 知识库
+
+- 平台帮助文档（给用户）：`docs/user/help-center-manual.md`
+- 运维值班 FAQ 100 题：`docs/user/ops-faq-100.md`
+- FAQ 一题一条 JSONL：`docs/ai/ops-faq-100.jsonl`
+- AI 帮助知识库（给模型）：`docs/ai/help-knowledge-base.md`
+- FAQ 喂料说明：`docs/ai/ops-faq-100-kb.md`
+- AI 分块知识（RAG/向量检索）：`docs/ai/help-knowledge-base.jsonl`
+
+后端 AI 聊天在识别“帮助/如何操作”类问题时，会自动注入对应帮助知识片段，提升回答一致性与可执行性。

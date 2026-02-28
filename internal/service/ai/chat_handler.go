@@ -195,12 +195,16 @@ func (h *handler) chat(c *gin.Context) {
 	tracker := newToolEventTracker()
 	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, req.Context, emit, tracker)
 	prompt := msg
-	if directive := buildToolExecutionDirective(msg, scene); directive != "" {
+	directive := composePromptDirectives(
+		buildToolExecutionDirective(msg, scene),
+		buildHelpKnowledgeDirective(msg),
+	)
+	if directive != "" {
 		prompt = directive + "\n\n用户问题:\n" + msg
 	}
 	if len(req.Context) > 0 {
 		prompt = msg + "\n\n上下文:\n" + mustJSON(req.Context)
-		if directive := buildToolExecutionDirective(msg, scene); directive != "" {
+		if directive != "" {
 			prompt = directive + "\n\n用户问题:\n" + msg + "\n\n上下文:\n" + mustJSON(req.Context)
 		}
 	}
@@ -420,6 +424,18 @@ func buildToolExecutionDirective(message, scene string) string {
    - 已命中的主机 ID/名称/IP
    - 失败原因为认证失败
    - 建议下一步（更新凭据或检查 ssh_key_id/password）。`
+}
+
+func composePromptDirectives(directives ...string) string {
+	out := make([]string, 0, len(directives))
+	for _, directive := range directives {
+		v := strings.TrimSpace(directive)
+		if v == "" {
+			continue
+		}
+		out = append(out, v)
+	}
+	return strings.Join(out, "\n\n")
 }
 
 func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene string, runtime map[string]any, emit func(event string, payload gin.H) bool, tracker *toolEventTracker) context.Context {

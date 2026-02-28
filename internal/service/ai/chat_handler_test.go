@@ -82,3 +82,43 @@ func TestBuildToolExecutionDirective(t *testing.T) {
 		t.Fatalf("expected empty directive for non-host scene")
 	}
 }
+
+func TestBuildHelpKnowledgeDirective(t *testing.T) {
+	if got := buildHelpKnowledgeDirective("如何添加新主机并完成纳管"); got == "" {
+		t.Fatalf("expected help directive for help intent")
+	}
+	if got := buildHelpKnowledgeDirective("帮我写一段周报"); got != "" {
+		t.Fatalf("expected empty help directive for non-help intent")
+	}
+}
+
+func TestComposePromptDirectives(t *testing.T) {
+	out := composePromptDirectives("A", "", "B")
+	if out != "A\n\nB" {
+		t.Fatalf("unexpected directive compose result: %q", out)
+	}
+}
+
+func TestMatchFAQKnowledgeFromEntries(t *testing.T) {
+	entries := []faqKnowledgeEntry{
+		{ID: "FAQ-001", Question: "登录失败提示账号或密码错误怎么办？", Answer: "先确认账号状态并重置密码。"},
+		{ID: "FAQ-056", Question: "发布前必须检查什么？", Answer: "检查变更范围和回滚方案。"},
+	}
+	got, score := matchFAQKnowledgeFromEntries("登录失败怎么办", entries)
+	if got == nil || got.ID != "FAQ-001" {
+		t.Fatalf("expected FAQ-001, got %#v", got)
+	}
+	if score <= 0 {
+		t.Fatalf("expected score > 0")
+	}
+}
+
+func TestMatchFAQKnowledgeFromEntriesNoMatch(t *testing.T) {
+	entries := []faqKnowledgeEntry{
+		{ID: "FAQ-001", Question: "登录失败提示账号或密码错误怎么办？", Answer: "先确认账号状态并重置密码。"},
+	}
+	got, score := matchFAQKnowledgeFromEntries("帮我写周报", entries)
+	if got != nil || score != 0 {
+		t.Fatalf("expected no match, got=%#v score=%d", got, score)
+	}
+}

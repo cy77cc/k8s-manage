@@ -17,6 +17,7 @@ import {
   LogoutOutlined,
   QuestionCircleOutlined,
   CloudServerOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../Auth/AuthContext';
@@ -50,6 +51,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     { key: '/automation', icon: <ToolOutlined />, label: t('menu.automation') },
     { key: '/cicd', icon: <ToolOutlined />, label: 'CI/CD' },
     { key: '/ai', icon: <ToolOutlined />, label: 'AI命令中心' },
+    { key: '/help', icon: <FileTextOutlined />, label: '帮助中心' },
     { key: '/config', icon: <SettingOutlined />, label: t('menu.config') },
     { key: '/tasks', icon: <ClockCircleOutlined />, label: t('menu.tasks') },
     { key: '/deployment', icon: <CloudOutlined />, label: '部署管理' },
@@ -79,6 +81,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     if (location.pathname.startsWith('/jobs')) return '/tasks';
     if (location.pathname.startsWith('/configcenter')) return '/config';
     if (location.pathname.startsWith('/k8s')) return '/deployment';
+    if (location.pathname.startsWith('/help')) return '/help';
     if (location.pathname.startsWith('/governance/users')) return '/governance/users';
     if (location.pathname.startsWith('/governance/roles')) return '/governance/roles';
     if (location.pathname.startsWith('/governance/permissions')) return '/governance/permissions';
@@ -160,7 +163,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         <Header 
           className="h-16 px-6 flex items-center justify-between"
           style={{ 
-            background: '#ffffff', 
+            background: 'var(--color-bg-surface)',
             borderBottom: '1px solid var(--color-border)',
             position: 'sticky',
             top: 0,
@@ -191,11 +194,16 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               placeholder="搜索主机、配置、任务..."
               prefix={<SearchOutlined style={{ color: '#8d98a8' }} />}
               className="header-search-input"
-              style={{ width: 280, background: '#ffffff', border: '1px solid var(--color-border)', color: '#1f2329' }}
+              style={{ width: 280, background: 'var(--color-bg-subtle)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
             />
             
             <Tooltip title="帮助文档">
-              <Button type="text" icon={<QuestionCircleOutlined />} style={{ color: 'var(--color-text-secondary)' }} />
+              <Button
+                type="text"
+                icon={<QuestionCircleOutlined />}
+                style={{ color: 'var(--color-text-secondary)' }}
+                onClick={() => navigate('/help')}
+              />
             </Tooltip>
             <GlobalAIAssistant inlineTrigger />
             
