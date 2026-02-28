@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Col, List, Progress, Row, Space, Statistic, Table, Tag, Button } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Card, Col, Empty, Input, Progress, Row, Select, Skeleton, Space, Statistic, Table, Tag, Button } from 'antd';
 import { AlertOutlined, CloudOutlined, DesktopOutlined, ReloadOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { Api } from '../../api';
+import { useVisibilityRefresh } from '../../hooks/useVisibilityRefresh';
 
 interface DashboardState {
   hostTotal: number;
@@ -17,6 +18,8 @@ interface DashboardState {
 
 const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [severity, setSeverity] = useState<string>('all');
   const [state, setState] = useState<DashboardState>({
     hostTotal: 0,
     hostOnline: 0,
@@ -29,7 +32,7 @@ const Dashboard: React.FC = () => {
     recentFailedReleases: 0,
   });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [hosts, jobs, clusters, alerts, releases] = await Promise.all([
@@ -54,38 +57,44 @@ const Dashboard: React.FC = () => {
         jobRunning: jobList.filter((j) => j.status === 'running').length,
         clusterTotal: clusterList.length,
         alertTotal: alertList.filter((a) => a.status === 'firing').length,
-        topHosts: hostList.slice(0, 5).map((h) => ({ id: String(h.id), name: h.name, ip: h.ip, status: h.status, cpu: h.cpu ?? 0, memory: h.memory ?? 0 })),
-        recentAlerts: alertList.slice(0, 6).map((a) => ({ id: String(a.id), message: a.title || a.source || '告警事件', severity: a.severity, createdAt: a.createdAt })),
+        topHosts: hostList.slice(0, 10).map((h) => ({ id: String(h.id), name: h.name, ip: h.ip, status: h.status, cpu: h.cpu ?? 0, memory: h.memory ?? 0 })),
+        recentAlerts: alertList.slice(0, 20).map((a) => ({ id: String(a.id), message: a.title || a.source || '告警事件', severity: a.severity, createdAt: a.createdAt })),
         recentFailedReleases,
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    load();
-    const handler = () => load();
+    void load();
+    const handler = () => void load();
     window.addEventListener('project:changed', handler as EventListener);
     return () => window.removeEventListener('project:changed', handler as EventListener);
-  }, []);
+  }, [load]);
+
+  useVisibilityRefresh(() => void load(), 30000, [load]);
 
   const widgets = useMemo(() => [
     { key: 'host-health', title: '主机健康', value: `${state.hostOnline}/${state.hostTotal}`, extra: `${Math.round((state.hostOnline / Math.max(1, state.hostTotal)) * 100)}%` },
     { key: 'task-success', title: '任务成功率', value: `${state.jobTotal - state.jobRunning}/${Math.max(1, state.jobTotal)}`, extra: `${Math.round(((state.jobTotal - state.jobRunning) / Math.max(1, state.jobTotal)) * 100)}%` },
     { key: 'release-frequency', title: '最近失败发布', value: state.recentFailedReleases, extra: '24h' },
-    { key: 'alert-trend', title: '告警趋势', value: state.alertTotal, extra: 'active' },
-    { key: 'k8s-capacity', title: 'K8s 容量', value: state.clusterTotal, extra: 'clusters' },
-    { key: 'service-slo', title: '服务 SLO', value: '99.90%', extra: '目标 99.95%' },
-    { key: 'error-rate', title: '错误率', value: `${state.alertTotal}%`, extra: '估算' },
-    { key: 'top-resources', title: 'Top 资源消耗', value: state.topHosts[0]?.name || '-', extra: `${state.topHosts[0]?.cpu || 0}% CPU` },
+    { key: 'alert-trend', title: '活跃告警', value: state.alertTotal, extra: 'active' },
   ], [state]);
+
+  const filteredAlerts = useMemo(() => {
+    return state.recentAlerts.filter((alert) => {
+      const matchQuery = query.trim() ? alert.message.toLowerCase().includes(query.trim().toLowerCase()) : true;
+      const matchSeverity = severity === 'all' ? true : alert.severity === severity;
+      return matchQuery && matchSeverity;
+    });
+  }, [query, severity, state.recentAlerts]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">主控台</h1>
-        <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
+        <h1 className="text-xl font-semibold text-slate-100">主控台</h1>
+        <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>
       </div>
 
       <Row gutter={[16, 16]}>
@@ -96,56 +105,89 @@ const Dashboard: React.FC = () => {
       </Row>
 
       <Row gutter={[16, 16]}>
-        {widgets.map((w) => (
-          <Col xs={24} sm={12} md={8} lg={6} key={w.key}>
-            <Card size="small" title={w.title}>
-              <div className="text-lg font-bold">{w.value}</div>
-              <div className="text-gray-500">{w.extra}</div>
-            </Card>
-          </Col>
-        ))}
+        <Col xs={24} xl={16}>
+          <Card title="监控概览" extra={<Tag color={state.alertTotal > 0 ? 'error' : 'success'}>{state.alertTotal > 0 ? '需要关注' : '健康'}</Tag>}>
+            {loading ? (
+              <Skeleton active paragraph={{ rows: 8 }} />
+            ) : (
+              <Row gutter={[12, 12]}>
+                {widgets.map((w) => (
+                  <Col xs={24} sm={12} key={w.key}>
+                    <Card size="small" title={w.title}>
+                      <div className="text-lg font-semibold">{w.value}</div>
+                      <div className="text-slate-400">{w.extra}</div>
+                    </Card>
+                  </Col>
+                ))}
+                <Col span={24}>
+                  <Card size="small" title="资源压力 Top 10">
+                    <Table
+                      rowKey="id"
+                      pagination={{ pageSize: 5 }}
+                      dataSource={state.topHosts}
+                      locale={{ emptyText: <Empty description="暂无主机数据" /> }}
+                      columns={[
+                        { title: '主机', dataIndex: 'name', sorter: (a, b) => a.name.localeCompare(b.name) },
+                        { title: 'IP', dataIndex: 'ip' },
+                        { title: '状态', dataIndex: 'status', filters: [{ text: 'online', value: 'online' }, { text: 'offline', value: 'offline' }], onFilter: (v, r) => r.status === v, render: (v: string) => <Tag color={v === 'online' ? 'success' : 'default'}>{v}</Tag> },
+                        { title: 'CPU', dataIndex: 'cpu', sorter: (a, b) => a.cpu - b.cpu, render: (v: number) => <Progress percent={Math.min(100, Math.round(v))} size="small" /> },
+                      ]}
+                    />
+                  </Card>
+                </Col>
+              </Row>
+            )}
+          </Card>
+        </Col>
+
+        <Col xs={24} xl={8}>
+          <Card
+            title="告警处理队列"
+            extra={(
+              <Space>
+                <Input allowClear placeholder="搜索告警" value={query} onChange={(e) => setQuery(e.target.value)} style={{ width: 140 }} />
+                <Select value={severity} style={{ width: 120 }} onChange={setSeverity} options={[{ value: 'all', label: '全部级别' }, { value: 'critical', label: 'critical' }, { value: 'warning', label: 'warning' }, { value: 'info', label: 'info' }]} />
+              </Space>
+            )}
+          >
+            {loading ? (
+              <Skeleton active paragraph={{ rows: 10 }} />
+            ) : (
+              <Table
+                rowKey="id"
+                dataSource={filteredAlerts}
+                pagination={{ pageSize: 6 }}
+                locale={{ emptyText: <Empty description="暂无告警数据" /> }}
+                columns={[
+                  { title: '告警', dataIndex: 'message', sorter: (a, b) => a.message.localeCompare(b.message) },
+                  { title: '级别', dataIndex: 'severity', filters: [{ text: 'critical', value: 'critical' }, { text: 'warning', value: 'warning' }, { text: 'info', value: 'info' }], onFilter: (v, r) => r.severity === v, render: (v: string) => <Tag color={v === 'critical' ? 'error' : v === 'warning' ? 'warning' : 'blue'}>{v}</Tag> },
+                ]}
+              />
+            )}
+          </Card>
+        </Col>
       </Row>
 
       <Row gutter={[16, 16]}>
-        <Col xs={24} lg={14}>
-          <Card title="主机概览">
-            <Table
-              rowKey="id"
-              pagination={false}
-              dataSource={state.topHosts}
-              columns={[
-                { title: '主机', dataIndex: 'name' },
-                { title: 'IP', dataIndex: 'ip' },
-                { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'online' ? 'success' : 'default'}>{v}</Tag> },
-                { title: 'CPU', dataIndex: 'cpu', render: (v: number) => <Progress percent={Math.min(100, v)} size="small" /> },
-              ]}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={10}>
-          <Card title="最近告警">
-            <List
-              dataSource={state.recentAlerts}
-              renderItem={(item) => (
-                <List.Item>
-                  <div className="w-full flex justify-between">
-                    <span>{item.message}</span>
-                    <Tag color={item.severity === 'critical' ? 'error' : item.severity === 'warning' ? 'warning' : 'blue'}>{item.severity}</Tag>
-                  </div>
-                </List.Item>
-              )}
-            />
+        <Col span={24}>
+          <Card title="服务列表（监控联动）">
+            {loading ? <Skeleton active paragraph={{ rows: 6 }} /> : (
+              <Table
+                rowKey="id"
+                dataSource={state.topHosts}
+                pagination={{ pageSize: 5 }}
+                locale={{ emptyText: <Empty description="暂无服务数据" /> }}
+                columns={[
+                  { title: '服务/主机', dataIndex: 'name' },
+                  { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'online' ? 'success' : 'error'}>{v}</Tag> },
+                  { title: 'CPU', dataIndex: 'cpu', sorter: (a, b) => a.cpu - b.cpu },
+                  { title: '内存', dataIndex: 'memory', sorter: (a, b) => a.memory - b.memory },
+                ]}
+              />
+            )}
           </Card>
         </Col>
       </Row>
-
-      <Card title="运行摘要">
-        <Space wrap>
-          <Tag color="blue">在线主机: {state.hostOnline}</Tag>
-          <Tag color="geekblue">集群数: {state.clusterTotal}</Tag>
-          <Tag color={state.recentFailedReleases > 0 ? 'error' : 'success'}>失败发布: {state.recentFailedReleases}</Tag>
-        </Space>
-      </Card>
     </div>
   );
 };

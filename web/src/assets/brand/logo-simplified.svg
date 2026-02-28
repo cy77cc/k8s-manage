@@ -1,0 +1,11 @@
+<svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="nebulaSimple" x1="8" y1="6" x2="48" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0EA5E9"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="52" height="52" rx="14" fill="#0F172A"/>
+  <circle cx="28" cy="28" r="14" stroke="url(#nebulaSimple)" stroke-width="5"/>
+  <circle cx="40" cy="18" r="4" fill="#38BDF8"/>
+</svg>

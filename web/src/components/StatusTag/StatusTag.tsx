@@ -10,35 +10,35 @@ interface StatusTagProps {
 const StatusTag: React.FC<StatusTagProps> = ({
   status,
   size = 'medium',
-  shape = 'rectangle'
+  shape = 'rectangle',
 }) => {
   const statusConfig = {
     RUNNING: {
       label: '运行中',
       color: theme.colors.status.running,
-      className: 'status-running'
+      className: 'status-running',
     },
     WARNING: {
       label: '警告',
       color: theme.colors.status.warning,
-      className: 'status-warning'
+      className: 'status-warning',
     },
     ERROR: {
       label: '故障',
       color: theme.colors.status.error,
-      className: 'status-error'
+      className: 'status-error',
     },
     OFFLINE: {
       label: '离线',
       color: theme.colors.status.offline,
-      className: 'status-offline'
-    }
+      className: 'status-offline',
+    },
   }[status];
 
   const sizeConfig = {
     small: 'w-2 h-2',
     medium: 'w-3 h-3',
-    large: 'w-4 h-4'
+    large: 'w-4 h-4',
   }[size];
 
   if (shape === 'circle') {
@@ -53,10 +53,10 @@ const StatusTag: React.FC<StatusTagProps> = ({
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium`}
+      className="inline-flex items-center px-2 py-1 rounded text-xs font-medium"
       style={{
-        backgroundColor: `${statusConfig.color}20`,
-        color: statusConfig.color
+        backgroundColor: `color-mix(in srgb, ${statusConfig.color} 16%, transparent)`,
+        color: statusConfig.color,
       }}
     >
       <span

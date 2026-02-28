@@ -1,38 +1,38 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
+    './index.html',
+    './src/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
       colors: {
-        'bg-primary': '#0B0E14',
-        'bg-secondary': '#161B22',
-        'text-primary': '#FFFFFF',
-        'text-secondary': '#E5E7EB',
-        'text-tertiary': '#D1D5DB',
-        'text-quaternary': '#9CA3AF',
-        'brand-primary': '#1677FF',
-        'status-running': '#52C41A',
-        'status-warning': '#FAAD14',
-        'status-error': '#FF4D4F',
-        'status-offline': '#8C8C8C'
+        'bg-primary': 'var(--color-bg-app)',
+        'bg-secondary': 'var(--color-bg-surface)',
+        'text-primary': 'var(--color-text-primary)',
+        'text-secondary': 'var(--color-text-secondary)',
+        'text-tertiary': '#64748B',
+        'text-quaternary': '#94A3B8',
+        'brand-primary': 'var(--color-brand-500)',
+        'status-running': 'var(--color-success)',
+        'status-warning': 'var(--color-warning)',
+        'status-error': 'var(--color-error)',
+        'status-offline': '#8C8C8C',
       },
       animation: {
-        'status-pulse': 'status-pulse 2s ease-in-out infinite'
+        'status-pulse': 'status-pulse 2s ease-in-out infinite',
       },
       keyframes: {
         'status-pulse': {
           '0%, 100%': {
-            opacity: '0.4'
+            opacity: '0.4',
           },
           '50%': {
-            opacity: '1'
-          }
-        }
-      }
+            opacity: '1',
+          },
+        },
+      },
     },
   },
   plugins: [],
-}
+};
