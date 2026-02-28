@@ -1,7 +1,8 @@
 import React from 'react';
 import type { ReactNode } from 'react';
-import { Spin, Result } from 'antd';
+import { Spin } from 'antd';
 import { usePermission } from './PermissionContext';
+import AccessDeniedPage from '../Auth/AccessDeniedPage';
 
 // 权限验证属性
 export interface AuthorizedProps {
@@ -25,13 +26,7 @@ const Authorized: React.FC<AuthorizedProps> = ({
   }
 
   if (!hasPermission(resource, action)) {
-    return fallback || (
-      <Result
-        status="403"
-        title="403"
-        subTitle="您没有权限访问此资源"
-      />
-    );
+    return fallback || <AccessDeniedPage compact />;
   }
 
   return <>{children}</>;

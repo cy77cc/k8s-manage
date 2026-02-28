@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -351,6 +352,40 @@ func (h *Handler) GetPermission(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"id": p.ID, "name": p.Name, "code": p.Code, "description": p.Description, "category": p.Resource, "createdAt": time.Unix(p.CreateTime, 0)}})
+}
+
+func (h *Handler) RecordMigrationEvent(c *gin.Context) {
+	uid, ok := c.Get("uid")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": gin.H{"message": "unauthorized"}})
+		return
+	}
+	var req struct {
+		EventType  string `json:"eventType" binding:"required"`
+		FromPath   string `json:"fromPath"`
+		ToPath     string `json:"toPath"`
+		Action     string `json:"action"`
+		Status     string `json:"status"`
+		DurationMs int64  `json:"durationMs"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+
+	userID := toUint64(uid)
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	log.Printf("rbac migration event=%s actor=%d from=%s to=%s action=%s status=%s duration_ms=%d timestamp=%s",
+		strings.TrimSpace(req.EventType),
+		userID,
+		strings.TrimSpace(req.FromPath),
+		strings.TrimSpace(req.ToPath),
+		strings.TrimSpace(req.Action),
+		strings.TrimSpace(req.Status),
+		req.DurationMs,
+		timestamp,
+	)
+	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": gin.H{"accepted": true}})
 }
 
 func (h *Handler) fetchPermissionsByUserID(userID uint64) ([]string, error) {

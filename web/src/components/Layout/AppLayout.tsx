@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Layout, Menu, Breadcrumb, Avatar, Dropdown, Badge, Input, Tooltip, Button } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   DashboardOutlined,
   DesktopOutlined,
@@ -22,8 +23,10 @@ import { useAuth } from '../Auth/AuthContext';
 import ProjectSwitcher from '../Project/ProjectSwitcher';
 import GlobalAIAssistant from '../AI/GlobalAIAssistant';
 import { useI18n } from '../../i18n';
+import { usePermission } from '../RBAC';
 
 const { Header, Sider, Content } = Layout;
+type MenuItem = Required<MenuProps>['items'][number];
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -34,9 +37,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { logout } = useAuth();
+  const { hasPermission } = usePermission();
   const { t, lang, setLang } = useI18n();
+  const governanceMenuEnabled = import.meta.env.VITE_FEATURE_GOVERNANCE_MENU !== 'false';
+  const canReadGovernance = hasPermission('rbac', 'read');
 
-  const menuItems = [
+  const baseMenuItems: MenuItem[] = [
     { key: '/', icon: <DashboardOutlined />, label: t('menu.dashboard') },
     { key: '/hosts', icon: <DesktopOutlined />, label: t('menu.hosts') },
     { key: '/services', icon: <CloudServerOutlined />, label: t('menu.services') },
@@ -49,12 +55,33 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     { key: '/deployment', icon: <CloudOutlined />, label: '部署管理' },
     { key: '/monitor', icon: <AlertOutlined />, label: t('menu.monitor') },
     { key: '/tools', icon: <ToolOutlined />, label: t('menu.tools') },
+    ...(governanceMenuEnabled ? [] : [{ key: '/settings', icon: <SettingOutlined />, label: '系统设置' }]),
   ];
+  const governanceMenuItems: MenuItem[] =
+    governanceMenuEnabled && canReadGovernance
+      ? [
+          {
+            key: '/governance',
+            icon: <UserOutlined />,
+            label: '访问治理',
+            children: [
+              { key: '/governance/users', label: '用户管理' },
+              { key: '/governance/roles', label: '角色管理' },
+              { key: '/governance/permissions', label: '权限列表' },
+            ],
+          },
+        ]
+      : [];
+
+  const menuItems = [...baseMenuItems, ...governanceMenuItems];
 
   const activeMenuKey = React.useMemo(() => {
     if (location.pathname.startsWith('/jobs')) return '/tasks';
     if (location.pathname.startsWith('/configcenter')) return '/config';
     if (location.pathname.startsWith('/k8s')) return '/deployment';
+    if (location.pathname.startsWith('/governance/users')) return '/governance/users';
+    if (location.pathname.startsWith('/governance/roles')) return '/governance/roles';
+    if (location.pathname.startsWith('/governance/permissions')) return '/governance/permissions';
     return location.pathname;
   }, [location.pathname]);
 
@@ -72,9 +99,16 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     
     paths.forEach((path) => {
       currentPath += `/${path}`;
-      const menuItem = menuItems.find(item => item.key === currentPath);
-      if (menuItem) {
-        items.push({ title: menuItem.label, path: currentPath });
+      const menuItem = menuItems.find((item) => item && (item as any).key === currentPath) as any;
+      if (menuItem?.label) {
+        items.push({ title: String(menuItem.label), path: currentPath });
+      }
+      const governanceRoot = menuItems.find((item) => item && (item as any).key === '/governance') as any;
+      if (governanceRoot?.children && Array.isArray(governanceRoot.children)) {
+        const child = governanceRoot.children.find((sub: any) => sub && sub.key === currentPath);
+        if (child?.label) {
+          items.push({ title: String(child.label), path: currentPath });
+        }
       }
     });
     

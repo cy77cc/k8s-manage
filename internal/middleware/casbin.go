@@ -2,7 +2,10 @@ package middleware
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/cy77cc/k8s-manage/internal/response"
@@ -36,6 +39,11 @@ func CasbinAuth(enforcer *casbin.Enforcer, permissionCode string) gin.HandlerFun
 		sub := fmt.Sprintf("%v", uid)
 		obj := permissionCode
 
+		if isPrivilegedSubject(enforcer, sub) {
+			c.Next()
+			return
+		}
+
 		// 4. Enforce
 		ok, err := enforcer.Enforce(sub, obj)
 		if err != nil {
@@ -46,7 +54,10 @@ func CasbinAuth(enforcer *casbin.Enforcer, permissionCode string) gin.HandlerFun
 		}
 
 		if !ok {
-			resp := response.NewResp(xcode.Forbidden, "无权限访问该资源", nil)
+			auditAccessDenied(c, sub, obj)
+			resp := response.NewResp(xcode.Forbidden, "无权限访问该资源", gin.H{
+				"code": "RBAC_FORBIDDEN",
+			})
 			c.JSON(http.StatusForbidden, resp)
 			c.Abort()
 			return
@@ -54,4 +65,32 @@ func CasbinAuth(enforcer *casbin.Enforcer, permissionCode string) gin.HandlerFun
 
 		c.Next()
 	}
+}
+
+func auditAccessDenied(c *gin.Context, actor, action string) {
+	resource := c.FullPath()
+	if resource == "" {
+		resource = c.Request.URL.Path
+	}
+	c.Set("rbac_deny_audit", gin.H{
+		"actor":     actor,
+		"resource":  resource,
+		"action":    action,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+	log.Printf("rbac deny actor=%s resource=%s action=%s timestamp=%s", actor, resource, action, time.Now().UTC().Format(time.RFC3339))
+}
+
+func isPrivilegedSubject(enforcer *casbin.Enforcer, subject string) bool {
+	roles, err := enforcer.GetRolesForUser(subject)
+	if err != nil {
+		return false
+	}
+	for _, role := range roles {
+		normalized := strings.ToLower(strings.TrimSpace(role))
+		if normalized == "admin" || normalized == "super-admin" || normalized == "super_admin" || normalized == "root" || normalized == "超级管理员" {
+			return true
+		}
+	}
+	return false
 }

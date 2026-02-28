@@ -4,11 +4,15 @@
 Maintain a stable baseline of `/api/v1` platform capabilities and link it to a per-domain delivery status snapshot.
 ## Requirements
 ### Requirement: API V1 Domain Surface SHALL Be Baseline Documented
-The platform SHALL maintain a baseline capability specification for the `/api/v1` domains currently wired by the backend service, including user/auth, host, cluster, service, deployment, RBAC, AI, AIOPS, monitoring, project, and node compatibility routes.
+The platform SHALL maintain a baseline capability specification for the `/api/v1` domains currently wired by the backend service, including user/auth, host, cluster, service, deployment, RBAC, AI, AIOPS, monitoring, project, and node compatibility routes, and SHALL explicitly classify user/role/permission governance as an independent access-governance navigation domain rather than a system-settings subcategory.
 
 #### Scenario: Route group baseline exists
 - **WHEN** reviewers compare OpenSpec with backend router registration
 - **THEN** the documented baseline SHALL include all currently registered domain groups under `internal/service/service.go`
+
+#### Scenario: Access-governance baseline classification exists
+- **WHEN** reviewers inspect baseline documentation for management navigation responsibilities
+- **THEN** user, role, and permission management SHALL be documented as a dedicated governance domain with role-aware visibility expectations
 
 ### Requirement: Host And Cluster Operational Coverage SHALL Be Captured
 The baseline SHALL capture implemented host lifecycle and cluster lifecycle operational APIs, including host onboarding/actions/terminal/files and cluster namespace/hpa/quota/rollout/deploy workflows.
@@ -37,3 +41,4 @@ The baseline specification SHALL reference the latest per-domain status matrix s
 #### Scenario: Baseline links status matrix
 - **WHEN** maintainers review baseline capability coverage
 - **THEN** they SHALL find the linked snapshot at `docs/platform-status-matrix.md` created from change `migrate-docs-to-openspec-baseline`
+

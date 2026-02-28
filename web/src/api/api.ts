@@ -1,6 +1,18 @@
 import axios from 'axios';
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 
+export class ApiRequestError extends Error {
+  statusCode?: number;
+  businessCode?: number;
+
+  constructor(message: string, statusCode?: number, businessCode?: number) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.statusCode = statusCode;
+    this.businessCode = businessCode;
+  }
+}
+
 // 响应数据结构
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -67,7 +79,7 @@ class ApiService {
             return this.tryRefreshAndRetry(originalConfig);
           }
           if (payload.code !== 1000 && payload.code !== 200) {
-            return Promise.reject(new Error(payload.msg || payload.message || '请求失败'));
+            return Promise.reject(new ApiRequestError(payload.msg || payload.message || '请求失败', response.status, payload.code));
           }
           response.data = {
             success: true,
@@ -81,7 +93,7 @@ class ApiService {
         }
 
         if (!payload?.success) {
-          return Promise.reject(new Error(payload?.error?.message || payload?.message || '请求失败'));
+          return Promise.reject(new ApiRequestError(payload?.error?.message || payload?.message || '请求失败', response.status));
         }
         return response;
       },
@@ -93,7 +105,8 @@ class ApiService {
           return this.tryRefreshAndRetry(originalConfig);
         }
         const message = error.response?.data?.message || error.response?.data?.error?.message || error.message || '网络错误';
-        return Promise.reject(new Error(message));
+        const businessCode = typeof error.response?.data?.code === 'number' ? error.response.data.code : undefined;
+        return Promise.reject(new ApiRequestError(message, error.response?.status, businessCode));
       }
     );
   }

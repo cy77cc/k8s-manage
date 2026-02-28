@@ -39,6 +39,8 @@ import AuditLogsPage from './pages/ConfigCenter/AuditLogsPage';
 import LoginPage from './pages/Auth/LoginPage';
 import RegisterPage from './pages/Auth/RegisterPage';
 import AICommandCenterPage from './pages/AI/AICommandCenterPage';
+import AccessDeniedPage from './components/Auth/AccessDeniedPage';
+import LegacyGovernanceRedirect from './components/Auth/LegacyGovernanceRedirect';
 
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -56,8 +58,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
 };
 
 const ProtectedApp: React.FC = () => {
+  const governanceMenuEnabled = import.meta.env.VITE_FEATURE_GOVERNANCE_MENU !== 'false';
   const withAuth = (resource: string, action: string, element: React.ReactElement) => (
-    <Authorized resource={resource} action={action}>
+    <Authorized resource={resource} action={action} fallback={<AccessDeniedPage />}>
       {element}
     </Authorized>
   );
@@ -105,9 +108,21 @@ const ProtectedApp: React.FC = () => {
           <Route path="/tools/cmdb" element={<ToolsPage />} />
           <Route path="/tools/archery" element={<ToolsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/settings/users" element={withAuth('rbac', 'read', <UsersPage />)} />
-          <Route path="/settings/roles" element={withAuth('rbac', 'read', <RolesPage />)} />
-          <Route path="/settings/permissions" element={withAuth('rbac', 'read', <PermissionsPage />)} />
+          <Route path="/governance/users" element={withAuth('rbac', 'read', <UsersPage />)} />
+          <Route path="/governance/roles" element={withAuth('rbac', 'read', <RolesPage />)} />
+          <Route path="/governance/permissions" element={withAuth('rbac', 'read', <PermissionsPage />)} />
+          <Route
+            path="/settings/users"
+            element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/users" /> : <Navigate to="/settings" replace />}
+          />
+          <Route
+            path="/settings/roles"
+            element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/roles" /> : <Navigate to="/settings" replace />}
+          />
+          <Route
+            path="/settings/permissions"
+            element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/permissions" /> : <Navigate to="/settings" replace />}
+          />
           <Route path="/services" element={withAuth('service', 'read', <ServiceListPage />)} />
           <Route path="/services/provision" element={withAuth('service', 'write', <ServiceProvisionPage />)} />
           <Route path="/services/:id" element={withAuth('service', 'read', <ServiceDetailPage />)} />

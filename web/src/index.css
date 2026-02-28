@@ -230,6 +230,22 @@ body {
   color: var(--color-text-secondary) !important;
 }
 
+.governance-action-btn {
+  min-height: 44px !important;
+  min-width: 44px !important;
+}
+
+.governance-interactive-row {
+  cursor: pointer;
+}
+
+.governance-interactive-row:focus,
+.governance-interactive-row:focus-within {
+  outline: 2px solid #255fe0;
+  outline-offset: -2px;
+  background: #edf4ff !important;
+}
+
 .ant-tag {
   border-radius: 4px;
 }

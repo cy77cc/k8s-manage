@@ -85,6 +85,15 @@ export interface RoleUpdateParams {
   permissions?: string[];
 }
 
+export interface MigrationEventParams {
+  eventType: 'legacy_redirect' | 'governance_task';
+  fromPath?: string;
+  toPath?: string;
+  action?: string;
+  status?: string;
+  durationMs?: number;
+}
+
 // RBAC管理API
 export const rbacApi = {
   async getMyPermissions(): Promise<ApiResponse<string[]>> {
@@ -145,5 +154,9 @@ export const rbacApi = {
   // 权限验证
   async checkPermission(resource: string, action: string): Promise<ApiResponse<{ hasPermission: boolean }>> {
     return apiService.post('/rbac/check', { resource, action });
+  },
+
+  async recordMigrationEvent(data: MigrationEventParams): Promise<ApiResponse<{ accepted: boolean }>> {
+    return apiService.post('/rbac/migration/events', data);
   },
 };

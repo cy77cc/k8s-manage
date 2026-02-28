@@ -1,7 +1,6 @@
 import React from 'react';
-import { Card, Form, Input, Button, Switch, Select, Divider, Space, message } from 'antd';
+import { Card, Form, Input, Button, Switch, Select, Divider, Space, message, Alert } from 'antd';
 import { SaveOutlined, UserOutlined, LockOutlined, BellOutlined, GlobalOutlined } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
 
 const { Option } = Select;
 
@@ -18,11 +17,12 @@ const SettingsPage: React.FC = () => {
         style={{ background: '#16213e', border: '1px solid #2d3748' }}
         title={<span className="text-white text-lg">系统设置</span>}
       >
-        <Space className="mb-4">
-          <Link to="/settings/users"><Button>用户管理</Button></Link>
-          <Link to="/settings/roles"><Button>角色管理</Button></Link>
-          <Link to="/settings/permissions"><Button>权限列表</Button></Link>
-        </Space>
+        <Alert
+          type="info"
+          showIcon
+          className="mb-4"
+          message="用户、角色、权限管理已迁移到侧边导航“访问治理”菜单。"
+        />
         <Form form={form} layout="vertical" style={{ maxWidth: 600 }}>
           <Divider><UserOutlined /> 个人信息</Divider>
           
