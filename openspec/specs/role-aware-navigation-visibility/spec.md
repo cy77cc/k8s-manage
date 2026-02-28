@@ -4,15 +4,15 @@
 TBD - created by archiving change extract-user-management-to-side-menu. Update Purpose after archive.
 ## Requirements
 ### Requirement: Role-Aware Navigation Visibility MUST Be Enforced
-The system MUST compute navigation visibility from the authenticated user's effective roles/permissions, SHALL render protected entries only for authorized users, and SHALL align menu grouping/order with the task-oriented information architecture while preserving authorization boundaries for each entry and governance action control.
+The system MUST compute right-side menu visibility from the authenticated user's effective roles/permissions and SHALL only render user-access-governance entries for authorized users, and SHALL only render governance action controls (including role-permission editing entry points) for users authorized to perform those actions.
 
-#### Scenario: Authorized user sees task-grouped governance menu and actions
+#### Scenario: Authorized user sees governance menu and actions
 - **WHEN** a user with required governance role signs in
-- **THEN** the system SHALL render governance entries in the task-oriented navigation structure and SHALL render only the governance action controls permitted to that user
+- **THEN** the system SHALL render the governance menu entries in the right-side navigation and SHALL render permitted governance action controls on the corresponding pages
 
-#### Scenario: Unauthorized user does not see protected governance menu or actions
+#### Scenario: Unauthorized user does not see governance menu or actions
 - **WHEN** a user without required governance role signs in
-- **THEN** the system SHALL NOT render protected governance navigation entries and SHALL NOT render governance action controls
+- **THEN** the system SHALL NOT render the governance menu entries in the right-side navigation and SHALL NOT render governance action controls
 
 ### Requirement: Route And API Access MUST Be Denied For Unauthorized Users
 The system MUST deny unauthorized direct access to governance routes and `/api/v1` governance endpoints even if the user manually enters URLs or calls APIs outside the UI.
@@ -24,4 +24,3 @@ The system MUST deny unauthorized direct access to governance routes and `/api/v
 #### Scenario: Unauthorized API access is blocked and auditable
 - **WHEN** an unauthorized user calls governance-related API endpoints
 - **THEN** the backend SHALL return HTTP 403 and SHALL emit an audit record with actor, resource, action, and timestamp
-

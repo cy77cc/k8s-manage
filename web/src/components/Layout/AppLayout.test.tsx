@@ -52,9 +52,6 @@ describe('AppLayout governance menu', () => {
 
     renderWithRouter();
 
-    expect(screen.getByText('NebulaOps')).toBeInTheDocument();
-    expect(screen.getByText('资源与资产')).toBeInTheDocument();
-    expect(screen.getByText(/系统健康度/)).toBeInTheDocument();
     expect(screen.getByText('访问治理')).toBeInTheDocument();
   });
 

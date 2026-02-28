@@ -7,7 +7,6 @@ export interface Alert {
   title: string;
   severity: string;
   source: string;
-  message: string;
   status: string;
   createdAt: string;
 }

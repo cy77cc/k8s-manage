@@ -84,7 +84,7 @@ const PermissionsPage: React.FC = () => {
             options={categories.map((value) => ({ value, label: value }))}
             onChange={(value) => setCategory(value || '')}
           />
-          <Button className="governance-action-btn" icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>
         </Space>
       )}
     >
@@ -118,7 +118,6 @@ const PermissionsPage: React.FC = () => {
               <Space>
                 <Button
                   type="link"
-                  className="governance-action-btn"
                   onClick={(event) => {
                     event.stopPropagation();
                     setActive(row);
@@ -130,7 +129,6 @@ const PermissionsPage: React.FC = () => {
                 <Button
                   type="link"
                   icon={<CopyOutlined />}
-                  className="governance-action-btn"
                   onClick={(event) => {
                     event.stopPropagation();
                     void copyPermissionCode(row.code);

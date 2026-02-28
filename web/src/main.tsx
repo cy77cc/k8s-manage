@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConfigProvider, theme as antdTheme } from 'antd';
@@ -34,5 +35,18 @@ createRoot(document.getElementById('root')!).render(
         <App />
       </I18nProvider>
     </ConfigProvider>
+=======
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+import { I18nProvider } from './i18n'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <I18nProvider>
+      <App />
+    </I18nProvider>
+>>>>>>> parent of c665b5d (feat: enhance UI theme and styling with Ant Design integration)
   </StrictMode>,
-);
+)

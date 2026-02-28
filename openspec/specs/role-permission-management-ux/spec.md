@@ -2,24 +2,25 @@
 
 ## Purpose
 Define governance UX requirements for discoverable actions, complete operation flows, scalable permission editing, and role-aware action visibility on user/role/permission pages.
+
 ## Requirements
 ### Requirement: Governance Pages SHALL Provide Complete Action Entry Points
-The system SHALL provide explicit and discoverable action entry points for high-frequency governance operations on Users, Roles, and Permissions pages, SHALL present those entry points using the unified design system patterns, and SHALL ensure core operations are not hidden behind implicit gestures only.
+The system SHALL provide explicit action entry points for high-frequency governance operations on Users, Roles, and Permissions pages, and SHALL ensure core operations are not hidden behind implicit gestures only.
 
-#### Scenario: User management shows explicit edit action in unified interaction pattern
+#### Scenario: User management shows explicit edit action
 - **WHEN** an authorized user opens the Users management page
-- **THEN** each user row SHALL expose an explicit `Edit` entry alongside destructive actions using consistent button/link patterns defined by the global UI foundation
+- **THEN** each user row SHALL expose an explicit `Edit` entry in addition to destructive actions such as `Delete`
 
 #### Scenario: Role and permission pages expose complete operation set
 - **WHEN** an authorized user opens Roles or Permissions page
-- **THEN** the page SHALL expose required non-destructive and destructive operations through discoverable controls with consistent visual hierarchy
+- **THEN** the page SHALL expose the required non-destructive and destructive operations through discoverable controls
 
 ### Requirement: Role List SHALL Expose Explicit Permission-Editing Entry
-The system SHALL provide explicit and discoverable action controls in the role list for viewing role details and editing role permissions, SHALL keep those controls accessible under the redesigned layout, and SHALL NOT require users to rely solely on implicit row-click behavior to find permission-editing functionality.
+The system SHALL provide explicit and discoverable action controls in the role list for viewing role details and editing role permissions, and SHALL NOT require users to rely solely on implicit row-click behavior to find permission-editing functionality.
 
-#### Scenario: Role list shows explicit actions with redesigned table patterns
+#### Scenario: Role list shows explicit actions
 - **WHEN** an authorized user opens the Roles management page
-- **THEN** each role row SHALL display explicit actions for `View Details` and `Edit Permissions` with consistent alignment and affordance
+- **THEN** each role row SHALL display explicit actions for `View Details` and `Edit Permissions`
 
 #### Scenario: Implicit interaction is not the only path
 - **WHEN** a user is unfamiliar with role management interactions
@@ -50,4 +51,3 @@ The system SHALL provide searchable and grouped permission browsing with respons
 #### Scenario: Large list rendering remains responsive
 - **WHEN** the permission dataset size grows significantly
 - **THEN** the system SHALL keep selection and scrolling interactions responsive through incremental rendering or equivalent optimization
-
