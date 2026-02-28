@@ -1,5 +1,16 @@
 ## ADDED Requirements
 
+### Requirement: Governance Pages SHALL Provide Complete Action Entry Points
+The system SHALL provide explicit action entry points for high-frequency governance operations on Users, Roles, and Permissions pages, and SHALL ensure core operations are not hidden behind implicit gestures only.
+
+#### Scenario: User management shows explicit edit action
+- **WHEN** an authorized user opens the Users management page
+- **THEN** each user row SHALL expose an explicit `Edit` entry in addition to destructive actions such as `Delete`
+
+#### Scenario: Role and permission pages expose complete operation set
+- **WHEN** an authorized user opens Roles or Permissions page
+- **THEN** the page SHALL expose the required non-destructive and destructive operations through discoverable controls
+
 ### Requirement: Role List SHALL Expose Explicit Permission-Editing Entry
 The system SHALL provide explicit and discoverable action controls in the role list for viewing role details and editing role permissions, and SHALL NOT require users to rely solely on implicit row-click behavior to find permission-editing functionality.
 

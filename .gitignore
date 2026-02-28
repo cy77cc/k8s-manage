@@ -53,6 +53,10 @@ dist
 dist-ssr
 *.local
 
+*.tgz
+
+*.tar.*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
