@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -19,15 +17,6 @@ import (
 type Handler struct{ svcCtx *svc.ServiceContext }
 
 func NewHandler(svcCtx *svc.ServiceContext) *Handler { return &Handler{svcCtx: svcCtx} }
-
-type codeValidationError struct {
-	field string
-	codes []string
-}
-
-func (e *codeValidationError) Error() string {
-	return fmt.Sprintf("invalid %s values: %s", e.field, strings.Join(e.codes, ","))
-}
 
 func (h *Handler) MyPermissions(c *gin.Context) {
 	uid, ok := c.Get("uid")
@@ -194,17 +183,9 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		}
 		return nil
 	}); err != nil {
-		var validationErr *codeValidationError
-		if errors.As(err, &validationErr) {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": validationErr.Error()}})
-			return
-		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
 	}
-
-	uid, _ := c.Get("uid")
-	log.Printf("rbac update user actor=%d target=%d timestamp=%s", toUint64(uid), id, time.Now().UTC().Format(time.RFC3339))
 	h.GetUser(c)
 }
 
@@ -319,17 +300,9 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 		}
 		return nil
 	}); err != nil {
-		var validationErr *codeValidationError
-		if errors.As(err, &validationErr) {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": validationErr.Error()}})
-			return
-		}
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
 	}
-
-	uid, _ := c.Get("uid")
-	log.Printf("rbac update role actor=%d target=%d timestamp=%s", toUint64(uid), id, time.Now().UTC().Format(time.RFC3339))
 	h.GetRole(c)
 }
 
@@ -588,17 +561,11 @@ func (h *Handler) syncUserRolesTx(tx *gorm.DB, userID uint64, roleCodes []string
 		return err
 	}
 	cleanCodes := make([]string, 0, len(roleCodes))
-	seen := make(map[string]struct{}, len(roleCodes))
 	for _, code := range roleCodes {
 		v := strings.TrimSpace(code)
-		if v == "" {
-			continue
+		if v != "" {
+			cleanCodes = append(cleanCodes, v)
 		}
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		cleanCodes = append(cleanCodes, v)
 	}
 	if len(cleanCodes) == 0 {
 		return nil
@@ -606,19 +573,6 @@ func (h *Handler) syncUserRolesTx(tx *gorm.DB, userID uint64, roleCodes []string
 	var roles []model.Role
 	if err := tx.Where("code IN ?", cleanCodes).Find(&roles).Error; err != nil {
 		return err
-	}
-	if len(roles) != len(cleanCodes) {
-		found := make(map[string]struct{}, len(roles))
-		for _, role := range roles {
-			found[strings.TrimSpace(role.Code)] = struct{}{}
-		}
-		missing := make([]string, 0)
-		for _, code := range cleanCodes {
-			if _, ok := found[code]; !ok {
-				missing = append(missing, code)
-			}
-		}
-		return &codeValidationError{field: "roles", codes: missing}
 	}
 	for _, role := range roles {
 		if err := tx.Create(&model.UserRole{UserID: int64(userID), RoleID: int64(role.ID)}).Error; err != nil {
@@ -633,17 +587,11 @@ func (h *Handler) syncRolePermissionsTx(tx *gorm.DB, roleID uint64, permissionCo
 		return err
 	}
 	cleanCodes := make([]string, 0, len(permissionCodes))
-	seen := make(map[string]struct{}, len(permissionCodes))
 	for _, code := range permissionCodes {
 		v := strings.TrimSpace(code)
-		if v == "" {
-			continue
+		if v != "" {
+			cleanCodes = append(cleanCodes, v)
 		}
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		cleanCodes = append(cleanCodes, v)
 	}
 	if len(cleanCodes) == 0 {
 		return nil
@@ -651,19 +599,6 @@ func (h *Handler) syncRolePermissionsTx(tx *gorm.DB, roleID uint64, permissionCo
 	var perms []model.Permission
 	if err := tx.Where("code IN ?", cleanCodes).Find(&perms).Error; err != nil {
 		return err
-	}
-	if len(perms) != len(cleanCodes) {
-		found := make(map[string]struct{}, len(perms))
-		for _, permission := range perms {
-			found[strings.TrimSpace(permission.Code)] = struct{}{}
-		}
-		missing := make([]string, 0)
-		for _, code := range cleanCodes {
-			if _, ok := found[code]; !ok {
-				missing = append(missing, code)
-			}
-		}
-		return &codeValidationError{field: "permissions", codes: missing}
 	}
 	for _, perm := range perms {
 		if err := tx.Create(&model.RolePermission{RoleID: int64(roleID), PermissionID: int64(perm.ID)}).Error; err != nil {
