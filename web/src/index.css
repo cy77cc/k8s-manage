@@ -214,6 +214,53 @@ body {
   color: #d94f56 !important;
 }
 
+.ant-select-dropdown .ant-select-item-option-selected {
+  background: #1f365c !important;
+  color: #eaf1ff !important;
+}
+
+.ant-dropdown .ant-dropdown-menu,
+.ant-dropdown-menu {
+  background: #0f1c33 !important;
+  border: 1px solid var(--color-border) !important;
+}
+
+.ant-dropdown-menu .ant-dropdown-menu-item,
+.ant-dropdown-menu .ant-dropdown-menu-submenu-title {
+  color: var(--color-text-primary) !important;
+}
+
+.ant-dropdown-menu .ant-dropdown-menu-item:hover,
+.ant-dropdown-menu .ant-dropdown-menu-submenu-title:hover {
+  background: #1d3154 !important;
+}
+
+.ant-tabs .ant-tabs-nav {
+  margin-bottom: 10px;
+}
+
+.ant-tabs .ant-tabs-nav::before {
+  border-bottom-color: var(--color-border) !important;
+}
+
+.ant-tabs .ant-tabs-tab {
+  color: var(--color-text-secondary) !important;
+}
+
+.ant-tabs .ant-tabs-tab:hover {
+  color: var(--color-brand-300) !important;
+}
+
+.ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--color-brand-300) !important;
+}
+
+.ant-tabs .ant-tabs-ink-bar {
+  background: var(--color-brand-500) !important;
+}
+
+.ant-modal-content,
+.ant-modal-header,
 .ant-drawer-content,
 .ant-drawer-header {
   background: var(--color-secondary) !important;

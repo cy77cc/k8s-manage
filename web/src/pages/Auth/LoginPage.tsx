@@ -27,13 +27,7 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center px-4"
-      style={{
-        background:
-          'radial-gradient(circle at 8% 4%, rgba(59,130,246,0.12), transparent 30%), radial-gradient(circle at 94% 0%, rgba(14,165,233,0.1), transparent 22%), var(--color-bg-app)',
-      }}
-    >
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 px-4">
       <Card className="w-full max-w-md shadow-lg">
         <Title level={3}>登录 OpsPilot</Title>
         <Text type="secondary">使用账号密码访问控制台</Text>

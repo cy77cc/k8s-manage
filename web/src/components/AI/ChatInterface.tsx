@@ -65,7 +65,7 @@ const renderMarkdown = (content: string) => (
             );
           }
           return (
-            <code className={`ai-inline-code ${className || ''}`} {...props}>
+            <code className={className} style={{ background: '#f5f6f7', padding: '2px 4px', borderRadius: 4 }} {...props}>
               {children}
             </code>
           );
