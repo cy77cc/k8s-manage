@@ -199,7 +199,10 @@ func (l *UserLogic) Logout(ctx context.Context, req v1.LogoutReq) error {
 	if strings.TrimSpace(req.RefreshToken) == "" {
 		return nil
 	}
-	return xcode.FromError(l.whiteListDao.DeleteToken(ctx, req.RefreshToken))
+	if err := l.whiteListDao.DeleteToken(ctx, req.RefreshToken); err != nil {
+		return xcode.FromError(err)
+	}
+	return nil
 }
 
 func (l *UserLogic) loadRolesAndPermissions(ctx context.Context, userID uint64) ([]string, []string, error) {

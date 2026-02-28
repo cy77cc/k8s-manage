@@ -50,6 +50,12 @@ func Response(c *gin.Context, resp interface{}, err error) {
 	if err != nil {
 		// Convert error to CodeError
 		codeErr := xcode.FromError(err)
+		if codeErr == nil {
+			codeErr = &xcode.CodeError{
+				Code: xcode.ServerError,
+				Msg:  xcode.ServerError.Msg(),
+			}
+		}
 
 		// Set HTTP Status Code based on Xcode
 		// We can choose to always return 200 and let client check Code,
