@@ -6,6 +6,41 @@
   --ai-font-lg: calc(14px * var(--ai-font-scale));
 }
 
+/* GPU 加速优化 */
+.ai-assistant-drawer .ant-drawer-content-wrapper {
+  will-change: transform;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+/* Drawer 内容区域优化 */
+.ai-assistant-drawer .ant-drawer-body {
+  contain: layout style;
+}
+
+/* 内容布局 */
+.ai-assistant-layout {
+  contain: layout;
+  opacity: 1;
+  transition: opacity 0.2s ease-out;
+}
+
+/* 关闭时的淡出效果 */
+.ai-assistant-layout.is-closing {
+  opacity: 0;
+}
+
+/* 优化 Drawer 遮罩动画 */
+.ai-assistant-drawer .ant-drawer-mask {
+  will-change: opacity;
+  backface-visibility: hidden;
+}
+
+/* 优化 Drawer 内容淡出 */
+.ai-assistant-drawer .ant-drawer-content {
+  will-change: transform;
+}
+
 @media (max-width: 1366px), (max-height: 820px) {
   .ai-assistant-drawer {
     --ai-font-scale: 0.94;

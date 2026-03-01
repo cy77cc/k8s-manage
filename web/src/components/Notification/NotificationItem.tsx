@@ -1,0 +1,118 @@
+import React from 'react';
+import { Button, Space } from 'antd';
+import {
+  AlertOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  InfoCircleOutlined,
+  ClockCircleOutlined,
+  CheckOutlined,
+  CloseOutlined,
+} from '@ant-design/icons';
+import type { UserNotification } from '../../types/notification';
+import { formatRelativeTime } from './utils';
+
+interface NotificationItemProps {
+  notification: UserNotification;
+  onMarkAsRead?: (id: string) => void;
+  onDismiss?: (id: string) => void;
+  onConfirm?: (id: string) => void;
+  onClick?: (notification: UserNotification) => void;
+}
+
+const severityConfig = {
+  critical: { icon: <CloseCircleOutlined />, color: '#ff4d4f', bgColor: '#fff1f0' },
+  warning: { icon: <AlertOutlined />, color: '#faad14', bgColor: '#fffbe6' },
+  info: { icon: <InfoCircleOutlined />, color: '#1677ff', bgColor: '#e6f4ff' },
+};
+
+const NotificationItem: React.FC<NotificationItemProps> = ({
+  notification,
+  onMarkAsRead,
+  onDismiss,
+  onConfirm,
+  onClick,
+}) => {
+  const { notification: n, read_at, confirmed_at } = notification;
+  const config = severityConfig[n.severity];
+  const isUnread = !read_at;
+  const canConfirm = n.action_type === 'confirm' && n.type === 'alert' && !confirmed_at;
+
+  const handleClick = () => {
+    onClick?.(notification);
+  };
+
+  const handleActionClick = (e: React.MouseEvent, action: () => void) => {
+    e.stopPropagation();
+    action();
+  };
+
+  return (
+    <div
+      className={`notification-item ${isUnread ? 'notification-item-unread' : ''}`}
+      onClick={handleClick}
+    >
+      <div className="notification-item-icon" style={{ color: config.color, backgroundColor: config.bgColor }}>
+        {config.icon}
+      </div>
+
+      <div className="notification-item-content">
+        <div className="notification-item-header">
+          <span className="notification-item-title">{n.title}</span>
+          {isUnread && <span className="notification-item-dot" />}
+        </div>
+
+        {n.content && (
+          <div className="notification-item-text">{n.content}</div>
+        )}
+
+        <div className="notification-item-meta">
+          <Space size={8}>
+            <span className="notification-item-source">{n.source}</span>
+            <span className="notification-item-time">
+              <ClockCircleOutlined /> {formatRelativeTime(n.created_at)}
+            </span>
+          </Space>
+        </div>
+
+        {(canConfirm || !read_at) && (
+          <div className="notification-item-actions">
+            {canConfirm && (
+              <Button
+                type="primary"
+                size="small"
+                icon={<CheckOutlined />}
+                onClick={(e) => handleActionClick(e, () => onConfirm?.(notification.id))}
+              >
+                确认告警
+              </Button>
+            )}
+            {!read_at && (
+              <>
+                <Button
+                  size="small"
+                  onClick={(e) => handleActionClick(e, () => onMarkAsRead?.(notification.id))}
+                >
+                  标记已读
+                </Button>
+                <Button
+                  size="small"
+                  icon={<CloseOutlined />}
+                  onClick={(e) => handleActionClick(e, () => onDismiss?.(notification.id))}
+                />
+              </>
+            )}
+          </div>
+        )}
+
+        {confirmed_at && (
+          <div className="notification-item-confirmed">
+            <CheckCircleOutlined style={{ color: '#52c41a' }} /> 已确认
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default NotificationItem;

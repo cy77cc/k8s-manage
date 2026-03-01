@@ -138,7 +138,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     };
   }, []);
 
-  const loadSession = async () => {
+  // 记录已加载的 scene，避免重复加载
+  const loadedSceneRef = useRef<string | null>(null);
+
+  const loadSession = async (forceReload = false) => {
+    // 如果 scene 没变且不是强制刷新，跳过
+    if (!forceReload && loadedSceneRef.current === scene && !sessionId) {
+      return;
+    }
+    loadedSceneRef.current = scene;
+
     try {
       if (sessionId) {
         const response = await Api.ai.getSessionDetail(sessionId);
@@ -175,13 +184,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  // 只在 sessionId 变化时加载，scene 变化不自动重新加载
   useEffect(() => {
-    loadSession();
-  }, [sessionId, scene]);
+    loadSession(true);
+  }, [sessionId]);
 
+  // 首次挂载时加载会话列表
+  const mountedRef = useRef(false);
   useEffect(() => {
-    void loadSessions();
-  }, [sessionId, scene]);
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      loadSession();
+      void loadSessions();
+    }
+  }, []);
 
   useEffect(() => {
     const key = `ai:pinned:sessions:${scene}`;

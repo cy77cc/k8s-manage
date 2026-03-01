@@ -79,6 +79,10 @@ const ServiceListPage: React.FC = () => {
           rowKey="id"
           loading={loading}
           dataSource={list}
+          rowClassName={() => 'stagger-row'}
+          onRow={(_, index) => ({
+            style: { '--stagger-delay': `${Math.min(index ?? 0, 20) * 30}ms` } as React.CSSProperties,
+          })}
           columns={[
             { title: '名称', dataIndex: 'name', render: (v: string, r: ServiceItem) => <a onClick={() => navigate(`/services/${r.id}`)}>{v}</a> },
             { title: '环境', dataIndex: 'env', render: (v: string) => <Tag>{v}</Tag> },

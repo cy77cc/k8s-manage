@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Breadcrumb, Avatar, Dropdown, Badge, Input, Tooltip, Button } from 'antd';
+import { Layout, Menu, Breadcrumb, Avatar, Dropdown, Input, Tooltip, Button } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   DashboardOutlined,
@@ -11,7 +11,6 @@ import {
   ToolOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  BellOutlined,
   SearchOutlined,
   UserOutlined,
   LogoutOutlined,
@@ -23,6 +22,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../Auth/AuthContext';
 import ProjectSwitcher from '../Project/ProjectSwitcher';
 import GlobalAIAssistant from '../AI/GlobalAIAssistant';
+import { NotificationBell } from '../Notification';
+import '../Notification/notification.css';
 import { useI18n } from '../../i18n';
 import { usePermission } from '../RBAC';
 
@@ -206,10 +207,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               />
             </Tooltip>
             <GlobalAIAssistant inlineTrigger />
-            
-            <Badge count={3} size="small">
-              <Button type="text" icon={<BellOutlined />} style={{ color: 'var(--color-text-secondary)' }} />
-            </Badge>
+
+            <NotificationBell onViewAll={() => navigate('/monitor')} />
             
             <Dropdown
               menu={{

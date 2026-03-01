@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/k8s-manage/internal/service/notification"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 )
 
@@ -409,6 +410,9 @@ func (l *Logic) evaluateRules(ctx context.Context, values map[string]float64) er
 			if err := l.deliverAlert(ctx, event); err != nil {
 				return err
 			}
+			// 创建通知并推送
+			integrator := notification.NewNotificationIntegrator(l.svcCtx.DB)
+			go integrator.CreateAlertNotification(context.Background(), &event)
 			continue
 		}
 

@@ -16,12 +16,14 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/service/host"
 	"github.com/cy77cc/k8s-manage/internal/service/monitoring"
 	"github.com/cy77cc/k8s-manage/internal/service/node"
+	"github.com/cy77cc/k8s-manage/internal/service/notification"
 	"github.com/cy77cc/k8s-manage/internal/service/project"
 	"github.com/cy77cc/k8s-manage/internal/service/rbac"
 	servicemgr "github.com/cy77cc/k8s-manage/internal/service/service"
 	"github.com/cy77cc/k8s-manage/internal/service/topology"
 	"github.com/cy77cc/k8s-manage/internal/service/user"
 	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/k8s-manage/internal/websocket"
 	webui "github.com/cy77cc/k8s-manage/web"
 	"github.com/gin-gonic/gin"
 )
@@ -48,6 +50,10 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	rbac.RegisterRBACHandlers(v1, serverCtx)
 	ai.RegisterAIHandlers(v1, serverCtx)
 	aiops.RegisterAIOPSHandlers(v1, serverCtx)
+	notification.RegisterNotificationHandlers(v1, serverCtx)
+
+	// WebSocket 路由
+	r.GET("/ws/notifications", websocket.HandleWebSocket)
 
 	registerWebStaticRoutes(r)
 }

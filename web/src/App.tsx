@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import AppLayout from './components/Layout/AppLayout';
 import { PermissionProvider, Authorized } from './components/RBAC';
 import { AuthProvider, useAuth } from './components/Auth/AuthContext';
+import { NotificationProvider } from './contexts/NotificationContext';
+import { PageTransition } from './components/Motion';
 import Dashboard from './pages/Dashboard/Dashboard';
 import HostListPage from './pages/Hosts/HostListPage';
 import HostDetailPage from './pages/Hosts/HostDetailPage';
@@ -59,6 +61,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
 };
 
 const ProtectedApp: React.FC = () => {
+  const { user } = useAuth();
   const governanceMenuEnabled = import.meta.env.VITE_FEATURE_GOVERNANCE_MENU !== 'false';
   const withAuth = (resource: string, action: string, element: React.ReactElement) => (
     <Authorized resource={resource} action={action} fallback={<AccessDeniedPage />}>
@@ -68,73 +71,77 @@ const ProtectedApp: React.FC = () => {
 
   return (
     <PermissionProvider>
-      <AppLayout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/hosts" element={withAuth('host', 'read', <HostListPage />)} />
-          <Route path="/hosts/onboarding" element={withAuth('host', 'write', <HostOnboardingPage />)} />
-          <Route path="/hosts/keys" element={withAuth('host', 'write', <HostKeysPage />)} />
-          <Route path="/hosts/cloud-import" element={withAuth('host', 'write', <HostCloudImportPage />)} />
-          <Route path="/hosts/virtualization" element={withAuth('host', 'write', <HostVirtualizationPage />)} />
-          <Route path="/hosts/detail/:id" element={withAuth('host', 'read', <HostDetailPage />)} />
-          <Route path="/hosts/terminal/:id" element={withAuth('host', 'write', <HostTerminalPage />)} />
-          <Route path="/config" element={withAuth('config', 'read', <ConfigPage />)} />
-          <Route path="/config/:id" element={withAuth('config', 'write', <ConfigPage />)} />
-          <Route path="/configcenter/apps" element={withAuth('config', 'read', <ConfigAppsPage />)} />
-          <Route path="/configcenter/list" element={withAuth('config', 'read', <ConfigListPage />)} />
-          <Route path="/configcenter/diff" element={withAuth('config', 'read', <ConfigDiffPage />)} />
-          <Route path="/configcenter/multienv" element={withAuth('config', 'write', <ConfigMultiEnvPage />)} />
-          <Route path="/configcenter/logs" element={withAuth('config', 'read', <AuditLogsPage />)} />
-          <Route path="/tasks" element={withAuth('task', 'read', <TasksPage />)} />
-          <Route path="/tasks/create" element={withAuth('task', 'write', <TasksPage />)} />
-          <Route path="/tasks/:id" element={withAuth('task', 'read', <TasksPage />)} />
-          <Route path="/jobs" element={withAuth('task', 'read', <JobListPage />)} />
-          <Route path="/jobs/create" element={withAuth('task', 'write', <JobCreationPage />)} />
-          <Route path="/jobs/:id/edit" element={withAuth('task', 'write', <JobCreationPage />)} />
-          <Route path="/jobs/:jobId/history" element={withAuth('task', 'read', <ExecutionHistoryPage />)} />
-          <Route path="/jobs/calendar" element={withAuth('task', 'read', <JobCalendarPage />)} />
-          <Route path="/deployment" element={withAuth('deploy:target', 'read', <DeploymentPage />)} />
-          <Route path="/k8s" element={<Navigate to="/deployment" replace />} />
-          <Route path="/k8s/:cluster" element={<Navigate to="/deployment" replace />} />
-          <Route path="/k8s-legacy" element={withAuth('kubernetes', 'read', <K8sPage />)} />
-          <Route path="/monitor" element={withAuth('monitoring', 'read', <MonitorPage />)} />
-          <Route path="/monitor/dashboard" element={withAuth('monitoring', 'read', <MonitorPage />)} />
-          <Route path="/monitor/alerts" element={withAuth('monitoring', 'read', <MonitorPage />)} />
-          <Route path="/monitor/rules" element={withAuth('monitoring', 'read', <MonitorPage />)} />
-          <Route path="/tools" element={<ToolsPage />} />
-          <Route path="/tools/nightingale" element={<ToolsPage />} />
-          <Route path="/tools/jenkins" element={<ToolsPage />} />
-          <Route path="/tools/jumpserver" element={<ToolsPage />} />
-          <Route path="/tools/kuboard" element={<ToolsPage />} />
-          <Route path="/tools/cmdb" element={<ToolsPage />} />
-          <Route path="/tools/archery" element={<ToolsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/governance/users" element={withAuth('rbac', 'read', <UsersPage />)} />
-          <Route path="/governance/roles" element={withAuth('rbac', 'read', <RolesPage />)} />
-          <Route path="/governance/permissions" element={withAuth('rbac', 'read', <PermissionsPage />)} />
-          <Route
-            path="/settings/users"
-            element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/users" /> : <Navigate to="/settings" replace />}
-          />
-          <Route
-            path="/settings/roles"
-            element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/roles" /> : <Navigate to="/settings" replace />}
-          />
-          <Route
-            path="/settings/permissions"
-            element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/permissions" /> : <Navigate to="/settings" replace />}
-          />
-          <Route path="/services" element={withAuth('service', 'read', <ServiceListPage />)} />
-          <Route path="/services/provision" element={withAuth('service', 'write', <ServiceProvisionPage />)} />
-          <Route path="/services/:id" element={withAuth('service', 'read', <ServiceDetailPage />)} />
-          <Route path="/cmdb/assets" element={withAuth('cmdb', 'read', <CMDBPage />)} />
-          <Route path="/automation" element={withAuth('automation', 'read', <AutomationPage />)} />
-          <Route path="/cicd" element={withAuth('cicd', 'read', <CICDPage />)} />
-          <Route path="/ai" element={withAuth('ai', 'read', <AICommandCenterPage />)} />
-          <Route path="/help" element={<HelpCenterPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+      <NotificationProvider userId={user?.id}>
+        <AppLayout>
+          <PageTransition>
+            <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/hosts" element={withAuth('host', 'read', <HostListPage />)} />
+            <Route path="/hosts/onboarding" element={withAuth('host', 'write', <HostOnboardingPage />)} />
+            <Route path="/hosts/keys" element={withAuth('host', 'write', <HostKeysPage />)} />
+            <Route path="/hosts/cloud-import" element={withAuth('host', 'write', <HostCloudImportPage />)} />
+            <Route path="/hosts/virtualization" element={withAuth('host', 'write', <HostVirtualizationPage />)} />
+            <Route path="/hosts/detail/:id" element={withAuth('host', 'read', <HostDetailPage />)} />
+            <Route path="/hosts/terminal/:id" element={withAuth('host', 'write', <HostTerminalPage />)} />
+            <Route path="/config" element={withAuth('config', 'read', <ConfigPage />)} />
+            <Route path="/config/:id" element={withAuth('config', 'write', <ConfigPage />)} />
+            <Route path="/configcenter/apps" element={withAuth('config', 'read', <ConfigAppsPage />)} />
+            <Route path="/configcenter/list" element={withAuth('config', 'read', <ConfigListPage />)} />
+            <Route path="/configcenter/diff" element={withAuth('config', 'read', <ConfigDiffPage />)} />
+            <Route path="/configcenter/multienv" element={withAuth('config', 'write', <ConfigMultiEnvPage />)} />
+            <Route path="/configcenter/logs" element={withAuth('config', 'read', <AuditLogsPage />)} />
+            <Route path="/tasks" element={withAuth('task', 'read', <TasksPage />)} />
+            <Route path="/tasks/create" element={withAuth('task', 'write', <TasksPage />)} />
+            <Route path="/tasks/:id" element={withAuth('task', 'read', <TasksPage />)} />
+            <Route path="/jobs" element={withAuth('task', 'read', <JobListPage />)} />
+            <Route path="/jobs/create" element={withAuth('task', 'write', <JobCreationPage />)} />
+            <Route path="/jobs/:id/edit" element={withAuth('task', 'write', <JobCreationPage />)} />
+            <Route path="/jobs/:jobId/history" element={withAuth('task', 'read', <ExecutionHistoryPage />)} />
+            <Route path="/jobs/calendar" element={withAuth('task', 'read', <JobCalendarPage />)} />
+            <Route path="/deployment" element={withAuth('deploy:target', 'read', <DeploymentPage />)} />
+            <Route path="/k8s" element={<Navigate to="/deployment" replace />} />
+            <Route path="/k8s/:cluster" element={<Navigate to="/deployment" replace />} />
+            <Route path="/k8s-legacy" element={withAuth('kubernetes', 'read', <K8sPage />)} />
+            <Route path="/monitor" element={withAuth('monitoring', 'read', <MonitorPage />)} />
+            <Route path="/monitor/dashboard" element={withAuth('monitoring', 'read', <MonitorPage />)} />
+            <Route path="/monitor/alerts" element={withAuth('monitoring', 'read', <MonitorPage />)} />
+            <Route path="/monitor/rules" element={withAuth('monitoring', 'read', <MonitorPage />)} />
+            <Route path="/tools" element={<ToolsPage />} />
+            <Route path="/tools/nightingale" element={<ToolsPage />} />
+            <Route path="/tools/jenkins" element={<ToolsPage />} />
+            <Route path="/tools/jumpserver" element={<ToolsPage />} />
+            <Route path="/tools/kuboard" element={<ToolsPage />} />
+            <Route path="/tools/cmdb" element={<ToolsPage />} />
+            <Route path="/tools/archery" element={<ToolsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/governance/users" element={withAuth('rbac', 'read', <UsersPage />)} />
+            <Route path="/governance/roles" element={withAuth('rbac', 'read', <RolesPage />)} />
+            <Route path="/governance/permissions" element={withAuth('rbac', 'read', <PermissionsPage />)} />
+            <Route
+              path="/settings/users"
+              element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/users" /> : <Navigate to="/settings" replace />}
+            />
+            <Route
+              path="/settings/roles"
+              element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/roles" /> : <Navigate to="/settings" replace />}
+            />
+            <Route
+              path="/settings/permissions"
+              element={governanceMenuEnabled ? <LegacyGovernanceRedirect to="/governance/permissions" /> : <Navigate to="/settings" replace />}
+            />
+            <Route path="/services" element={withAuth('service', 'read', <ServiceListPage />)} />
+            <Route path="/services/provision" element={withAuth('service', 'write', <ServiceProvisionPage />)} />
+            <Route path="/services/:id" element={withAuth('service', 'read', <ServiceDetailPage />)} />
+            <Route path="/cmdb/assets" element={withAuth('cmdb', 'read', <CMDBPage />)} />
+            <Route path="/automation" element={withAuth('automation', 'read', <AutomationPage />)} />
+            <Route path="/cicd" element={withAuth('cicd', 'read', <CICDPage />)} />
+            <Route path="/ai" element={withAuth('ai', 'read', <AICommandCenterPage />)} />
+            <Route path="/help" element={<HelpCenterPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </PageTransition>
       </AppLayout>
+      </NotificationProvider>
     </PermissionProvider>
   );
 };

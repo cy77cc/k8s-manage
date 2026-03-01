@@ -51,12 +51,14 @@ export * from './modules/topology';
 import { topologyApi } from './modules/topology';
 export * from './modules/deployment';
 import { deploymentApi } from './modules/deployment';
+export * from './modules/notification';
+import { notificationApi } from './modules/notification';
 
 // 统一导出所有API
 export const Api = {
   // 基础服务
   service: apiService,
-  
+
   // 模块API
   hosts: hostApi,
   tasks: taskApi,
@@ -74,6 +76,7 @@ export const Api = {
   cicd: cicdApi,
   topology: topologyApi,
   deployment: deploymentApi,
+  notification: notificationApi,
 };
 
 export default Api;

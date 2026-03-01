@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Col, List, Progress, Row, Space, Statistic, Table, Tag, Button } from 'antd';
 import { AlertOutlined, CloudOutlined, DesktopOutlined, ReloadOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { Api } from '../../api';
+import { StaggerList, StaggerItem } from '../../components/Motion';
 
 interface DashboardState {
   hostTotal: number;
@@ -88,23 +89,29 @@ const Dashboard: React.FC = () => {
         <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
       </div>
 
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} lg={6}><Card><Statistic title="主机总数" value={state.hostTotal} prefix={<DesktopOutlined />} /></Card></Col>
-        <Col xs={24} sm={12} lg={6}><Card><Statistic title="在线主机" value={state.hostOnline} prefix={<CloudOutlined />} /></Card></Col>
-        <Col xs={24} sm={12} lg={6}><Card><Statistic title="任务总数" value={state.jobTotal} prefix={<ScheduleOutlined />} /></Card></Col>
-        <Col xs={24} sm={12} lg={6}><Card><Statistic title="活跃告警" value={state.alertTotal} prefix={<AlertOutlined />} /></Card></Col>
-      </Row>
+      <StaggerList staggerDelay={0.05}>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} sm={12} lg={6}><StaggerItem><Card><Statistic title="主机总数" value={state.hostTotal} prefix={<DesktopOutlined />} /></Card></StaggerItem></Col>
+          <Col xs={24} sm={12} lg={6}><StaggerItem><Card><Statistic title="在线主机" value={state.hostOnline} prefix={<CloudOutlined />} /></Card></StaggerItem></Col>
+          <Col xs={24} sm={12} lg={6}><StaggerItem><Card><Statistic title="任务总数" value={state.jobTotal} prefix={<ScheduleOutlined />} /></Card></StaggerItem></Col>
+          <Col xs={24} sm={12} lg={6}><StaggerItem><Card><Statistic title="活跃告警" value={state.alertTotal} prefix={<AlertOutlined />} /></Card></StaggerItem></Col>
+        </Row>
+      </StaggerList>
 
-      <Row gutter={[16, 16]}>
-        {widgets.map((w) => (
-          <Col xs={24} sm={12} md={8} lg={6} key={w.key}>
-            <Card size="small" title={w.title}>
-              <div className="text-lg font-bold">{w.value}</div>
-              <div className="text-gray-500">{w.extra}</div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
+      <StaggerList staggerDelay={0.05}>
+        <Row gutter={[16, 16]}>
+          {widgets.map((w) => (
+            <Col xs={24} sm={12} md={8} lg={6} key={w.key}>
+              <StaggerItem>
+                <Card size="small" title={w.title}>
+                  <div className="text-lg font-bold">{w.value}</div>
+                  <div className="text-gray-500">{w.extra}</div>
+                </Card>
+              </StaggerItem>
+            </Col>
+          ))}
+        </Row>
+      </StaggerList>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={14}>

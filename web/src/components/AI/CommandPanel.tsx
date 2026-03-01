@@ -158,6 +158,7 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
             {preview.risk === 'high' ? (
               <Alert
                 type="error"
+                className="motion-high-risk-pulse"
                 message="高风险命令"
                 description="请重点核对目标资源、关键参数和回滚路径，再执行确认。"
               />
@@ -232,7 +233,7 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
               <Text code>{String(preview.artifacts?.approval_token || '-')}</Text>
             </Text>
             {preview.risk === 'high' ? (
-              <Alert type="error" message="高风险操作将直接影响线上状态，请确认审批与回滚方案。" />
+              <Alert type="error" className="motion-high-risk-pulse" message="高风险操作将直接影响线上状态，请确认审批与回滚方案。" />
             ) : null}
             {paramDiff.length > 0 ? (
               <Card size="small" title="参数 Diff 摘要">

@@ -106,6 +106,10 @@ const HostListPage: React.FC = () => {
         rowSelection={{ selectedRowKeys: selected, onChange: setSelected }}
         loading={loading}
         dataSource={filtered}
+        rowClassName={() => 'stagger-row'}
+        onRow={(_, index) => ({
+          style: { '--stagger-delay': `${Math.min(index ?? 0, 20) * 30}ms` } as React.CSSProperties,
+        })}
         columns={[
           { title: '名称', dataIndex: 'name', render: (v: string, r: Host) => <a onClick={() => navigate(`/hosts/detail/${r.id}`)}>{v}</a> },
           { title: 'IP', dataIndex: 'ip' },
