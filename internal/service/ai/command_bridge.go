@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	ai2 "github.com/cy77cc/k8s-manage/internal/ai"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/service/cicd"
 	"github.com/gin-gonic/gin"
@@ -49,8 +49,8 @@ type commandAction struct {
 	Description  string
 	Required     []string
 	Permission   string
-	Mode         ai2.ToolMode
-	Risk         ai2.ToolRisk
+	Mode         tools.ToolMode
+	Risk         tools.ToolRisk
 	Tool         string
 	NextActions  []string
 	Exec         func(ctx context.Context, h *handler, uid uint64, cc commandContext, approvalToken string) (map[string]any, error)
@@ -109,8 +109,8 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 		Description: "查询服务状态",
 		Required:    []string{"service_id"},
 		Permission:  "ai:tool:read",
-		Mode:        ai2.ToolModeReadonly,
-		Risk:        ai2.ToolRiskLow,
+		Mode:        tools.ToolModeReadonly,
+		Risk:        tools.ToolRiskLow,
 		Tool:        "service_get_detail",
 		NextActions: []string{"deployment.release.preview", "ops.aggregate.status"},
 	})
@@ -120,8 +120,8 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 		Description: "触发发布",
 		Required:    []string{"service_id", "deployment_id", "env", "version", "runtime_type"},
 		Permission:  "cicd:release:run",
-		Mode:        ai2.ToolModeMutating,
-		Risk:        ai2.ToolRiskMedium,
+		Mode:        tools.ToolModeMutating,
+		Risk:        tools.ToolRiskMedium,
 		NextActions: []string{"cicd.release.approve", "ops.aggregate.status"},
 		Exec:        executeTriggerRelease,
 	})
@@ -131,8 +131,8 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 		Description: "回滚发布",
 		Required:    []string{"release_id", "target_version"},
 		Permission:  "cicd:release:rollback",
-		Mode:        ai2.ToolModeMutating,
-		Risk:        ai2.ToolRiskHigh,
+		Mode:        tools.ToolModeMutating,
+		Risk:        tools.ToolRiskHigh,
 		NextActions: []string{"ops.aggregate.status"},
 		Exec:        executeRollbackRelease,
 	})
@@ -142,8 +142,8 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 		Description: "审批发布",
 		Required:    []string{"release_id", "approve"},
 		Permission:  "cicd:release:approve",
-		Mode:        ai2.ToolModeMutating,
-		Risk:        ai2.ToolRiskHigh,
+		Mode:        tools.ToolModeMutating,
+		Risk:        tools.ToolRiskHigh,
 		NextActions: []string{"ops.aggregate.status"},
 		Exec:        executeReleaseApproval,
 	})
@@ -153,8 +153,8 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 		Description: "查询资产与关系",
 		Required:    []string{},
 		Permission:  "cmdb:read",
-		Mode:        ai2.ToolModeReadonly,
-		Risk:        ai2.ToolRiskLow,
+		Mode:        tools.ToolModeReadonly,
+		Risk:        tools.ToolRiskLow,
 		NextActions: []string{"ops.aggregate.status"},
 		Exec:        executeCMDBSearch,
 	})
@@ -164,8 +164,8 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 		Description: "查询告警",
 		Required:    []string{},
 		Permission:  "monitoring:read",
-		Mode:        ai2.ToolModeReadonly,
-		Risk:        ai2.ToolRiskLow,
+		Mode:        tools.ToolModeReadonly,
+		Risk:        tools.ToolRiskLow,
 		NextActions: []string{"service.status"},
 		Exec:        executeAlertSearch,
 	})
@@ -175,8 +175,8 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 		Description: "跨域聚合状态",
 		Required:    []string{},
 		Permission:  "ai:tool:read",
-		Mode:        ai2.ToolModeReadonly,
-		Risk:        ai2.ToolRiskLow,
+		Mode:        tools.ToolModeReadonly,
+		Risk:        tools.ToolRiskLow,
 		NextActions: []string{"deployment.release", "monitor.alerts"},
 		Exec:        executeAggregate,
 	})
@@ -184,10 +184,10 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 }
 
 func classifyRisk(action commandAction) commandRisk {
-	if action.Mode == ai2.ToolModeReadonly {
+	if action.Mode == tools.ToolModeReadonly {
 		return commandRiskReadonly
 	}
-	if action.Risk == ai2.ToolRiskHigh {
+	if action.Risk == tools.ToolRiskHigh {
 		return commandRiskHigh
 	}
 	return commandRiskLow
@@ -359,8 +359,8 @@ func (h *handler) previewCommand(c *gin.Context) {
 		ticket := h.store.newApproval(uid, approvalTicket{
 			Tool:   cc.Intent,
 			Params: cc.Params,
-			Risk:   ai2.ToolRiskHigh,
-			Mode:   ai2.ToolModeMutating,
+			Risk:   tools.ToolRiskHigh,
+			Mode:   tools.ToolModeMutating,
 		})
 		result.Artifacts["approval_required"] = true
 		result.Artifacts["approval_token"] = ticket.ID
@@ -494,8 +494,8 @@ func (h *handler) executeWithTool(ctx context.Context, uid uint64, cc commandCon
 	if strings.TrimSpace(cc.Action.Tool) == "" {
 		return nil, fmt.Errorf("action %s has no executor", cc.Intent)
 	}
-	runCtx := ai2.WithToolUser(ctx, uid, approvalToken)
-	runCtx = ai2.WithToolPolicyChecker(runCtx, h.toolPolicy)
+	runCtx := tools.WithToolUser(ctx, uid, approvalToken)
+	runCtx = tools.WithToolPolicyChecker(runCtx, h.toolPolicy)
 	result, err := h.svcCtx.AI.RunTool(runCtx, cc.Action.Tool, cc.Params)
 	artifacts := map[string]any{
 		"tool":       cc.Action.Tool,

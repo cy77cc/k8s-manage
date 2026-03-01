@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	ai2 "github.com/cy77cc/k8s-manage/internal/ai"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +21,7 @@ func (h *handler) capabilities(c *gin.Context) {
 		return
 	}
 	all := h.svcCtx.AI.ToolMetas()
-	out := make([]ai2.ToolMeta, 0, len(all))
+	out := make([]tools.ToolMeta, 0, len(all))
 	for _, item := range all {
 		if h.hasPermission(uid, item.Permission) {
 			out = append(out, item)
@@ -63,9 +63,9 @@ func (h *handler) previewTool(c *gin.Context) {
 		"mode":              meta.Mode,
 		"risk":              meta.Risk,
 		"params":            req.Params,
-		"approval_required": meta.Mode == ai2.ToolModeMutating,
+		"approval_required": meta.Mode == tools.ToolModeMutating,
 	}
-	if meta.Mode == ai2.ToolModeMutating {
+	if meta.Mode == tools.ToolModeMutating {
 		t := h.store.newApproval(uid, approvalTicket{
 			Tool:   meta.Name,
 			Params: req.Params,
@@ -111,8 +111,8 @@ func (h *handler) executeTool(c *gin.Context) {
 		CreatedAt:  time.Now(),
 	}
 	start := time.Now()
-	ctx := ai2.WithToolUser(c.Request.Context(), uid, strings.TrimSpace(req.ApprovalToken))
-	ctx = ai2.WithToolPolicyChecker(ctx, h.toolPolicy)
+	ctx := tools.WithToolUser(c.Request.Context(), uid, strings.TrimSpace(req.ApprovalToken))
+	ctx = tools.WithToolPolicyChecker(ctx, h.toolPolicy)
 	result, err := h.svcCtx.AI.RunTool(ctx, req.Tool, req.Params)
 	finished := time.Now()
 	rec.FinishedAt = &finished
@@ -126,7 +126,7 @@ func (h *handler) executeTool(c *gin.Context) {
 		rec.Status = "failed"
 		rec.Error = result.Error
 	}
-	if apErr, ok := ai2.IsApprovalRequired(err); ok {
+	if apErr, ok := tools.IsApprovalRequired(err); ok {
 		rec.Status = "failed"
 		rec.Error = apErr.Error()
 	}
@@ -170,7 +170,7 @@ func (h *handler) createApproval(c *gin.Context) {
 		return
 	}
 	req.Tool = meta.Name
-	if meta.Mode == ai2.ToolModeReadonly {
+	if meta.Mode == tools.ToolModeReadonly {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "readonly tool does not require approval"})
 		return
 	}
@@ -220,17 +220,17 @@ func (h *handler) confirmApproval(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 1000, "msg": "ok", "data": out})
 }
 
-func (h *handler) findMeta(name string) (ai2.ToolMeta, bool) {
+func (h *handler) findMeta(name string) (tools.ToolMeta, bool) {
 	if h.svcCtx.AI == nil {
-		return ai2.ToolMeta{}, false
+		return tools.ToolMeta{}, false
 	}
-	normalized := ai2.NormalizeToolName(name)
+	normalized := tools.NormalizeToolName(name)
 	for _, item := range h.svcCtx.AI.ToolMetas() {
 		if item.Name == normalized {
 			return item, true
 		}
 	}
-	return ai2.ToolMeta{}, false
+	return tools.ToolMeta{}, false
 }
 
 func strconvFormatInt(v int64) string {

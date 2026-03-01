@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	ai2 "github.com/cy77cc/k8s-manage/internal/ai"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"gorm.io/gorm"
@@ -44,28 +44,28 @@ type approvalTicket struct {
 	ID         string         `json:"id"`
 	Tool       string         `json:"tool"`
 	Params     map[string]any `json:"params"`
-	Risk       ai2.ToolRisk   `json:"risk"`
-	Mode       ai2.ToolMode   `json:"mode"`
+	Risk       tools.ToolRisk `json:"risk"`
+	Mode       tools.ToolMode `json:"mode"`
 	Status     string         `json:"status"`
 	CreatedAt  time.Time      `json:"createdAt"`
 	ExpiresAt  time.Time      `json:"expiresAt"`
 	RequestUID uint64         `json:"requestUid"`
 	ReviewUID  uint64         `json:"reviewUid,omitempty"`
-	Meta       ai2.ToolMeta   `json:"-"`
+	Meta       tools.ToolMeta `json:"-"`
 }
 
 type executionRecord struct {
-	ID         string          `json:"id"`
-	Tool       string          `json:"tool"`
-	Params     map[string]any  `json:"params"`
-	Mode       ai2.ToolMode    `json:"mode"`
-	Status     string          `json:"status"`
-	Result     *ai2.ToolResult `json:"result,omitempty"`
-	ApprovalID string          `json:"approvalId,omitempty"`
-	RequestUID uint64          `json:"requestUid"`
-	CreatedAt  time.Time       `json:"createdAt"`
-	FinishedAt *time.Time      `json:"finishedAt,omitempty"`
-	Error      string          `json:"error,omitempty"`
+	ID         string            `json:"id"`
+	Tool       string            `json:"tool"`
+	Params     map[string]any    `json:"params"`
+	Mode       tools.ToolMode    `json:"mode"`
+	Status     string            `json:"status"`
+	Result     *tools.ToolResult `json:"result,omitempty"`
+	ApprovalID string            `json:"approvalId,omitempty"`
+	RequestUID uint64            `json:"requestUid"`
+	CreatedAt  time.Time         `json:"createdAt"`
+	FinishedAt *time.Time        `json:"finishedAt,omitempty"`
+	Error      string            `json:"error,omitempty"`
 }
 
 type handler struct {

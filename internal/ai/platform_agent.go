@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 )
 
 const toolCallGuide = `Tool calling rules:
@@ -27,31 +28,31 @@ type PlatformAgent struct {
 	Model    model.ToolCallingChatModel
 	experts  map[string]*react.Agent
 	tools    map[string]tool.InvokableTool
-	metas    map[string]ToolMeta
-	mcp      *MCPClientManager
+	metas    map[string]tools.ToolMeta
+	mcp      *tools.MCPClientManager
 }
 
-func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel, deps PlatformDeps) (*PlatformAgent, error) {
+func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel, deps tools.PlatformDeps) (*PlatformAgent, error) {
 	if chatModel == nil {
 		return nil, nil
 	}
 
-	localTools, err := BuildLocalTools(deps)
+	localTools, err := tools.BuildLocalTools(deps)
 	if err != nil {
 		return nil, err
 	}
-	mcpManager, err := NewMCPClientManager(ctx, MCPConfigFromEnv())
+	mcpManager, err := tools.NewMCPClientManager(ctx, tools.MCPConfigFromEnv())
 	if err != nil {
 		return nil, err
 	}
-	mcpTools, err := BuildMCPProxyTools(mcpManager)
+	mcpTools, err := tools.BuildMCPProxyTools(mcpManager)
 	if err != nil {
 		return nil, err
 	}
 	registered := append(localTools, mcpTools...)
 	baseTools := make([]tool.BaseTool, 0, len(registered))
 	toolMap := make(map[string]tool.InvokableTool, len(registered))
-	metaMap := make(map[string]ToolMeta, len(registered))
+	metaMap := make(map[string]tools.ToolMeta, len(registered))
 	for _, item := range registered {
 		baseTools = append(baseTools, item.Tool)
 		toolMap[item.Meta.Name] = item.Tool
@@ -118,11 +119,11 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 	}, nil
 }
 
-func (p *PlatformAgent) ToolMetas() []ToolMeta {
+func (p *PlatformAgent) ToolMetas() []tools.ToolMeta {
 	if p == nil {
 		return nil
 	}
-	out := make([]ToolMeta, 0, len(p.metas))
+	out := make([]tools.ToolMeta, 0, len(p.metas))
 	for _, m := range p.metas {
 		out = append(out, m)
 	}
@@ -169,26 +170,51 @@ func (p *PlatformAgent) selectAgent(messages []*schema.Message) *react.Agent {
 	}
 }
 
-func (p *PlatformAgent) RunTool(ctx context.Context, toolName string, params map[string]any) (ToolResult, error) {
+func (p *PlatformAgent) RunTool(ctx context.Context, toolName string, params map[string]any) (tools.ToolResult, error) {
 	if p == nil {
-		return ToolResult{OK: false, Error: "agent not initialized", Source: "platform"}, fmt.Errorf("agent not initialized")
+		return tools.ToolResult{
+				OK:     false,
+				Error:  "agent not initialized",
+				Source: "platform",
+			},
+			fmt.Errorf("agent not initialized")
 	}
-	normalizedName := NormalizeToolName(toolName)
+	normalizedName := tools.NormalizeToolName(toolName)
 	t, ok := p.tools[normalizedName]
 	if !ok {
-		return ToolResult{OK: false, Error: "tool not found", Source: "platform"}, fmt.Errorf("tool not found")
+		return tools.ToolResult{
+				OK:     false,
+				Error:  "tool not found",
+				Source: "platform",
+			},
+			fmt.Errorf("tool not found")
 	}
 	raw, err := json.Marshal(params)
 	if err != nil {
-		return ToolResult{OK: false, Error: err.Error(), Source: "platform"}, err
+		return tools.ToolResult{
+				OK:     false,
+				Error:  err.Error(),
+				Source: "platform",
+			},
+			err
 	}
 	out, err := t.InvokableRun(ctx, string(raw))
 	if err != nil {
-		return ToolResult{OK: false, Error: err.Error(), Source: "platform"}, nil
+		return tools.ToolResult{
+				OK:     false,
+				Error:  err.Error(),
+				Source: "platform",
+			},
+			nil
 	}
-	var result ToolResult
+	var result tools.ToolResult
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
-		return ToolResult{OK: true, Data: out, Source: "platform"}, nil
+		return tools.ToolResult{
+				OK:     true,
+				Data:   out,
+				Source: "platform",
+			},
+			nil
 	}
 	return result, nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/casbin/casbin/v2"
 	"github.com/cy77cc/k8s-manage/internal/ai"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	casbinadapter "github.com/cy77cc/k8s-manage/internal/component/casbin"
 	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/logger"
@@ -47,7 +48,7 @@ func MustNewServiceContext() *ServiceContext {
 	db := storage.MustNewDB()
 
 	platformAgent, err := ai.NewPlatformAgent(ctx, chatModel,
-		ai.PlatformDeps{
+		tools.PlatformDeps{
 			DB:        db,
 			Clientset: clientset,
 		})

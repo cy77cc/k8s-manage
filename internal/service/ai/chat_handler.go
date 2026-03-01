@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
-	ai2 "github.com/cy77cc/k8s-manage/internal/ai"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/gin-gonic/gin"
 )
 
@@ -226,7 +226,7 @@ func (h *handler) chat(c *gin.Context) {
 			break
 		}
 		if recvErr != nil {
-			if apErr, ok := ai2.IsApprovalRequired(recvErr); ok {
+			if apErr, ok := tools.IsApprovalRequired(recvErr); ok {
 				_ = emit("approval_required", gin.H{
 					"tool":           apErr.Tool,
 					"approval_token": apErr.Token,
@@ -254,7 +254,7 @@ func (h *handler) chat(c *gin.Context) {
 		}
 	}
 	if streamErr != nil && !errors.Is(streamErr, io.EOF) {
-		if _, ok := ai2.IsApprovalRequired(streamErr); !ok {
+		if _, ok := tools.IsApprovalRequired(streamErr); !ok {
 			fatalErr = &streamErrorPayload{
 				Code:        "stream_interrupted",
 				Message:     streamErr.Error(),
@@ -439,15 +439,15 @@ func composePromptDirectives(directives ...string) string {
 }
 
 func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene string, runtime map[string]any, emit func(event string, payload gin.H) bool, tracker *toolEventTracker) context.Context {
-	ctx = ai2.WithToolUser(ctx, uid, approvalToken)
-	ctx = ai2.WithToolRuntimeContext(ctx, runtime)
-	ctx = ai2.WithToolMemoryAccessor(ctx, &toolMemoryAccessor{
+	ctx = tools.WithToolUser(ctx, uid, approvalToken)
+	ctx = tools.WithToolRuntimeContext(ctx, runtime)
+	ctx = tools.WithToolMemoryAccessor(ctx, &toolMemoryAccessor{
 		store: h.store,
 		uid:   uid,
 		scene: scene,
 	})
-	ctx = ai2.WithToolPolicyChecker(ctx, h.toolPolicy)
-	ctx = ai2.WithToolEventEmitter(ctx, func(event string, payload any) {
+	ctx = tools.WithToolPolicyChecker(ctx, h.toolPolicy)
+	ctx = tools.WithToolEventEmitter(ctx, func(event string, payload any) {
 		switch event {
 		case "tool_call", "tool_result":
 			pm := toPayloadMap(payload)

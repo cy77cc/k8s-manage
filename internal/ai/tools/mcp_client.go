@@ -1,4 +1,4 @@
-package ai
+package tools
 
 import (
 	"context"
@@ -162,6 +162,8 @@ func (m *MCPClientManager) CallTool(ctx context.Context, toolName string, args m
 		},
 	})
 }
+
+
 
 func (m *MCPClientManager) Close() error {
 	if m == nil || m.cli == nil {

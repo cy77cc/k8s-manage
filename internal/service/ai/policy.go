@@ -6,20 +6,20 @@ import (
 	"strings"
 	"time"
 
-	ai2 "github.com/cy77cc/k8s-manage/internal/ai"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/gin-gonic/gin"
 )
 
-func (h *handler) toolPolicy(ctx context.Context, meta ai2.ToolMeta, params map[string]any) error {
-	uid, approvalToken := ai2.ToolUserFromContext(ctx)
+func (h *handler) toolPolicy(ctx context.Context, meta tools.ToolMeta, params map[string]any) error {
+	uid, approvalToken := tools.ToolUserFromContext(ctx)
 	if uid == 0 {
 		return errors.New("unauthorized")
 	}
 	if !h.hasPermission(uid, meta.Permission) {
 		return errors.New("permission denied")
 	}
-	if meta.Mode == ai2.ToolModeReadonly {
+	if meta.Mode == tools.ToolModeReadonly {
 		return nil
 	}
 	if strings.TrimSpace(approvalToken) == "" {
@@ -30,7 +30,7 @@ func (h *handler) toolPolicy(ctx context.Context, meta ai2.ToolMeta, params map[
 			Mode:   meta.Mode,
 			Meta:   meta,
 		})
-		return &ai2.ApprovalRequiredError{
+		return &tools.ApprovalRequiredError{
 			Token:     t.ID,
 			Tool:      t.Tool,
 			ExpiresAt: t.ExpiresAt,
