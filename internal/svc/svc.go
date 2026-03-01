@@ -46,10 +46,11 @@ func MustNewServiceContext() *ServiceContext {
 
 	db := storage.MustNewDB()
 
-	platformAgent, err := ai.NewPlatformAgent(ctx, chatModel, ai.PlatformDeps{
-		DB:        db,
-		Clientset: clientset,
-	})
+	platformAgent, err := ai.NewPlatformAgent(ctx, chatModel,
+		ai.PlatformDeps{
+			DB:        db,
+			Clientset: clientset,
+		})
 	if err != nil {
 		logger.L().Warn("Failed to initialize AI PlatformAgent",
 			logger.String("base_url", aiBaseURL()),

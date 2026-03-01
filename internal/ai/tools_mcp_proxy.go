@@ -31,11 +31,13 @@ func BuildMCPProxyTools(manager *MCPClientManager) ([]RegisteredTool, error) {
 			start := time.Now()
 			callID := nextToolCallID()
 			EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "call_id": callID, "params": input})
+
 			if err := CheckToolPolicy(ctx, meta, input); err != nil {
 				res := ToolResult{OK: false, ErrorCode: "policy_denied", Error: err.Error(), Source: "mcp", LatencyMS: time.Since(start).Milliseconds()}
 				EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res})
 				return res, err
 			}
+
 			callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			res, err := manager.CallTool(callCtx, toolName, input)

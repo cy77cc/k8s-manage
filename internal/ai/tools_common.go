@@ -16,28 +16,99 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// runWithPolicyAndEvent 执行工具操作并处理相关的策略检查、事件发送和错误处理
+//
+// 参数:
+//   - ctx: 上下文对象，用于传递请求范围的值和控制取消
+//   - meta: 工具元数据，包含工具名称、提供者等信息
+//   - input: 工具执行的输入数据
+//   - do: 实际执行工具逻辑的函数
+//
+// 返回值:
+//   - ToolResult: 工具执行结果
+//   - error: 执行过程中的错误
 func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, do func(T) (any, string, error)) (ToolResult, error) {
+	// 记录开始时间，用于计算执行延迟
 	start := time.Now()
+
+	// 将输入结构体转换为映射
 	originalParams := structToMap(input)
+
+	// 解析工具参数
 	resolvedParams, resolution := resolveToolParams(ctx, meta, originalParams, "")
+
+	// 将解析后的参数转换回输入类型
 	runtimeInput, convErr := mapToInput[T](resolvedParams)
+
+	// 检查参数转换是否成功
 	if convErr != nil {
-		res := ToolResult{OK: false, ErrorCode: "invalid_param", Error: convErr.Error(), Source: meta.Provider, LatencyMS: time.Since(start).Milliseconds()}
-		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": nextToolCallID(), "result": res, "param_resolution": resolution, "retry": false})
+		// 构建参数错误结果
+		res := ToolResult{
+			OK:        false,
+			ErrorCode: "invalid_param",
+			Error:     convErr.Error(),
+			Source:    meta.Provider,
+			LatencyMS: time.Since(start).Milliseconds(),
+		}
+
+		// 发送工具结果事件
+		EmitToolEvent(ctx, "tool_result", map[string]any{
+			"tool":             meta.Name,
+			"call_id":          nextToolCallID(),
+			"result":           res,
+			"param_resolution": resolution,
+			"retry":            false,
+		})
+
 		return res, nil
 	}
+
+	// 生成调用ID
 	callID := nextToolCallID()
-	EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "call_id": callID, "params": resolvedParams, "param_resolution": resolution, "retry": false})
+
+	// 发送工具调用事件
+	EmitToolEvent(ctx, "tool_call", map[string]any{
+		"tool":             meta.Name,
+		"call_id":          callID,
+		"params":           resolvedParams,
+		"param_resolution": resolution,
+		"retry":            false,
+	})
+
+	// 检查工具执行是否符合策略要求
 	if err := CheckToolPolicy(ctx, meta, resolvedParams); err != nil {
-		res := ToolResult{OK: false, ErrorCode: "policy_denied", Error: err.Error(), Source: meta.Provider, LatencyMS: time.Since(start).Milliseconds()}
-		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res, "param_resolution": resolution, "retry": false})
+		// 构建策略拒绝结果
+		res := ToolResult{
+			OK:        false,
+			ErrorCode: "policy_denied",
+			Error:     err.Error(),
+			Source:    meta.Provider,
+			LatencyMS: time.Since(start).Milliseconds(),
+		}
+
+		// 发送工具结果事件
+		EmitToolEvent(ctx, "tool_result", map[string]any{
+			"tool":             meta.Name,
+			"call_id":          callID,
+			"result":           res,
+			"param_resolution": resolution,
+			"retry":            false,
+		})
+
 		return res, err
 	}
+
+	// 执行工具逻辑
 	data, source, err := runToolAttempt(ctx, meta, runtimeInput, do)
+
+	// 标记是否进行了重试
 	retried := false
+
+	// 处理执行错误
 	if err != nil {
+		// 检查是否为参数缺失错误
 		if ie, ok := AsToolInputError(err); ok && ie.Code == "missing_param" {
-			// First attempt still gets a terminal result event before retry.
+			// 构建首次尝试的结果（在重试前）
 			firstRes := ToolResult{
 				OK:        false,
 				ErrorCode: ie.Code,
@@ -45,16 +116,45 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 				Source:    firstNonEmpty(source, meta.Provider),
 				LatencyMS: time.Since(start).Milliseconds(),
 			}
-			EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": firstRes, "param_resolution": resolution, "retry": true})
+
+			// 发送首次尝试的结果事件
+			EmitToolEvent(ctx, "tool_result", map[string]any{
+				"tool":             meta.Name,
+				"call_id":          callID,
+				"result":           firstRes,
+				"param_resolution": resolution,
+				"retry":            true,
+			})
+
+			// 标记进行了重试
 			retried = true
+
+			// 重新解析参数（针对缺失的参数）
 			resolvedRetry, resolutionRetry := resolveToolParams(ctx, meta, resolvedParams, ie.Field)
+
+			// 检查参数是否有变化
 			if !equalJSONMap(resolvedRetry, resolvedParams) {
+				// 更新参数和解析结果
 				resolvedParams = resolvedRetry
 				runtimeInput, convErr = mapToInput[T](resolvedParams)
+
+				// 检查参数转换是否成功
 				if convErr == nil {
+					// 生成新的调用ID
 					callID = nextToolCallID()
-					EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "call_id": callID, "params": resolvedParams, "param_resolution": resolutionRetry, "retry": true})
+
+					// 发送重试的工具调用事件
+					EmitToolEvent(ctx, "tool_call", map[string]any{
+						"tool":             meta.Name,
+						"call_id":          callID,
+						"params":           resolvedParams,
+						"param_resolution": resolutionRetry,
+						"retry":            true,
+					})
+
+					// 再次检查策略
 					if err := CheckToolPolicy(ctx, meta, resolvedParams); err != nil {
+						// 构建策略拒绝结果
 						res := ToolResult{
 							OK:        false,
 							ErrorCode: "policy_denied",
@@ -62,71 +162,152 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 							Source:    meta.Provider,
 							LatencyMS: time.Since(start).Milliseconds(),
 						}
-						EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res, "param_resolution": resolutionRetry, "retry": true})
+
+						// 发送工具结果事件
+						EmitToolEvent(ctx, "tool_result", map[string]any{
+							"tool":             meta.Name,
+							"call_id":          callID,
+							"result":           res,
+							"param_resolution": resolutionRetry,
+							"retry":            true,
+						})
+
 						return res, err
 					}
+
+					// 再次执行工具逻辑
 					data, source, err = runToolAttempt(ctx, meta, runtimeInput, do)
+
+					// 更新解析结果
 					resolution = resolutionRetry
 				}
 			}
 		}
 	}
+
+	// 如果没有指定源，则使用工具提供者作为源
 	if source == "" {
 		source = meta.Provider
 	}
+
+	// 处理最终错误
 	if err != nil {
+		// 确定错误代码
 		errCode := "tool_error"
 		if ie, ok := AsToolInputError(err); ok {
 			errCode = ie.Code
 		}
+
+		// 构建错误结果
 		res := ToolResult{OK: false, ErrorCode: errCode, Error: err.Error(), Source: source, LatencyMS: time.Since(start).Milliseconds()}
-		EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res, "param_resolution": resolution, "retry": retried})
+
+		// 发送工具结果事件
+		EmitToolEvent(ctx, "tool_result", map[string]any{
+			"tool":             meta.Name,
+			"call_id":          callID,
+			"result":           res,
+			"param_resolution": resolution,
+			"retry":            retried,
+		})
+
 		return res, nil
 	}
+
+	// 构建成功结果
 	res := ToolResult{OK: true, Data: data, Source: source, LatencyMS: time.Since(start).Milliseconds()}
-	EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res, "params": resolvedParams, "param_resolution": resolution, "retry": retried})
+
+	// 发送工具结果事件
+	EmitToolEvent(ctx, "tool_result", map[string]any{
+		"tool":             meta.Name,
+		"call_id":          callID,
+		"result":           res,
+		"params":           resolvedParams,
+		"param_resolution": resolution,
+		"retry":            retried,
+	})
+
+	// 如果执行成功，存储最后使用的工具参数到工具内存中
 	if mem := ToolMemoryAccessorFromContext(ctx); mem != nil && res.OK {
 		mem.SetLastToolParams(meta.Name, resolvedParams)
 	}
+
 	return res, nil
 }
 
+// runToolAttempt 执行工具操作的尝试，包含超时控制和异常捕获
+//
+// 参数:
+//   - ctx: 上下文对象，用于传递请求范围的值和控制取消
+//   - meta: 工具元数据，包含工具名称、提供者、模式等信息
+//   - input: 工具执行的输入数据
+//   - do: 实际执行工具逻辑的函数
+//
+// 返回值:
+//   - data: 工具执行的结果数据
+//   - source: 结果的来源
+//   - err: 执行过程中的错误
 func runToolAttempt[T any](ctx context.Context, meta ToolMeta, input T, do func(T) (any, string, error)) (data any, source string, err error) {
+	// 设置超时时间，根据工具模式不同设置不同的超时
+	// 普通工具超时时间为8秒，修改型工具超时时间为20秒
 	timeout := 8 * time.Second
 	if meta.Mode == ToolModeMutating {
 		timeout = 20 * time.Second
 	}
+
+	// 创建带超时的上下文
 	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// 定义尝试执行的输出结构
 	type attemptOut struct {
-		data   any
-		source string
-		err    error
+		data   any    // 执行结果数据
+		source string // 结果来源
+		err    error  // 执行错误
 	}
+
+	// 创建通道用于接收执行结果
 	ch := make(chan attemptOut, 1)
+
+	// 在goroutine中执行工具操作
 	go func() {
+		// 捕获执行过程中的panic
 		defer func() {
 			if r := recover(); r != nil {
+				// 将panic转换为工具输入错误
 				ch <- attemptOut{err: &ToolInputError{Code: "tool_panic", Message: fmt.Sprintf("tool panic: %v", r)}}
 			}
 		}()
+
+		// 执行工具逻辑
 		d, s, e := do(input)
+
+		// 将执行结果发送到通道
 		ch <- attemptOut{data: d, source: s, err: e}
 	}()
 
+	// 等待执行结果或超时
 	select {
 	case <-attemptCtx.Done():
+		// 处理超时或取消情况
 		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+			// 超时错误
 			return nil, meta.Provider, &ToolInputError{Code: "tool_timeout", Message: "tool execution timeout"}
 		}
+		// 取消错误
 		return nil, meta.Provider, &ToolInputError{Code: "tool_canceled", Message: "tool execution canceled"}
 	case out := <-ch:
+		// 处理执行结果
 		if out.source == "" {
+			// 如果没有指定源，则使用工具提供者作为源
 			out.source = meta.Provider
 		}
+
 		if out.err == nil {
+			// 执行成功
 			return out.data, out.source, nil
 		}
+
+		// 执行失败，标准化错误
 		return out.data, out.source, normalizeToolErr(out.err)
 	}
 }
@@ -158,25 +339,48 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
+// resolveK8sClient 解析 Kubernetes 客户端，根据参数和依赖项选择合适的客户端
+//
+// 参数:
+//   - deps: 平台依赖项，包含数据库连接和默认客户端等
+//   - params: 参数字典，可能包含 cluster_id 等信息
+//
+// 返回值:
+//   - *kubernetes.Clientset: Kubernetes 客户端实例
+//   - string: 客户端来源标识
+//   - error: 解析过程中的错误
 func resolveK8sClient(deps PlatformDeps, params map[string]any) (*kubernetes.Clientset, string, error) {
+	// 从参数中获取 cluster_id 并转换为整数
 	clusterID := toInt(params["cluster_id"])
+
+	// 首先尝试从数据库中获取指定集群的客户端
 	if clusterID > 0 && deps.DB != nil {
 		var cluster model.Cluster
+		// 从数据库中查询集群信息
 		if err := deps.DB.First(&cluster, clusterID).Error; err == nil && strings.TrimSpace(cluster.KubeConfig) != "" {
+			// 使用集群的 KubeConfig 创建 REST 配置
 			cfg, err := clientcmd.RESTConfigFromKubeConfig([]byte(cluster.KubeConfig))
 			if err != nil {
 				return nil, "cluster_kubeconfig", err
 			}
+
+			// 使用 REST 配置创建 Kubernetes 客户端
 			cli, err := kubernetes.NewForConfig(cfg)
 			if err != nil {
 				return nil, "cluster_kubeconfig", err
 			}
+
+			// 返回从集群配置创建的客户端
 			return cli, "cluster_kubeconfig", nil
 		}
 	}
+
+	// 如果没有指定集群或获取失败，尝试使用默认客户端
 	if deps.Clientset != nil {
 		return deps.Clientset, "default_clientset", nil
 	}
+
+	// 如果所有尝试都失败，返回错误
 	return nil, "fallback", errors.New("k8s client unavailable")
 }
 
@@ -191,6 +395,20 @@ func runLocalCommand(ctx context.Context, timeout time.Duration, name string, ar
 	return strings.TrimSpace(string(out)), err
 }
 
+// runOnTarget 在指定目标上执行命令，支持本地和远程执行
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - deps: 平台依赖项，包含数据库连接和默认客户端等
+//   - target: 目标节点标识，支持本地执行（localhost 或空字符串）或节点 ID/IP/名称/主机名
+//   - localName: 本地执行命令名称（如 "ssh"）
+//   - localArgs: 本地执行命令参数（如 "-p 2222 user@host"）
+//   - remoteCmd: 远程执行的 shell 命令（如 "kubectl get nodes"）
+//
+// 返回值:
+//   - string: 命令执行输出
+//   - string: 执行来源标识（"local" 或 "remote_ssh"）
+//   - error: 执行过程中的错误
 func runOnTarget(ctx context.Context, deps PlatformDeps, target, localName string, localArgs []string, remoteCmd string) (string, string, error) {
 	node, err := resolveNodeByTarget(deps, target)
 	if err != nil {
@@ -255,17 +473,6 @@ func toInt(v any) int {
 		return n
 	default:
 		return 0
-	}
-}
-
-func toString(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case json.Number:
-		return x.String()
-	default:
-		return fmt.Sprintf("%v", x)
 	}
 }
 
