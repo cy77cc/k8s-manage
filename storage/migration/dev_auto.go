@@ -71,5 +71,10 @@ func RunDevAutoMigrate(db *gorm.DB) error {
 		&model.AutomationRunLog{},
 		&model.AutomationExecutionAudit{},
 		&model.TopologyAccessAudit{},
+		&model.AuditLog{},
+		&model.Policy{},
+		&model.RiskFinding{},
+		&model.Anomaly{},
+		&model.Suggestion{},
 	)
 }

@@ -14,6 +14,11 @@ func RegisterAIOPSHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.GET("/inspections", h.ListInspections)
 		g.GET("/inspections/:id", h.GetInspection)
 		g.POST("/recommendations/apply-preview", h.ApplyPreview)
+
+		// AIOps insights API
+		g.GET("/risk-findings", h.GetRiskFindings)
+		g.GET("/anomalies", h.GetAnomalies)
+		g.GET("/suggestions", h.GetSuggestions)
 	}
 }
 

@@ -8,6 +8,10 @@ import (
 
 func RegisterDeploymentHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	h := NewHandler(svcCtx)
+	auditH := NewAuditHandler(svcCtx)
+	metricsH := NewMetricsHandler(svcCtx)
+	topologyH := NewTopologyHandler(svcCtx)
+	policyH := NewPolicyHandler(svcCtx)
 	g := v1.Group("/deploy", middleware.JWTAuth())
 	{
 		g.GET("/targets", h.ListTargets)
@@ -35,6 +39,23 @@ func RegisterDeploymentHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext)
 		g.POST("/credentials/import", h.ImportExternalCredential)
 		g.POST("/credentials/:id/test", h.TestCredential)
 		g.GET("/credentials", h.ListCredentials)
+
+		// 审计日志
+		g.GET("/audit-logs", auditH.ListAuditLogs)
+
+		// 指标统计
+		g.GET("/metrics/summary", metricsH.GetMetricsSummary)
+		g.GET("/metrics/trends", metricsH.GetMetricsTrends)
+
+		// 部署拓扑
+		g.GET("/topology", topologyH.GetTopology)
+
+		// 策略管理
+		g.GET("/policies", policyH.ListPolicies)
+		g.GET("/policies/:id", policyH.GetPolicy)
+		g.POST("/policies", policyH.CreatePolicy)
+		g.PUT("/policies/:id", policyH.UpdatePolicy)
+		g.DELETE("/policies/:id", policyH.DeletePolicy)
 	}
 
 	sg := v1.Group("/services", middleware.JWTAuth())

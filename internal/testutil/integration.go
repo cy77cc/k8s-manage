@@ -115,6 +115,17 @@ func autoMigrateAll(db *gorm.DB) error {
 		&model.Job{},
 		&model.JobExecution{},
 		&model.JobLog{},
+
+		// Audit
+		&model.AuditLog{},
+
+		// Policy
+		&model.Policy{},
+
+		// AIOps
+		&model.RiskFinding{},
+		&model.Anomaly{},
+		&model.Suggestion{},
 	)
 }
 

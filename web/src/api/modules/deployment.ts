@@ -144,6 +144,68 @@ export interface ClusterCredential {
   updated_at: string;
 }
 
+export interface AuditLog {
+  id: number;
+  action_type: string;
+  resource_type: string;
+  resource_id: number;
+  actor_id: number;
+  actor_name: string;
+  detail: Record<string, any>;
+  created_at: string;
+}
+
+export interface MetricsSummary {
+  total_releases: number;
+  success_rate: number;
+  avg_duration_seconds: number;
+  by_environment: Record<string, { total: number; success_rate: number }>;
+  by_status: Record<string, number>;
+  recent_failures: number;
+  recent_releases: number;
+}
+
+export interface MetricsTrend {
+  date: string;
+  deployment_count: number;
+  success_count: number;
+  failure_count: number;
+  success_rate: number;
+}
+
+export interface TopologyService {
+  id: number;
+  name: string;
+  environment: string;
+  status: string;
+  last_deployment?: string;
+  target_id: number;
+  target_name?: string;
+  runtime_type?: string;
+}
+
+export interface TopologyConnection {
+  source_id: number;
+  target_id: number;
+  type: string;
+}
+
+export interface DeploymentTopology {
+  services: TopologyService[];
+  connections: TopologyConnection[];
+}
+
+export interface Policy {
+  id: number;
+  name: string;
+  type: 'traffic' | 'resilience' | 'access' | 'slo';
+  target_id: number;
+  config: Record<string, any>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export const deploymentApi = {
   getTargets(): Promise<ApiResponse<PaginatedResponse<DeployTarget>>> {
     return apiService.get('/deploy/targets');
@@ -302,5 +364,40 @@ export const deploymentApi = {
   },
   listCredentials(params?: { runtime_type?: 'k8s' | 'compose' }): Promise<ApiResponse<PaginatedResponse<ClusterCredential>>> {
     return apiService.get('/deploy/credentials', { params });
+  },
+
+  // 审计日志
+  getAuditLogs(params?: { action_type?: string; resource_type?: string; page?: number; page_size?: number }): Promise<ApiResponse<PaginatedResponse<AuditLog>>> {
+    return apiService.get('/deploy/audit-logs', { params });
+  },
+
+  // 指标统计
+  getMetricsSummary(): Promise<ApiResponse<MetricsSummary>> {
+    return apiService.get('/deploy/metrics/summary');
+  },
+  getMetricsTrends(params?: { range?: 'daily' | 'weekly' | 'monthly' }): Promise<ApiResponse<MetricsTrend[]>> {
+    return apiService.get('/deploy/metrics/trends', { params });
+  },
+
+  // 部署拓扑
+  getTopology(params?: { environment?: string }): Promise<ApiResponse<DeploymentTopology>> {
+    return apiService.get('/deploy/topology', { params });
+  },
+
+  // 策略管理
+  getPolicies(params?: { type?: string; target_id?: number }): Promise<ApiResponse<PaginatedResponse<Policy>>> {
+    return apiService.get('/deploy/policies', { params });
+  },
+  getPolicy(id: number): Promise<ApiResponse<Policy>> {
+    return apiService.get(`/deploy/policies/${id}`);
+  },
+  createPolicy(payload: { name: string; type: string; target_id?: number; config?: Record<string, any>; enabled?: boolean }): Promise<ApiResponse<Policy>> {
+    return apiService.post('/deploy/policies', payload);
+  },
+  updatePolicy(id: number, payload: Partial<{ name: string; type: string; config: Record<string, any>; enabled: boolean }>): Promise<ApiResponse<Policy>> {
+    return apiService.put(`/deploy/policies/${id}`, payload);
+  },
+  deletePolicy(id: number): Promise<ApiResponse<void>> {
+    return apiService.delete(`/deploy/policies/${id}`);
   },
 };

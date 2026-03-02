@@ -54,6 +54,9 @@ import { deploymentApi } from './modules/deployment';
 export * from './modules/notification';
 import { notificationApi } from './modules/notification';
 
+export * from './modules/aiops';
+import { aiopsApi } from './modules/aiops';
+
 // 统一导出所有API
 export const Api = {
   cluster: {
@@ -84,6 +87,7 @@ export const Api = {
   topology: topologyApi,
   deployment: deploymentApi,
   notification: notificationApi,
+  aiops: aiopsApi,
 };
 
 export default Api;

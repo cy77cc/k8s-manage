@@ -1,18 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Space, Table, Modal, Form, Input, Select, message, Tabs } from 'antd';
+import { Card, Button, Space, Table, Modal, Form, Input, Select, message, Tabs, Switch, Tag } from 'antd';
 import { PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-
-interface Policy {
-  id: string;
-  service_id: string;
-  service_name: string;
-  type: 'traffic' | 'resilience' | 'access' | 'slo';
-  name: string;
-  config: any;
-  enabled: boolean;
-  created_at: string;
-}
+import { Api } from '../../../api';
+import type { Policy } from '../../../api/modules/deployment';
 
 const PolicyManagementPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -20,34 +11,15 @@ const PolicyManagementPage: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [form] = Form.useForm();
+  const [typeFilter, setTypeFilter] = useState<string>('');
 
   const load = async () => {
     setLoading(true);
     try {
-      // Mock data - replace with actual API call
-      const mockPolicies: Policy[] = [
-        {
-          id: '1',
-          service_id: '1',
-          service_name: 'api-gateway',
-          type: 'traffic',
-          name: 'Rate Limiting',
-          config: { rate: 1000, per: 'minute' },
-          enabled: true,
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: '2',
-          service_id: '1',
-          service_name: 'api-gateway',
-          type: 'resilience',
-          name: 'Circuit Breaker',
-          config: { threshold: 5, timeout: 30 },
-          enabled: true,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setPolicies(mockPolicies);
+      const res = await Api.deployment.getPolicies({
+        type: typeFilter || undefined,
+      });
+      setPolicies(res.data.list || []);
     } catch (err) {
       message.error('加载策略失败');
     } finally {
@@ -57,26 +29,28 @@ const PolicyManagementPage: React.FC = () => {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [typeFilter]);
 
   const handleCreate = () => {
     setEditingPolicy(null);
     form.resetFields();
+    form.setFieldsValue({ enabled: true });
     setModalVisible(true);
   };
 
   const handleEdit = (policy: Policy) => {
     setEditingPolicy(policy);
     form.setFieldsValue({
-      service_id: policy.service_id,
-      type: policy.type,
       name: policy.name,
+      type: policy.type,
+      target_id: policy.target_id,
       config: JSON.stringify(policy.config, null, 2),
+      enabled: policy.enabled,
     });
     setModalVisible(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: number) => {
     Modal.confirm({
       title: '确认删除',
       content: '确定要删除此策略吗？',
@@ -85,7 +59,7 @@ const PolicyManagementPage: React.FC = () => {
       cancelText: '取消',
       onOk: async () => {
         try {
-          // API call to delete policy
+          await Api.deployment.deletePolicy(id);
           message.success('策略已删除');
           load();
         } catch (err) {
@@ -95,59 +69,93 @@ const PolicyManagementPage: React.FC = () => {
     });
   };
 
+  const handleToggleEnabled = async (policy: Policy) => {
+    try {
+      await Api.deployment.updatePolicy(policy.id, { enabled: !policy.enabled });
+      message.success(`策略已${policy.enabled ? '禁用' : '启用'}`);
+      load();
+    } catch (err) {
+      message.error('操作失败');
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
       let config = {};
-      try {
-        config = JSON.parse(values.config);
-      } catch {
-        message.error('配置 JSON 格式错误');
-        return;
+      if (values.config) {
+        try {
+          config = JSON.parse(values.config);
+        } catch {
+          message.error('配置 JSON 格式错误');
+          return;
+        }
       }
 
-      // API call to create/update policy
-      message.success(editingPolicy ? '策略已更新' : '策略已创建');
+      if (editingPolicy) {
+        await Api.deployment.updatePolicy(editingPolicy.id, {
+          name: values.name,
+          type: values.type,
+          config,
+          enabled: values.enabled,
+        });
+        message.success('策略已更新');
+      } else {
+        await Api.deployment.createPolicy({
+          name: values.name,
+          type: values.type,
+          target_id: values.target_id,
+          config,
+          enabled: values.enabled,
+        });
+        message.success('策略已创建');
+      }
+
       setModalVisible(false);
       load();
     } catch (err) {
-      // Validation failed
+      message.error(editingPolicy ? '更新失败' : '创建失败');
     }
   };
 
+  const getTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      traffic: '流量策略',
+      resilience: '弹性策略',
+      access: '访问策略',
+      slo: 'SLO 策略',
+    };
+    return labels[type] || type;
+  };
+
+  const getTypeColor = (type: string) => {
+    const colors: Record<string, string> = {
+      traffic: 'blue',
+      resilience: 'green',
+      access: 'orange',
+      slo: 'purple',
+    };
+    return colors[type] || 'default';
+  };
+
   const columns: ColumnsType<Policy> = [
-    {
-      title: '服务',
-      dataIndex: 'service_name',
-      key: 'service_name',
-    },
-    {
-      title: '策略类型',
-      dataIndex: 'type',
-      key: 'type',
-      render: (type: string) => {
-        const labels: Record<string, string> = {
-          traffic: '流量策略',
-          resilience: '弹性策略',
-          access: '访问策略',
-          slo: 'SLO 策略',
-        };
-        return labels[type] || type;
-      },
-    },
     {
       title: '策略名称',
       dataIndex: 'name',
       key: 'name',
     },
     {
+      title: '策略类型',
+      dataIndex: 'type',
+      key: 'type',
+      render: (type: string) => <Tag color={getTypeColor(type)}>{getTypeLabel(type)}</Tag>,
+    },
+    {
       title: '状态',
       dataIndex: 'enabled',
       key: 'enabled',
-      render: (enabled: boolean) => (
-        <span className={enabled ? 'text-green-600' : 'text-gray-400'}>
-          {enabled ? '已启用' : '已禁用'}
-        </span>
+      render: (enabled: boolean, record: Policy) => (
+        <Switch checked={enabled} onChange={() => handleToggleEnabled(record)} />
       ),
     },
     {
@@ -179,10 +187,11 @@ const PolicyManagementPage: React.FC = () => {
   ];
 
   const groupedPolicies = policies.reduce((acc, policy) => {
-    if (!acc[policy.service_name]) {
-      acc[policy.service_name] = [];
+    const key = policy.type;
+    if (!acc[key]) {
+      acc[key] = [];
     }
-    acc[policy.service_name].push(policy);
+    acc[key].push(policy);
     return acc;
   }, {} as Record<string, Policy[]>);
 
@@ -195,6 +204,20 @@ const PolicyManagementPage: React.FC = () => {
           <p className="text-sm text-gray-500 mt-1">配置服务的流量、弹性、访问和 SLO 策略</p>
         </div>
         <Space>
+          <Select
+            value={typeFilter}
+            style={{ width: 140 }}
+            allowClear
+            placeholder="策略类型"
+            options={[
+              { value: '', label: '全部类型' },
+              { value: 'traffic', label: '流量策略' },
+              { value: 'resilience', label: '弹性策略' },
+              { value: 'access', label: '访问策略' },
+              { value: 'slo', label: 'SLO 策略' },
+            ]}
+            onChange={setTypeFilter}
+          />
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
             刷新
           </Button>
@@ -204,22 +227,31 @@ const PolicyManagementPage: React.FC = () => {
         </Space>
       </div>
 
-      {/* Policies grouped by service */}
+      {/* Policies grouped by type */}
       <Card>
-        <Tabs
-          items={Object.entries(groupedPolicies).map(([serviceName, servicePolicies]) => ({
-            key: serviceName,
-            label: `${serviceName} (${servicePolicies.length})`,
-            children: (
-              <Table
-                dataSource={servicePolicies}
-                columns={columns}
-                rowKey="id"
-                pagination={false}
-              />
-            ),
-          }))}
-        />
+        {Object.keys(groupedPolicies).length > 0 ? (
+          <Tabs
+            items={Object.entries(groupedPolicies).map(([type, typePolicies]) => ({
+              key: type,
+              label: (
+                <span>
+                  <Tag color={getTypeColor(type)}>{getTypeLabel(type)}</Tag>
+                  <span className="text-gray-500">({typePolicies.length})</span>
+                </span>
+              ),
+              children: (
+                <Table
+                  dataSource={typePolicies}
+                  columns={columns}
+                  rowKey="id"
+                  pagination={false}
+                />
+              ),
+            }))}
+          />
+        ) : (
+          <div className="text-center text-gray-500 py-8">暂无策略数据</div>
+        )}
       </Card>
 
       {/* Create/Edit modal */}
@@ -235,18 +267,11 @@ const PolicyManagementPage: React.FC = () => {
       >
         <Form form={form} layout="vertical">
           <Form.Item
-            name="service_id"
-            label="服务"
-            rules={[{ required: true, message: '请选择服务' }]}
+            name="name"
+            label="策略名称"
+            rules={[{ required: true, message: '请输入策略名称' }]}
           >
-            <Select
-              placeholder="选择服务"
-              options={[
-                { value: '1', label: 'api-gateway' },
-                { value: '2', label: 'user-service' },
-                { value: '3', label: 'order-service' },
-              ]}
-            />
+            <Input placeholder="例如: Rate Limiting" />
           </Form.Item>
           <Form.Item
             name="type"
@@ -263,22 +288,17 @@ const PolicyManagementPage: React.FC = () => {
               ]}
             />
           </Form.Item>
-          <Form.Item
-            name="name"
-            label="策略名称"
-            rules={[{ required: true, message: '请输入策略名称' }]}
-          >
-            <Input placeholder="例如: Rate Limiting" />
+          <Form.Item name="target_id" label="关联部署目标">
+            <Input type="number" placeholder="部署目标 ID（可选）" />
           </Form.Item>
-          <Form.Item
-            name="config"
-            label="配置 (JSON)"
-            rules={[{ required: true, message: '请输入配置' }]}
-          >
+          <Form.Item name="config" label="配置 (JSON)">
             <Input.TextArea
               rows={10}
               placeholder={'{\n  "rate": 1000,\n  "per": "minute"\n}'}
             />
+          </Form.Item>
+          <Form.Item name="enabled" label="启用状态" valuePropName="checked">
+            <Switch />
           </Form.Item>
         </Form>
       </Modal>

@@ -1,24 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Select, Space, Button } from 'antd';
+import { Card, Row, Col, Statistic, Select, Space, Button, message } from 'antd';
 import {
   ReloadOutlined,
   RiseOutlined,
-  FallOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
 import { Line } from '@ant-design/charts';
+import { Api } from '../../../api';
+import type { MetricsSummary, MetricsTrend } from '../../../api/modules/deployment';
 
 const MetricsDashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [timeRange, setTimeRange] = useState<'daily' | 'weekly' | 'monthly'>('daily');
-  const [envFilter, setEnvFilter] = useState<string>('all');
+  const [summary, setSummary] = useState<MetricsSummary | null>(null);
+  const [trends, setTrends] = useState<MetricsTrend[]>([]);
 
   const load = async () => {
     setLoading(true);
     try {
-      // Mock data loading
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const [summaryRes, trendsRes] = await Promise.all([
+        Api.deployment.getMetricsSummary(),
+        Api.deployment.getMetricsTrends({ range: timeRange }),
+      ]);
+      setSummary(summaryRes.data);
+      setTrends(trendsRes.data || []);
+    } catch (err) {
+      message.error('加载指标数据失败');
     } finally {
       setLoading(false);
     }
@@ -26,27 +34,19 @@ const MetricsDashboardPage: React.FC = () => {
 
   useEffect(() => {
     load();
-  }, [timeRange, envFilter]);
+  }, [timeRange]);
 
-  // Mock data for deployment frequency
-  const deploymentFrequencyData = [
-    { date: '2024-01', count: 45 },
-    { date: '2024-02', count: 52 },
-    { date: '2024-03', count: 48 },
-    { date: '2024-04', count: 61 },
-    { date: '2024-05', count: 55 },
-    { date: '2024-06', count: 67 },
-  ];
+  // 部署频率趋势数据
+  const deploymentFrequencyData = trends.map((t) => ({
+    date: t.date,
+    count: t.deployment_count,
+  }));
 
-  // Mock data for success rate
-  const successRateData = [
-    { date: '2024-01', rate: 92 },
-    { date: '2024-02', rate: 94 },
-    { date: '2024-03', rate: 91 },
-    { date: '2024-04', rate: 95 },
-    { date: '2024-05', rate: 93 },
-    { date: '2024-06', rate: 96 },
-  ];
+  // 成功率趋势数据
+  const successRateData = trends.map((t) => ({
+    date: t.date,
+    rate: Number(t.success_rate.toFixed(1)),
+  }));
 
   const deploymentFrequencyConfig = {
     data: deploymentFrequencyData,
@@ -72,10 +72,49 @@ const MetricsDashboardPage: React.FC = () => {
       shape: 'circle',
     },
     yAxis: {
-      min: 80,
+      min: 0,
       max: 100,
     },
     color: '#10b981',
+  };
+
+  // 环境数据
+  const environmentData = summary?.by_environment || {};
+  const envEntries = Object.entries(environmentData);
+
+  const getEnvColor = (env: string) => {
+    switch (env) {
+      case 'production':
+        return '#ef4444';
+      case 'staging':
+        return '#f59e0b';
+      case 'development':
+        return '#3b82f6';
+      default:
+        return '#6366f1';
+    }
+  };
+
+  const getEnvBgClass = (env: string) => {
+    switch (env) {
+      case 'production':
+        return 'bg-red-50';
+      case 'staging':
+        return 'bg-orange-50';
+      case 'development':
+        return 'bg-blue-50';
+      default:
+        return 'bg-gray-50';
+    }
+  };
+
+  const getEnvLabel = (env: string) => {
+    const labels: Record<string, string> = {
+      production: '生产环境',
+      staging: '预发布',
+      development: '开发环境',
+    };
+    return labels[env] || env;
   };
 
   return (
@@ -97,17 +136,6 @@ const MetricsDashboardPage: React.FC = () => {
             ]}
             onChange={setTimeRange}
           />
-          <Select
-            value={envFilter}
-            style={{ width: 140 }}
-            options={[
-              { value: 'all', label: '全部环境' },
-              { value: 'production', label: '生产环境' },
-              { value: 'staging', label: '预发布' },
-              { value: 'development', label: '开发环境' },
-            ]}
-            onChange={setEnvFilter}
-          />
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
             刷新
           </Button>
@@ -119,99 +147,99 @@ const MetricsDashboardPage: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="部署频率"
-              value={67}
-              suffix="次/月"
+              title="总发布数"
+              value={summary?.total_releases || 0}
               prefix={<RiseOutlined className="text-success" />}
               valueStyle={{ color: '#10b981' }}
             />
-            <div className="text-xs text-gray-500 mt-2">较上月 +12%</div>
+            <div className="text-xs text-gray-500 mt-2">
+              最近7天: {summary?.recent_releases || 0} 次
+            </div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="成功率"
-              value={96}
+              value={Number((summary?.success_rate || 0).toFixed(1))}
               suffix="%"
               prefix={<CheckCircleOutlined className="text-success" />}
               valueStyle={{ color: '#10b981' }}
             />
-            <div className="text-xs text-gray-500 mt-2">较上月 +3%</div>
+            <div className="text-xs text-gray-500 mt-2">
+              最近7天失败: {summary?.recent_failures || 0} 次
+            </div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="平均部署时长"
-              value={8.5}
+              value={Number((summary?.avg_duration_seconds || 0) / 60).toFixed(1)}
               suffix="分钟"
               prefix={<ClockCircleOutlined className="text-primary" />}
               valueStyle={{ color: '#6366f1' }}
             />
-            <div className="text-xs text-gray-500 mt-2">较上月 -15%</div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
-              title="审批响应时间"
-              value={2.3}
-              suffix="小时"
+              title="进行中"
+              value={summary?.by_status?.applying || 0}
+              suffix="个"
               prefix={<ClockCircleOutlined className="text-warning" />}
               valueStyle={{ color: '#f59e0b' }}
             />
-            <div className="text-xs text-gray-500 mt-2">较上月 +5%</div>
+            <div className="text-xs text-gray-500 mt-2">
+              待审批: {summary?.by_status?.pending_approval || 0} 个
+            </div>
           </Card>
         </Col>
       </Row>
 
       {/* Deployment frequency chart */}
       <Card title="部署频率趋势">
-        <Line {...deploymentFrequencyConfig} />
+        {deploymentFrequencyData.length > 0 ? (
+          <Line {...deploymentFrequencyConfig} />
+        ) : (
+          <div className="text-center text-gray-500 py-8">暂无数据</div>
+        )}
       </Card>
 
       {/* Success rate chart */}
       <Card title="成功率趋势">
-        <Line {...successRateConfig} />
+        {successRateData.length > 0 ? (
+          <Line {...successRateConfig} />
+        ) : (
+          <div className="text-center text-gray-500 py-8">暂无数据</div>
+        )}
       </Card>
 
       {/* Environment comparison */}
       <Card title="环境对比">
         <Row gutter={[16, 16]}>
-          <Col xs={24} md={8}>
-            <Card className="bg-blue-50">
-              <Statistic
-                title="开发环境"
-                value={156}
-                suffix="次部署"
-                valueStyle={{ color: '#3b82f6' }}
-              />
-              <div className="text-xs text-gray-600 mt-2">成功率: 98%</div>
-            </Card>
-          </Col>
-          <Col xs={24} md={8}>
-            <Card className="bg-orange-50">
-              <Statistic
-                title="预发布环境"
-                value={89}
-                suffix="次部署"
-                valueStyle={{ color: '#f59e0b' }}
-              />
-              <div className="text-xs text-gray-600 mt-2">成功率: 95%</div>
-            </Card>
-          </Col>
-          <Col xs={24} md={8}>
-            <Card className="bg-red-50">
-              <Statistic
-                title="生产环境"
-                value={67}
-                suffix="次部署"
-                valueStyle={{ color: '#ef4444' }}
-              />
-              <div className="text-xs text-gray-600 mt-2">成功率: 96%</div>
-            </Card>
-          </Col>
+          {envEntries.length > 0 ? (
+            envEntries.map(([env, data]) => (
+              <Col xs={24} md={8} key={env}>
+                <Card className={getEnvBgClass(env)}>
+                  <Statistic
+                    title={getEnvLabel(env)}
+                    value={data.total}
+                    suffix="次部署"
+                    valueStyle={{ color: getEnvColor(env) }}
+                  />
+                  <div className="text-xs text-gray-600 mt-2">
+                    成功率: {Number(data.success_rate).toFixed(1)}%
+                  </div>
+                </Card>
+              </Col>
+            ))
+          ) : (
+            <Col span={24}>
+              <div className="text-center text-gray-500 py-8">暂无环境数据</div>
+            </Col>
+          )}
         </Row>
       </Card>
     </div>

@@ -30,7 +30,7 @@ import (
 )
 
 func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
-	r.Use(middleware.ContextMiddleware(), middleware.Cors(), middleware.Logger())
+	r.Use(gin.Recovery(), middleware.ContextMiddleware(), middleware.Cors(), middleware.Logger())
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})

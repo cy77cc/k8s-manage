@@ -125,3 +125,132 @@ func toJSON(v any) string {
 	raw, _ := json.Marshal(v)
 	return string(raw)
 }
+
+// GetRiskFindings 获取风险发现列表
+func (h *Handler) GetRiskFindings(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "aiops:read") {
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	ctx := c.Request.Context()
+	query := h.svcCtx.DB.WithContext(ctx).Model(&model.RiskFinding{})
+
+	// Filter by severity
+	if severity := c.Query("severity"); severity != "" {
+		query = query.Where("severity = ?", severity)
+	}
+	// Filter by service_id
+	if serviceID := c.Query("service_id"); serviceID != "" {
+		query = query.Where("service_id = ?", serviceID)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
+
+	var findings []model.RiskFinding
+	offset := (page - 1) * pageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(pageSize).Find(&findings).Error; err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
+
+	httpx.OK(c, gin.H{"list": findings, "total": total})
+}
+
+// GetAnomalies 获取异常检测列表
+func (h *Handler) GetAnomalies(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "aiops:read") {
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	ctx := c.Request.Context()
+	query := h.svcCtx.DB.WithContext(ctx).Model(&model.Anomaly{})
+
+	// Filter by type
+	if anomalyType := c.Query("type"); anomalyType != "" {
+		query = query.Where("type = ?", anomalyType)
+	}
+	// Filter by service_id
+	if serviceID := c.Query("service_id"); serviceID != "" {
+		query = query.Where("service_id = ?", serviceID)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
+
+	var anomalies []model.Anomaly
+	offset := (page - 1) * pageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(pageSize).Find(&anomalies).Error; err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
+
+	httpx.OK(c, gin.H{"list": anomalies, "total": total})
+}
+
+// GetSuggestions 获取优化建议列表
+func (h *Handler) GetSuggestions(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "aiops:read") {
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	ctx := c.Request.Context()
+	query := h.svcCtx.DB.WithContext(ctx).Model(&model.Suggestion{})
+
+	// Filter by impact
+	if impact := c.Query("impact"); impact != "" {
+		query = query.Where("impact = ?", impact)
+	}
+	// Filter by service_id
+	if serviceID := c.Query("service_id"); serviceID != "" {
+		query = query.Where("service_id = ?", serviceID)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
+
+	var suggestions []model.Suggestion
+	offset := (page - 1) * pageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(pageSize).Find(&suggestions).Error; err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
+
+	httpx.OK(c, gin.H{"list": suggestions, "total": total})
+}
