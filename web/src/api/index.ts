@@ -5,6 +5,46 @@ export * from './api';
 import apiService from './api';
 
 // 模块API
+export { clusterApi } from './modules/cluster';
+export type {
+  Cluster as ClusterInfo,
+  ClusterNode,
+  Taint,
+  NodeCondition,
+  BootstrapPreviewReq,
+  BootstrapPreviewResp,
+  BootstrapTask,
+  BootstrapStepStatus,
+  ClusterImportReq,
+  ClusterTestResp,
+  AddNodeReq,
+  NamespaceInfo,
+  PodInfo,
+  DeploymentInfo,
+  StatefulSetInfo,
+  DaemonSetInfo,
+  JobInfo,
+  ServiceInfo,
+  ServicePort,
+  IngressInfo,
+  IngressHost,
+  ConfigMapInfo,
+  SecretInfo,
+  PVCInfo,
+  PVInfo,
+  ClusterServiceInfo,
+  EventInfo,
+  HPAInfo,
+  HPAMetricInfo,
+  ResourceQuotaInfo,
+  LimitRangeInfo,
+  LimitRangeItem,
+  ClusterVersionInfo,
+  ClusterUpgradePlan,
+  CertificateInfo,
+} from './modules/cluster';
+import { clusterApi } from './modules/cluster';
+
 export * from './modules/hosts';
 import { hostApi } from './modules/hosts';
 
@@ -59,17 +99,11 @@ import { aiopsApi } from './modules/aiops';
 
 // 统一导出所有API
 export const Api = {
-  cluster: {
-    getList: () => apiService.get<{ list: any[]; total: number }>("/clusters"),
-    getDetail: (id: number) => apiService.get<any>(`/clusters/${id}`),
-    getClusters: () => apiService.get<{ list: any[]; total: number }>("/clusters"),
-    getClusterDetail: (id: number) => apiService.get<any>(`/clusters/${id}`),
-    getClusterNodes: (id: number) => apiService.get<{ list: any[]; total: number }>(`/clusters/${id}/nodes`),
-  },
   // 基础服务
   service: apiService,
 
   // 模块API
+  cluster: clusterApi,
   hosts: hostApi,
   tasks: taskApi,
   kubernetes: kubernetesApi,

@@ -102,9 +102,14 @@ func (AlertNotificationDelivery) TableName() string { return "alert_notification
 type ClusterBootstrapTask struct {
 	ID             string    `gorm:"column:id;type:varchar(64);primaryKey" json:"id"`
 	Name           string    `gorm:"column:name;type:varchar(128);not null" json:"name"`
+	ClusterID      *uint     `gorm:"column:cluster_id;index" json:"cluster_id"`
 	ControlPlaneID uint      `gorm:"column:control_plane_host_id;index" json:"control_plane_host_id"`
 	WorkerIDsJSON  string    `gorm:"column:worker_ids_json;type:longtext" json:"worker_ids_json"`
+	K8sVersion     string    `gorm:"column:k8s_version;type:varchar(32)" json:"k8s_version"`
 	CNI            string    `gorm:"column:cni;type:varchar(32);default:'flannel'" json:"cni"`
+	PodCIDR        string    `gorm:"column:pod_cidr;type:varchar(32)" json:"pod_cidr"`
+	ServiceCIDR    string    `gorm:"column:service_cidr;type:varchar(32)" json:"service_cidr"`
+	StepsJSON      string    `gorm:"column:steps_json;type:longtext" json:"steps_json"`
 	Status         string    `gorm:"column:status;type:varchar(32);index" json:"status"`
 	ResultJSON     string    `gorm:"column:result_json;type:longtext" json:"result_json"`
 	ErrorMessage   string    `gorm:"column:error_message;type:text" json:"error_message"`

@@ -25,6 +25,7 @@ import ApprovalCenterPage from './pages/Deployment/ApprovalCenterPage';
 import ClusterListPage from './pages/Deployment/Infrastructure/ClusterListPage';
 import ClusterDetailPage from './pages/Deployment/Infrastructure/ClusterDetailPage';
 import ClusterBootstrapWizard from './pages/Deployment/Infrastructure/ClusterBootstrapWizard';
+import ClusterImportWizard from './pages/Deployment/Infrastructure/ClusterImportWizard';
 import CredentialListPage from './pages/Deployment/Infrastructure/CredentialListPage';
 import DeploymentTargetListPage from './pages/Deployment/Targets/DeploymentTargetListPage';
 import DeploymentTargetDetailPage from './pages/Deployment/Targets/DeploymentTargetDetailPage';
@@ -117,6 +118,7 @@ const ProtectedApp: React.FC = () => {
             <Route path="/deployment/infrastructure/clusters" element={withAuth('cluster', 'read', <ClusterListPage />)} />
             <Route path="/deployment/infrastructure/clusters/:id" element={withAuth('cluster', 'read', <ClusterDetailPage />)} />
             <Route path="/deployment/infrastructure/clusters/bootstrap" element={withAuth('cluster', 'write', <ClusterBootstrapWizard />)} />
+            <Route path="/deployment/infrastructure/clusters/import" element={withAuth('cluster', 'write', <ClusterImportWizard />)} />
             <Route path="/deployment/infrastructure/credentials" element={withAuth('cluster', 'read', <CredentialListPage />)} />
             <Route path="/deployment/infrastructure/hosts" element={withAuth('host', 'read', <HostListPage />)} />
             <Route path="/deployment/infrastructure/hosts/onboarding" element={withAuth('host', 'write', <HostOnboardingPage />)} />
