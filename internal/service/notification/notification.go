@@ -257,17 +257,37 @@ func (s *NotificationService) CreateNotification(notif *model.Notification, user
 
 // getUserID 从上下文获取用户ID
 func getUserID(c *gin.Context) uint64 {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0
+	read := func(key string) (uint64, bool) {
+		userID, exists := c.Get(key)
+		if !exists {
+			return 0, false
+		}
+		switch v := userID.(type) {
+		case uint64:
+			return v, true
+		case uint:
+			return uint64(v), true
+		case int64:
+			if v > 0 {
+				return uint64(v), true
+			}
+		case int:
+			if v > 0 {
+				return uint64(v), true
+			}
+		case float64:
+			if v > 0 {
+				return uint64(v), true
+			}
+		}
+		return 0, false
 	}
-	switch v := userID.(type) {
-	case uint64:
-		return v
-	case float64:
-		return uint64(v)
-	case int:
-		return uint64(v)
+
+	if uid, ok := read("uid"); ok {
+		return uid
+	}
+	if uid, ok := read("user_id"); ok {
+		return uid
 	}
 	return 0
 }

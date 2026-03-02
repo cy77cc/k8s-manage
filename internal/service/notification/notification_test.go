@@ -52,10 +52,21 @@ func TestListNotifications(t *testing.T) {
 		SourceID: "1",
 	}
 	db.Create(&notif)
-	db.Create(&model.UserNotification{UserID: 1, NotificationID: notif.ID})
 
-	svcInst := newTestService(db)
-	router.Group("/notifications").GET("", svcInst.ListNotifications)
+	userNotif := model.UserNotification{
+		UserID:         1,
+		NotificationID: notif.ID,
+	}
+	db.Create(&userNotif)
+
+	// 注册路由
+	svc := &NotificationService{svcCtx: nil}
+	svc.svcCtx = &struct {
+		DB *gorm.DB
+	}{DB: db}
+
+	notifications := router.Group("/notifications")
+	notifications.GET("", svc.ListNotifications)
 
 	req, _ := http.NewRequest("GET", "/notifications?page=1&page_size=10", nil)
 	w := httptest.NewRecorder()
@@ -85,10 +96,20 @@ func TestUnreadCount(t *testing.T) {
 
 	db.Create(&model.UserNotification{UserID: 1, NotificationID: notif1.ID})
 	readAt := time.Now()
-	db.Create(&model.UserNotification{UserID: 1, NotificationID: notif2.ID, ReadAt: &readAt})
+	userNotif2 := model.UserNotification{
+		UserID:         1,
+		NotificationID: notif2.ID,
+		ReadAt:         &readAt,
+	}
+	db.Create(&userNotif1)
+	db.Create(&userNotif2)
 
-	svcInst := newTestService(db)
-	router.Group("/notifications").GET("/unread-count", svcInst.UnreadCount)
+	svc := &NotificationService{svcCtx: &struct {
+		DB *gorm.DB
+	}{DB: db}}
+
+	notifications := router.Group("/notifications")
+	notifications.GET("/unread-count", svc.UnreadCount)
 
 	req, _ := http.NewRequest("GET", "/notifications/unread-count", nil)
 	w := httptest.NewRecorder()
@@ -113,10 +134,19 @@ func TestMarkAsRead(t *testing.T) {
 
 	notif := model.Notification{Type: "alert", Title: "Test Alert", Severity: "critical", Source: "test"}
 	db.Create(&notif)
-	db.Create(&model.UserNotification{UserID: 1, NotificationID: notif.ID})
 
-	svcInst := newTestService(db)
-	router.Group("/notifications").POST("/:id/read", svcInst.MarkAsRead)
+	userNotif := model.UserNotification{
+		UserID:         1,
+		NotificationID: notif.ID,
+	}
+	db.Create(&userNotif)
+
+	svc := &NotificationService{svcCtx: &struct {
+		DB *gorm.DB
+	}{DB: db}}
+
+	notifications := router.Group("/notifications")
+	notifications.POST("/:id/read", svc.MarkAsRead)
 
 	req, _ := http.NewRequest("POST", "/notifications/1/read", nil)
 	w := httptest.NewRecorder()
@@ -139,10 +169,19 @@ func TestDismiss(t *testing.T) {
 
 	notif := model.Notification{Type: "alert", Title: "Test Alert", Severity: "critical", Source: "test"}
 	db.Create(&notif)
-	db.Create(&model.UserNotification{UserID: 1, NotificationID: notif.ID})
 
-	svcInst := newTestService(db)
-	router.Group("/notifications").POST("/:id/dismiss", svcInst.Dismiss)
+	userNotif := model.UserNotification{
+		UserID:         1,
+		NotificationID: notif.ID,
+	}
+	db.Create(&userNotif)
+
+	svc := &NotificationService{svcCtx: &struct {
+		DB *gorm.DB
+	}{DB: db}}
+
+	notifications := router.Group("/notifications")
+	notifications.POST("/:id/dismiss", svc.Dismiss)
 
 	req, _ := http.NewRequest("POST", "/notifications/1/dismiss", nil)
 	w := httptest.NewRecorder()
@@ -172,10 +211,19 @@ func TestConfirm(t *testing.T) {
 		ActionType: "confirm",
 	}
 	db.Create(&notif)
-	db.Create(&model.UserNotification{UserID: 1, NotificationID: notif.ID})
 
-	svcInst := newTestService(db)
-	router.Group("/notifications").POST("/:id/confirm", svcInst.Confirm)
+	userNotif := model.UserNotification{
+		UserID:         1,
+		NotificationID: notif.ID,
+	}
+	db.Create(&userNotif)
+
+	svc := &NotificationService{svcCtx: &struct {
+		DB *gorm.DB
+	}{DB: db}}
+
+	notifications := router.Group("/notifications")
+	notifications.POST("/:id/confirm", svc.Confirm)
 
 	req, _ := http.NewRequest("POST", "/notifications/1/confirm", nil)
 	w := httptest.NewRecorder()
@@ -205,8 +253,12 @@ func TestMarkAllAsRead(t *testing.T) {
 		db.Create(&model.UserNotification{UserID: 1, NotificationID: notif.ID})
 	}
 
-	svcInst := newTestService(db)
-	router.Group("/notifications").POST("/read-all", svcInst.MarkAllAsRead)
+	svc := &NotificationService{svcCtx: &struct {
+		DB *gorm.DB
+	}{DB: db}}
+
+	notifications := router.Group("/notifications")
+	notifications.POST("/read-all", svc.MarkAllAsRead)
 
 	req, _ := http.NewRequest("POST", "/notifications/read-all", nil)
 	w := httptest.NewRecorder()
@@ -227,10 +279,14 @@ func TestUnauthorized(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	// No user_id set — expect auth failure response (HTTP 200 with error code per project convention)
+	// 不设置 user_id
 
-	svcInst := newTestService(db)
-	r.Group("/notifications").GET("", svcInst.ListNotifications)
+	svc := &NotificationService{svcCtx: &struct {
+		DB *gorm.DB
+	}{DB: db}}
+
+	notifications := r.Group("/notifications")
+	notifications.GET("", svc.ListNotifications)
 
 	req, _ := http.NewRequest("GET", "/notifications", nil)
 	w := httptest.NewRecorder()
@@ -243,5 +299,41 @@ func TestUnauthorized(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &response)
 	if response["code"] == float64(1000) {
 		t.Error("expected non-success code in response body for unauthorized request")
+	}
+}
+
+func TestListNotificationsAcceptsUIDContextKey(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("uid", uint64(1))
+		c.Next()
+	})
+
+	notif := model.Notification{
+		Type:     "alert",
+		Title:    "Test Alert",
+		Content:  "Test content",
+		Severity: "critical",
+		Source:   "test",
+		SourceID: "1",
+	}
+	db.Create(&notif)
+	db.Create(&model.UserNotification{
+		UserID:         1,
+		NotificationID: notif.ID,
+	})
+
+	svc := &NotificationService{svcCtx: &svcctx.ServiceContext{DB: db}}
+	notifications := router.Group("/notifications")
+	notifications.GET("", svc.ListNotifications)
+
+	req, _ := http.NewRequest("GET", "/notifications?page=1&page_size=10", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
 	}
 }
