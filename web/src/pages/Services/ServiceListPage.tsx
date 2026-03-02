@@ -1,29 +1,59 @@
-import React from 'react';
-import { Button, Card, Col, Input, Row, Select, Space, Statistic, Table, Tag, message } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import {
+  Button,
+  Card,
+  Col,
+  Input,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Tag,
+  message,
+  Checkbox,
+  Dropdown,
+  Empty,
+  Badge,
+} from 'antd';
+import {
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  MoreOutlined,
+  PlayCircleOutlined,
+  PauseCircleOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  ExclamationCircleOutlined,
+  FileTextOutlined,
+} from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { Api } from '../../api';
 import type { ServiceItem } from '../../api/modules/services';
+import { StaggerList, StaggerItem } from '../../components/Motion';
 
 const ServiceListPage: React.FC = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = React.useState(false);
-  const [list, setList] = React.useState<ServiceItem[]>([]);
-  const [query, setQuery] = React.useState('');
-  const [env, setEnv] = React.useState<string>('all');
-  const [runtime, setRuntime] = React.useState<string>('all');
-  const [teamId, setTeamId] = React.useState<string>('');
-  const [labelSelector, setLabelSelector] = React.useState('');
+  const [loading, setLoading] = useState(false);
+  const [list, setList] = useState<ServiceItem[]>([]);
+  const [query, setQuery] = useState('');
+  const [env, setEnv] = useState<string>('all');
+  const [runtime, setRuntime] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [labelSelector, setLabelSelector] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const load = React.useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await Api.services.getList({
         page: 1,
         pageSize: 100,
-        env,
-        runtimeType: runtime as any,
-        teamId,
+        env: env === 'all' ? undefined : env,
+        runtimeType: runtime === 'all' ? undefined : (runtime as any),
         labelSelector,
         q: query,
       });
@@ -33,77 +63,324 @@ const ServiceListPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [env, runtime, teamId, labelSelector, query]);
+  }, [env, runtime, labelSelector, query]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     void load();
   }, [load]);
 
-  const running = list.filter((x) => x.status === 'running').length;
-  const deploying = list.filter((x) => x.status === 'deploying' || x.status === 'syncing').length;
-  const draft = list.filter((x) => x.status === 'draft').length;
+  // 统计数据
+  const stats = useMemo(() => {
+    const running = list.filter((x) => x.status === 'running').length;
+    const deploying = list.filter((x) => x.status === 'deploying' || x.status === 'syncing').length;
+    const draft = list.filter((x) => x.status === 'draft').length;
+    const error = list.filter((x) => x.status === 'error').length;
+    return { running, deploying, draft, error, total: list.length };
+  }, [list]);
+
+  // 过滤后的列表
+  const filteredList = useMemo(() => {
+    if (statusFilter === 'all') return list;
+    return list.filter((item) => item.status === statusFilter);
+  }, [list, statusFilter]);
+
+  // 批量操作
+  const handleBatchAction = (action: string) => {
+    if (selectedIds.length === 0) {
+      message.warning('请先选择服务');
+      return;
+    }
+    message.info(`批量${action}: ${selectedIds.length} 个服务`);
+    // TODO: 实现批量操作逻辑
+  };
+
+  // 获取状态图标和颜色
+  const getStatusConfig = (status: string) => {
+    const configs: Record<string, { icon: React.ReactNode; color: string; text: string }> = {
+      running: { icon: <CheckCircleOutlined />, color: 'success', text: '运行中' },
+      deploying: { icon: <ClockCircleOutlined />, color: 'processing', text: '部署中' },
+      syncing: { icon: <ClockCircleOutlined />, color: 'processing', text: '同步中' },
+      error: { icon: <ExclamationCircleOutlined />, color: 'error', text: '错误' },
+      draft: { icon: <FileTextOutlined />, color: 'default', text: '草稿' },
+    };
+    return configs[status] || { icon: null, color: 'default', text: status };
+  };
+
+  // 服务卡片组件
+  const ServiceCard: React.FC<{ service: ServiceItem }> = ({ service }) => {
+    const statusConfig = getStatusConfig(service.status);
+    const isSelected = selectedIds.includes(String(service.id));
+
+    return (
+      <Card
+        hoverable
+        className="h-full transition-all duration-200"
+        style={{
+          borderColor: isSelected ? '#6366f1' : undefined,
+          boxShadow: isSelected ? '0 0 0 2px rgba(99, 102, 241, 0.1)' : undefined,
+        }}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-start gap-3 flex-1">
+            <Checkbox
+              checked={isSelected}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setSelectedIds([...selectedIds, String(service.id)]);
+                } else {
+                  setSelectedIds(selectedIds.filter((id) => id !== String(service.id)));
+                }
+              }}
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <a
+                  onClick={() => navigate(`/services/${service.id}`)}
+                  className="text-lg font-semibold text-gray-900 hover:text-primary-600"
+                >
+                  {service.name}
+                </a>
+                <Tag color={statusConfig.color} icon={statusConfig.icon}>
+                  {statusConfig.text}
+                </Tag>
+              </div>
+              <div className="flex flex-wrap gap-2 text-sm text-gray-600">
+                <span>环境: <Tag>{service.env}</Tag></span>
+                <span>运行时: <Tag color="blue">{service.runtimeType}</Tag></span>
+                {service.owner && <span>负责人: {service.owner}</span>}
+              </div>
+            </div>
+          </div>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'view', icon: <EyeOutlined />, label: '查看详情' },
+                { key: 'edit', icon: <EditOutlined />, label: '编辑配置' },
+                { type: 'divider' },
+                { key: 'start', icon: <PlayCircleOutlined />, label: '启动服务' },
+                { key: 'stop', icon: <PauseCircleOutlined />, label: '停止服务' },
+                { type: 'divider' },
+                { key: 'delete', icon: <DeleteOutlined />, label: '删除服务', danger: true },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'view') navigate(`/services/${service.id}`);
+                else message.info(`${key}: ${service.name}`);
+              },
+            }}
+          >
+            <Button type="text" icon={<MoreOutlined />} />
+          </Dropdown>
+        </div>
+
+        {service.labels && service.labels.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <div className="text-xs text-gray-500 mb-2">标签</div>
+            <Space size={[4, 4]} wrap>
+              {service.labels.slice(0, 4).map((l) => (
+                <Tag key={`${l.key}:${l.value}`} className="text-xs">
+                  {l.key}={l.value}
+                </Tag>
+              ))}
+              {service.labels.length > 4 && (
+                <Tag className="text-xs">+{service.labels.length - 4}</Tag>
+              )}
+            </Space>
+          </div>
+        )}
+      </Card>
+    );
+  };
 
   return (
-    <div className="space-y-4">
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={8}><Card><Statistic title="运行中" value={running} suffix={`/ ${list.length}`} /></Card></Col>
-        <Col xs={24} sm={8}><Card><Statistic title="部署中" value={deploying} /></Card></Col>
-        <Col xs={24} sm={8}><Card><Statistic title="草稿" value={draft} /></Card></Col>
-      </Row>
+    <div className="space-y-6">
+      {/* 页面头部 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">服务管理</h1>
+          <p className="text-sm text-gray-500 mt-1">管理和监控所有服务实例</p>
+        </div>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/services/provision')}>
+            创建服务
+          </Button>
+        </Space>
+      </div>
 
-      <Card
-        title="服务管理"
-        extra={(
-          <Space wrap>
-            <Input placeholder="搜索服务/负责人" value={query} onChange={(e) => setQuery(e.target.value)} style={{ width: 200 }} />
-            <Input placeholder="团队ID" value={teamId} onChange={(e) => setTeamId(e.target.value)} style={{ width: 100 }} />
-            <Select
-              value={runtime}
-              style={{ width: 120 }}
-              options={[{ value: 'all', label: '全部运行时' }, { value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]}
-              onChange={setRuntime}
+      {/* 统计卡片 */}
+      <StaggerList staggerDelay={0.05}>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} sm={12} lg={6}>
+            <StaggerItem>
+              <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setStatusFilter('all')}>
+                <Statistic
+                  title={<span className="text-gray-600">服务总数</span>}
+                  value={stats.total}
+                  valueStyle={{ color: '#495057', fontSize: '28px', fontWeight: 600 }}
+                />
+              </Card>
+            </StaggerItem>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <StaggerItem>
+              <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setStatusFilter('running')}>
+                <Statistic
+                  title={<span className="text-gray-600">运行中</span>}
+                  value={stats.running}
+                  prefix={<CheckCircleOutlined className="text-success" />}
+                  valueStyle={{ color: '#10b981', fontSize: '28px', fontWeight: 600 }}
+                />
+              </Card>
+            </StaggerItem>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <StaggerItem>
+              <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setStatusFilter('deploying')}>
+                <Statistic
+                  title={<span className="text-gray-600">部署中</span>}
+                  value={stats.deploying}
+                  prefix={<ClockCircleOutlined className="text-primary-500" />}
+                  valueStyle={{ color: '#6366f1', fontSize: '28px', fontWeight: 600 }}
+                />
+              </Card>
+            </StaggerItem>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <StaggerItem>
+              <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setStatusFilter('error')}>
+                <Statistic
+                  title={<span className="text-gray-600">错误</span>}
+                  value={stats.error}
+                  prefix={<ExclamationCircleOutlined className="text-error" />}
+                  valueStyle={{ color: '#ef4444', fontSize: '28px', fontWeight: 600 }}
+                />
+              </Card>
+            </StaggerItem>
+          </Col>
+        </Row>
+      </StaggerList>
+
+      {/* 筛选和搜索 */}
+      <Card>
+        <Space direction="vertical" size="middle" className="w-full">
+          <div className="flex flex-wrap gap-3">
+            <Input
+              placeholder="搜索服务名称或负责人"
+              prefix={<SearchOutlined className="text-gray-400" />}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{ width: 240 }}
+              allowClear
             />
             <Select
               value={env}
-              style={{ width: 120 }}
-              options={[{ value: 'all', label: '全部环境' }, { value: 'development' }, { value: 'staging' }, { value: 'production' }]}
+              style={{ width: 140 }}
+              options={[
+                { value: 'all', label: '全部环境' },
+                { value: 'development', label: 'Development' },
+                { value: 'staging', label: 'Staging' },
+                { value: 'production', label: 'Production' },
+              ]}
               onChange={setEnv}
             />
-            <Input placeholder="标签选择器 app=user,tier=backend" value={labelSelector} onChange={(e) => setLabelSelector(e.target.value)} style={{ width: 220 }} />
-            <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/services/provision')}>创建服务</Button>
-          </Space>
-        )}
-      >
-        <Table
-          rowKey="id"
-          loading={loading}
-          dataSource={list}
-          rowClassName={() => 'stagger-row'}
-          onRow={(_, index) => ({
-            style: { '--stagger-delay': `${Math.min(index ?? 0, 20) * 30}ms` } as React.CSSProperties,
-          })}
-          columns={[
-            { title: '名称', dataIndex: 'name', render: (v: string, r: ServiceItem) => <a onClick={() => navigate(`/services/${r.id}`)}>{v}</a> },
-            { title: '环境', dataIndex: 'env', render: (v: string) => <Tag>{v}</Tag> },
-            { title: '运行时', dataIndex: 'runtimeType', render: (v: string) => <Tag color="blue">{v}</Tag> },
-            { title: '配置', dataIndex: 'configMode', render: (v: string) => <Tag>{v}</Tag> },
-            { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'running' ? 'success' : v === 'deploying' ? 'processing' : v === 'error' ? 'error' : 'default'}>{v}</Tag> },
-            { title: '团队', dataIndex: 'teamId' },
-            { title: '负责人', dataIndex: 'owner' },
-            {
-              title: '标签',
-              dataIndex: 'labels',
-              render: (labels: Array<{ key: string; value: string }>) => (
-                <Space size={[4, 4]} wrap>
-                  {(labels || []).slice(0, 3).map((l) => <Tag key={`${l.key}:${l.value}`}>{l.key}={l.value}</Tag>)}
-                  {(labels || []).length > 3 ? <Tag>+{(labels || []).length - 3}</Tag> : null}
-                </Space>
-              ),
-            },
-          ]}
-        />
+            <Select
+              value={runtime}
+              style={{ width: 140 }}
+              options={[
+                { value: 'all', label: '全部运行时' },
+                { value: 'k8s', label: 'Kubernetes' },
+                { value: 'compose', label: 'Compose' },
+                { value: 'helm', label: 'Helm' },
+              ]}
+              onChange={setRuntime}
+            />
+            <Select
+              value={statusFilter}
+              style={{ width: 120 }}
+              options={[
+                { value: 'all', label: '全部状态' },
+                { value: 'running', label: '运行中' },
+                { value: 'deploying', label: '部署中' },
+                { value: 'error', label: '错误' },
+                { value: 'draft', label: '草稿' },
+              ]}
+              onChange={setStatusFilter}
+            />
+            <Input
+              placeholder="标签选择器 (app=user)"
+              value={labelSelector}
+              onChange={(e) => setLabelSelector(e.target.value)}
+              style={{ width: 200 }}
+              allowClear
+            />
+          </div>
+
+          {/* 批量操作 */}
+          {selectedIds.length > 0 && (
+            <div className="flex items-center justify-between p-3 bg-primary-50 rounded-lg border border-primary-200">
+              <span className="text-sm text-gray-700">
+                已选择 <Badge count={selectedIds.length} showZero className="mx-1" /> 个服务
+              </span>
+              <Space>
+                <Button size="small" onClick={() => setSelectedIds([])}>
+                  取消选择
+                </Button>
+                <Button size="small" icon={<PlayCircleOutlined />} onClick={() => handleBatchAction('启动')}>
+                  批量启动
+                </Button>
+                <Button size="small" icon={<PauseCircleOutlined />} onClick={() => handleBatchAction('停止')}>
+                  批量停止
+                </Button>
+                <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleBatchAction('删除')}>
+                  批量删除
+                </Button>
+              </Space>
+            </div>
+          )}
+        </Space>
       </Card>
+
+      {/* 服务列表 - 卡片视图 */}
+      {loading ? (
+        <Card>
+          <div className="text-center py-12">
+            <ReloadOutlined spin className="text-4xl text-primary-500 mb-4" />
+            <p className="text-gray-500">加载中...</p>
+          </div>
+        </Card>
+      ) : filteredList.length === 0 ? (
+        <Card>
+          <Empty
+            description={
+              <span className="text-gray-500">
+                {query || env !== 'all' || runtime !== 'all' || statusFilter !== 'all'
+                  ? '没有找到匹配的服务'
+                  : '还没有创建任何服务'}
+              </span>
+            }
+          >
+            {!query && env === 'all' && runtime === 'all' && statusFilter === 'all' && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/services/provision')}>
+                创建第一个服务
+              </Button>
+            )}
+          </Empty>
+        </Card>
+      ) : (
+        <StaggerList staggerDelay={0.05}>
+          <Row gutter={[16, 16]}>
+            {filteredList.map((service) => (
+              <Col xs={24} sm={12} lg={8} xl={6} key={service.id}>
+                <StaggerItem>
+                  <ServiceCard service={service} />
+                </StaggerItem>
+              </Col>
+            ))}
+          </Row>
+        </StaggerList>
+      )}
     </div>
   );
 };

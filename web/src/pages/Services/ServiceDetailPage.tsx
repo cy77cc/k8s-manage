@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Alert,
   Button,
@@ -16,8 +16,28 @@ import {
   Tabs,
   Tag,
   message,
+  Statistic,
+  Progress,
+  Badge,
+  Empty,
 } from 'antd';
-import { ArrowLeftOutlined, CloudUploadOutlined, EditOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import {
+  ArrowLeftOutlined,
+  CloudUploadOutlined,
+  EditOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  ExclamationCircleOutlined,
+  FileTextOutlined,
+  DesktopOutlined,
+  DatabaseOutlined,
+  ApiOutlined,
+  BarChartOutlined,
+  SettingOutlined,
+  FileSearchOutlined,
+} from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Api } from '../../api';
 import type {
@@ -64,28 +84,42 @@ const parseLabelText = (text: string): LabelKV[] => {
   return list;
 };
 
+// 获取状态配置
+const getStatusConfig = (status: string) => {
+  const configs: Record<string, { icon: React.ReactNode; color: string; text: string }> = {
+    running: { icon: <CheckCircleOutlined />, color: 'success', text: '运行中' },
+    deploying: { icon: <ClockCircleOutlined />, color: 'processing', text: '部署中' },
+    syncing: { icon: <ClockCircleOutlined />, color: 'processing', text: '同步中' },
+    error: { icon: <ExclamationCircleOutlined />, color: 'error', text: '错误' },
+    draft: { icon: <FileTextOutlined />, color: 'default', text: '草稿' },
+    stopped: { icon: <ExclamationCircleOutlined />, color: 'default', text: '已停止' },
+  };
+  return configs[status] || { icon: null, color: 'default', text: status };
+};
+
 const ServiceDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const [loading, setLoading] = React.useState(false);
-  const [service, setService] = React.useState<ServiceItem | null>(null);
-  const [events, setEvents] = React.useState<ServiceEvent[]>([]);
-  const [revisions, setRevisions] = React.useState<ServiceRevision[]>([]);
-  const [releases, setReleases] = React.useState<ServiceReleaseRecord[]>([]);
-  const [varSchema, setVarSchema] = React.useState<TemplateVar[]>([]);
-  const [varSet, setVarSet] = React.useState<VariableValueSet | null>(null);
-  const [previewYAML, setPreviewYAML] = React.useState('');
-  const [previewWarnings, setPreviewWarnings] = React.useState<Array<{ level: string; code: string; message: string }>>([]);
-  const [deploying, setDeploying] = React.useState(false);
-  const [editOpen, setEditOpen] = React.useState(false);
-  const [editSaving, setEditSaving] = React.useState(false);
+  const [loading, setLoading] = useState(false);
+  const [service, setService] = useState<ServiceItem | null>(null);
+  const [events, setEvents] = useState<ServiceEvent[]>([]);
+  const [revisions, setRevisions] = useState<ServiceRevision[]>([]);
+  const [releases, setReleases] = useState<ServiceReleaseRecord[]>([]);
+  const [varSchema, setVarSchema] = useState<TemplateVar[]>([]);
+  const [varSet, setVarSet] = useState<VariableValueSet | null>(null);
+  const [previewYAML, setPreviewYAML] = useState('');
+  const [previewWarnings, setPreviewWarnings] = useState<Array<{ level: string; code: string; message: string }>>([]);
+  const [deploying, setDeploying] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const [targetForm] = Form.useForm();
   const [varForm] = Form.useForm();
   const [editForm] = Form.useForm<ServiceEditFormValues>();
 
   const env = Form.useWatch('env', varForm) || 'staging';
 
-  const load = React.useCallback(async () => {
+  const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     try {
@@ -114,7 +148,7 @@ const ServiceDetailPage: React.FC = () => {
     }
   }, [id, targetForm, varForm]);
 
-  const loadVarSet = React.useCallback(async () => {
+  const loadVarSet = useCallback(async () => {
     if (!id) return;
     try {
       const resp = await Api.services.getVariableValues(id, env);
@@ -127,14 +161,32 @@ const ServiceDetailPage: React.FC = () => {
     }
   }, [id, env, varForm]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     void load();
   }, [load]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!service || !id) return;
     void loadVarSet();
   }, [service, id, loadVarSet]);
+
+  // 10秒自动刷新
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void load();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  // 统计数据
+  const stats = useMemo(() => {
+    const successReleases = releases.filter((r) => r.status === 'succeeded').length;
+    const failedReleases = releases.filter((r) => r.status === 'failed').length;
+    const successRate = releases.length > 0 ? Math.round((successReleases / releases.length) * 100) : 0;
+    return { successReleases, failedReleases, successRate, totalReleases: releases.length };
+  }, [releases]);
+
+  const statusConfig = service ? getStatusConfig(service.status) : null;
 
   const saveDeployTarget = async () => {
     if (!id) return;
@@ -297,129 +349,473 @@ const ServiceDetailPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4">
-      <Space>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/services')}>返回</Button>
-        <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>
-        <Button icon={<EditOutlined />} onClick={openEdit}>编辑服务配置</Button>
-        <Button icon={<SaveOutlined />} onClick={createRevision}>创建 Revision</Button>
-        <Button icon={<CloudUploadOutlined />} type="primary" loading={deploying} onClick={deploy}>Deploy</Button>
-      </Space>
+    <div className="space-y-6">
+      {/* 页面头部 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/services')}>
+            返回
+          </Button>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-semibold text-gray-900">{service?.name || '服务详情'}</h1>
+              {statusConfig && (
+                <Tag color={statusConfig.color} icon={statusConfig.icon} className="text-sm">
+                  {statusConfig.text}
+                </Tag>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mt-1">
+              {service?.env && <span>环境: {service.env}</span>}
+              {service?.owner && <span className="ml-4">负责人: {service.owner}</span>}
+            </p>
+          </div>
+        </div>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
+            刷新
+          </Button>
+          <Button icon={<EditOutlined />} onClick={openEdit}>
+            编辑配置
+          </Button>
+          <Button icon={<SaveOutlined />} onClick={createRevision}>
+            创建 Revision
+          </Button>
+          <Button icon={<CloudUploadOutlined />} type="primary" loading={deploying} onClick={deploy}>
+            部署
+          </Button>
+        </Space>
+      </div>
 
-      <Card title="服务详情" loading={loading}>
-        {service && (
-          <Descriptions bordered column={2}>
-            <Descriptions.Item label="名称">{service.name}</Descriptions.Item>
-            <Descriptions.Item label="环境"><Tag>{service.env}</Tag></Descriptions.Item>
-            <Descriptions.Item label="运行时"><Tag color="blue">{service.runtimeType}</Tag></Descriptions.Item>
-            <Descriptions.Item label="配置模式"><Tag>{service.configMode}</Tag></Descriptions.Item>
-            <Descriptions.Item label="状态"><Tag color={service.status === 'running' ? 'success' : 'warning'}>{service.status}</Tag></Descriptions.Item>
-            <Descriptions.Item label="负责人">{service.owner}</Descriptions.Item>
-            <Descriptions.Item label="项目/团队">{service.projectId} / {service.teamId}</Descriptions.Item>
-            <Descriptions.Item label="服务分类">{service.serviceKind}</Descriptions.Item>
-            <Descriptions.Item label="模板引擎">{service.templateEngineVersion || 'v1'}</Descriptions.Item>
-            <Descriptions.Item label="最新Revision">{service.lastRevisionId || '-'}</Descriptions.Item>
-            <Descriptions.Item label="标签" span={2}>{(service.labels || []).map((x) => `${x.key}=${x.value}`).join(', ') || '-'}</Descriptions.Item>
-          </Descriptions>
-        )}
-      </Card>
-
-      <Row gutter={16}>
-        <Col span={10}>
-          <Card title="部署目标">
-            <Form form={targetForm} layout="vertical">
-              <Form.Item name="cluster_id" label="Cluster ID" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
-              <Form.Item name="namespace" label="Namespace" rules={[{ required: true }]}><Input /></Form.Item>
-              <Form.Item name="deploy_target" label="Deploy Target"><Select options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} /></Form.Item>
-              <Space>
-                <Button onClick={saveDeployTarget}>保存默认目标</Button>
-                <Button onClick={doDeployPreview}>Deploy Preview</Button>
-              </Space>
-            </Form>
-          </Card>
-
-          <Card title="环境变量集" style={{ marginTop: 16 }}>
-            <Form form={varForm} layout="vertical">
-              <Form.Item name="env" label="环境"><Select options={[{ value: 'development' }, { value: 'staging' }, { value: 'production' }]} /></Form.Item>
-              {varSchema.map((v) => (
-                <Form.Item key={v.name} name={`var_${v.name}`} label={`${v.name}${v.required ? ' *' : ''}`}>
-                  <Input placeholder={v.default || ''} />
-                </Form.Item>
-              ))}
-              <Button onClick={saveVarValues}>保存变量集</Button>
-            </Form>
-            {varSet?.updated_at ? <Alert type="info" style={{ marginTop: 8 }} message={`最近更新时间: ${new Date(varSet.updated_at).toLocaleString()}`} /> : null}
+      {/* 统计卡片 */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="hover:shadow-lg transition-shadow">
+            <Statistic
+              title={<span className="text-gray-600">总发布次数</span>}
+              value={stats.totalReleases}
+              prefix={<ApiOutlined className="text-primary-500" />}
+              valueStyle={{ color: '#495057', fontSize: '24px', fontWeight: 600 }}
+            />
           </Card>
         </Col>
-        <Col span={14}>
-          <Card title="Deploy Preview / 渲染输出">
-            {previewWarnings.length > 0 ? (
-              <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }}>
-                {previewWarnings.map((w, idx) => <Alert key={`${w.code}-${idx}`} type={w.level === 'error' ? 'error' : 'warning'} showIcon message={w.message} />)}
-              </Space>
-            ) : null}
-            <pre style={{ maxHeight: 460, overflow: 'auto' }}>{previewYAML || service?.renderedYaml || service?.customYaml || '# 暂无输出'}</pre>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="hover:shadow-lg transition-shadow">
+            <Statistic
+              title={<span className="text-gray-600">成功率</span>}
+              value={stats.successRate}
+              suffix="%"
+              prefix={<CheckCircleOutlined className="text-success" />}
+              valueStyle={{ color: '#10b981', fontSize: '24px', fontWeight: 600 }}
+            />
+            <Progress
+              percent={stats.successRate}
+              strokeColor="#10b981"
+              showInfo={false}
+              className="mt-2"
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="hover:shadow-lg transition-shadow">
+            <Statistic
+              title={<span className="text-gray-600">版本数</span>}
+              value={revisions.length}
+              prefix={<DatabaseOutlined className="text-primary-500" />}
+              valueStyle={{ color: '#495057', fontSize: '24px', fontWeight: 600 }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="hover:shadow-lg transition-shadow">
+            <Statistic
+              title={<span className="text-gray-600">事件数</span>}
+              value={events.length}
+              prefix={<FileSearchOutlined className="text-primary-500" />}
+              valueStyle={{ color: '#495057', fontSize: '24px', fontWeight: 600 }}
+            />
           </Card>
         </Col>
       </Row>
 
-      <Card title="版本与发布">
-        <Tabs items={[
-          {
-            key: 'revisions',
-            label: `Revisions (${revisions.length})`,
-            children: (
-              <Table
-                rowKey="id"
-                dataSource={revisions}
-                pagination={false}
-                columns={[
-                  { title: '#', dataIndex: 'revision_no' },
-                  { title: '模式', dataIndex: 'config_mode', render: (v: string) => <Tag>{v}</Tag> },
-                  { title: '目标', dataIndex: 'render_target', render: (v: string) => <Tag color="blue">{v}</Tag> },
-                  { title: '创建人', dataIndex: 'created_by' },
-                  { title: '时间', dataIndex: 'created_at', render: (v: string) => new Date(v).toLocaleString() },
-                ]}
-              />
-            ),
-          },
-          {
-            key: 'releases',
-            label: `Releases (${releases.length})`,
-            children: (
-              <Table
-                rowKey="id"
-                dataSource={releases}
-                pagination={false}
-                columns={[
-                  { title: '#', dataIndex: 'id' },
-                  { title: '环境', dataIndex: 'env', render: (v: string) => <Tag>{v}</Tag> },
-                  { title: '目标', dataIndex: 'deploy_target', render: (v: string) => <Tag color="blue">{v}</Tag> },
-                  { title: '集群/命名空间', render: (_: any, r: ServiceReleaseRecord) => `${r.cluster_id} / ${r.namespace}` },
-                  { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'}>{v}</Tag> },
-                  { title: '时间', dataIndex: 'created_at', render: (v: string) => new Date(v).toLocaleString() },
-                ]}
-              />
-            ),
-          },
-          {
-            key: 'events',
-            label: `Events (${events.length})`,
-            children: (
-              <Table
-                rowKey="id"
-                dataSource={events}
-                pagination={false}
-                columns={[
-                  { title: '时间', dataIndex: 'createdAt', render: (v: string) => (v ? new Date(v).toLocaleString() : '-') },
-                  { title: '类型', dataIndex: 'type', render: (v: string) => <Tag>{v}</Tag> },
-                  { title: '级别', dataIndex: 'level', render: (v: string) => <Tag color={v === 'warning' ? 'warning' : v === 'error' ? 'error' : 'blue'}>{v}</Tag> },
-                  { title: '内容', dataIndex: 'message' },
-                ]}
-              />
-            ),
-          },
-        ]} />
+      {/* Tab 内容 */}
+      <Card>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'overview',
+              label: (
+                <span>
+                  <DesktopOutlined className="mr-2" />
+                  概览
+                </span>
+              ),
+              children: (
+                <div className="space-y-6">
+                  {/* 基本信息 */}
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900 mb-4">基本信息</h3>
+                    {service && (
+                      <Descriptions bordered column={2}>
+                        <Descriptions.Item label="服务名称">{service.name}</Descriptions.Item>
+                        <Descriptions.Item label="环境">
+                          <Tag>{service.env}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="运行时">
+                          <Tag color="blue">{service.runtimeType}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="配置模式">
+                          <Tag>{service.configMode}</Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="状态">
+                          {statusConfig && (
+                            <Tag color={statusConfig.color} icon={statusConfig.icon}>
+                              {statusConfig.text}
+                            </Tag>
+                          )}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="负责人">{service.owner || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="项目 ID">{service.projectId || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="团队 ID">{service.teamId || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="服务分类">{service.serviceKind || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="服务类型">{service.serviceType || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="模板引擎">{service.templateEngineVersion || 'v1'}</Descriptions.Item>
+                        <Descriptions.Item label="最新 Revision">{service.lastRevisionId || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="标签" span={2}>
+                          {service.labels && service.labels.length > 0 ? (
+                            <Space size={[4, 4]} wrap>
+                              {service.labels.map((l) => (
+                                <Tag key={`${l.key}:${l.value}`}>
+                                  {l.key}={l.value}
+                                </Tag>
+                              ))}
+                            </Space>
+                          ) : (
+                            '-'
+                          )}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    )}
+                  </div>
+
+                  {/* 最近发布 */}
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900 mb-4">最近发布</h3>
+                    {releases.length > 0 ? (
+                      <Table
+                        rowKey="id"
+                        dataSource={releases.slice(0, 5)}
+                        pagination={false}
+                        size="small"
+                        columns={[
+                          { title: 'ID', dataIndex: 'id', width: 80 },
+                          {
+                            title: '环境',
+                            dataIndex: 'env',
+                            width: 100,
+                            render: (v: string) => <Tag>{v}</Tag>,
+                          },
+                          {
+                            title: '目标',
+                            dataIndex: 'deploy_target',
+                            width: 100,
+                            render: (v: string) => <Tag color="blue">{v}</Tag>,
+                          },
+                          {
+                            title: '集群/命名空间',
+                            width: 180,
+                            render: (_: any, r: ServiceReleaseRecord) => `${r.cluster_id} / ${r.namespace}`,
+                          },
+                          {
+                            title: '状态',
+                            dataIndex: 'status',
+                            width: 100,
+                            render: (v: string) => (
+                              <Tag
+                                color={
+                                  v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'
+                                }
+                              >
+                                {v}
+                              </Tag>
+                            ),
+                          },
+                          {
+                            title: '时间',
+                            dataIndex: 'created_at',
+                            render: (v: string) => new Date(v).toLocaleString(),
+                          },
+                        ]}
+                      />
+                    ) : (
+                      <Empty description="暂无发布记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    )}
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: 'config',
+              label: (
+                <span>
+                  <SettingOutlined className="mr-2" />
+                  配置
+                </span>
+              ),
+              children: (
+                <Row gutter={16}>
+                  <Col xs={24} lg={10}>
+                    <div className="space-y-4">
+                      <Card title="部署目标" size="small">
+                        <Form form={targetForm} layout="vertical">
+                          <Form.Item name="cluster_id" label="Cluster ID" rules={[{ required: true }]}>
+                            <InputNumber min={1} style={{ width: '100%' }} />
+                          </Form.Item>
+                          <Form.Item name="namespace" label="Namespace" rules={[{ required: true }]}>
+                            <Input />
+                          </Form.Item>
+                          <Form.Item name="deploy_target" label="Deploy Target">
+                            <Select
+                              options={[
+                                { value: 'k8s', label: 'Kubernetes' },
+                                { value: 'compose', label: 'Compose' },
+                                { value: 'helm', label: 'Helm' },
+                              ]}
+                            />
+                          </Form.Item>
+                          <Space>
+                            <Button onClick={saveDeployTarget}>保存默认目标</Button>
+                            <Button onClick={doDeployPreview}>预览部署</Button>
+                          </Space>
+                        </Form>
+                      </Card>
+
+                      <Card title="环境变量集" size="small">
+                        <Form form={varForm} layout="vertical">
+                          <Form.Item name="env" label="环境">
+                            <Select
+                              options={[
+                                { value: 'development', label: 'Development' },
+                                { value: 'staging', label: 'Staging' },
+                                { value: 'production', label: 'Production' },
+                              ]}
+                            />
+                          </Form.Item>
+                          {varSchema.map((v) => (
+                            <Form.Item
+                              key={v.name}
+                              name={`var_${v.name}`}
+                              label={`${v.name}${v.required ? ' *' : ''}`}
+                            >
+                              <Input placeholder={v.default || ''} />
+                            </Form.Item>
+                          ))}
+                          <Button onClick={saveVarValues}>保存变量集</Button>
+                        </Form>
+                        {varSet?.updated_at && (
+                          <Alert
+                            type="info"
+                            style={{ marginTop: 8 }}
+                            message={`最近更新: ${new Date(varSet.updated_at).toLocaleString()}`}
+                          />
+                        )}
+                      </Card>
+                    </div>
+                  </Col>
+                  <Col xs={24} lg={14}>
+                    <Card title="渲染输出 / Deploy Preview" size="small">
+                      {previewWarnings.length > 0 && (
+                        <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }}>
+                          {previewWarnings.map((w, idx) => (
+                            <Alert
+                              key={`${w.code}-${idx}`}
+                              type={w.level === 'error' ? 'error' : 'warning'}
+                              showIcon
+                              message={w.message}
+                            />
+                          ))}
+                        </Space>
+                      )}
+                      <pre
+                        className="bg-gray-50 p-4 rounded-lg text-sm overflow-auto"
+                        style={{ maxHeight: 600 }}
+                      >
+                        {previewYAML || service?.renderedYaml || service?.customYaml || '# 暂无输出'}
+                      </pre>
+                    </Card>
+                  </Col>
+                </Row>
+              ),
+            },
+            {
+              key: 'logs',
+              label: (
+                <span>
+                  <FileTextOutlined className="mr-2" />
+                  日志
+                </span>
+              ),
+              children: (
+                <Empty
+                  description="日志查看功能开发中"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
+              ),
+            },
+            {
+              key: 'monitoring',
+              label: (
+                <span>
+                  <BarChartOutlined className="mr-2" />
+                  监控
+                </span>
+              ),
+              children: (
+                <Empty
+                  description="监控图表功能开发中"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
+              ),
+            },
+            {
+              key: 'revisions',
+              label: (
+                <span>
+                  <DatabaseOutlined className="mr-2" />
+                  版本 <Badge count={revisions.length} showZero className="ml-1" />
+                </span>
+              ),
+              children: revisions.length > 0 ? (
+                <Table
+                  rowKey="id"
+                  dataSource={revisions}
+                  pagination={{ pageSize: 10 }}
+                  columns={[
+                    { title: 'Revision #', dataIndex: 'revision_no', width: 100 },
+                    {
+                      title: '配置模式',
+                      dataIndex: 'config_mode',
+                      width: 120,
+                      render: (v: string) => <Tag>{v}</Tag>,
+                    },
+                    {
+                      title: '渲染目标',
+                      dataIndex: 'render_target',
+                      width: 120,
+                      render: (v: string) => <Tag color="blue">{v}</Tag>,
+                    },
+                    { title: '创建人', dataIndex: 'created_by', width: 120 },
+                    {
+                      title: '创建时间',
+                      dataIndex: 'created_at',
+                      render: (v: string) => new Date(v).toLocaleString(),
+                    },
+                  ]}
+                />
+              ) : (
+                <Empty description="暂无版本记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              ),
+            },
+            {
+              key: 'releases',
+              label: (
+                <span>
+                  <CloudUploadOutlined className="mr-2" />
+                  发布 <Badge count={releases.length} showZero className="ml-1" />
+                </span>
+              ),
+              children: releases.length > 0 ? (
+                <Table
+                  rowKey="id"
+                  dataSource={releases}
+                  pagination={{ pageSize: 10 }}
+                  columns={[
+                    { title: 'Release #', dataIndex: 'id', width: 100 },
+                    {
+                      title: '环境',
+                      dataIndex: 'env',
+                      width: 100,
+                      render: (v: string) => <Tag>{v}</Tag>,
+                    },
+                    {
+                      title: '部署目标',
+                      dataIndex: 'deploy_target',
+                      width: 120,
+                      render: (v: string) => <Tag color="blue">{v}</Tag>,
+                    },
+                    {
+                      title: '集群/命名空间',
+                      width: 180,
+                      render: (_: any, r: ServiceReleaseRecord) => `${r.cluster_id} / ${r.namespace}`,
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'status',
+                      width: 120,
+                      render: (v: string) => (
+                        <Tag color={v === 'succeeded' ? 'success' : v === 'failed' ? 'error' : 'processing'}>
+                          {v}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      title: '创建时间',
+                      dataIndex: 'created_at',
+                      render: (v: string) => new Date(v).toLocaleString(),
+                    },
+                  ]}
+                />
+              ) : (
+                <Empty description="暂无发布记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              ),
+            },
+            {
+              key: 'events',
+              label: (
+                <span>
+                  <FileSearchOutlined className="mr-2" />
+                  事件 <Badge count={events.length} showZero className="ml-1" />
+                </span>
+              ),
+              children: events.length > 0 ? (
+                <Table
+                  rowKey="id"
+                  dataSource={events}
+                  pagination={{ pageSize: 10 }}
+                  columns={[
+                    {
+                      title: '时间',
+                      dataIndex: 'createdAt',
+                      width: 180,
+                      render: (v: string) => (v ? new Date(v).toLocaleString() : '-'),
+                    },
+                    {
+                      title: '类型',
+                      dataIndex: 'type',
+                      width: 120,
+                      render: (v: string) => <Tag>{v}</Tag>,
+                    },
+                    {
+                      title: '级别',
+                      dataIndex: 'level',
+                      width: 100,
+                      render: (v: string) => (
+                        <Tag color={v === 'warning' ? 'warning' : v === 'error' ? 'error' : 'blue'}>
+                          {v}
+                        </Tag>
+                      ),
+                    },
+                    { title: '内容', dataIndex: 'message' },
+                  ]}
+                />
+              ) : (
+                <Empty description="暂无事件记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              ),
+            },
+          ]}
+        />
       </Card>
 
       <Modal
