@@ -26,17 +26,34 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
   const statusRef = useRef<WSConnectionStatus>('disconnected');
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
+  const userIdRef = useRef(userId);
+
+  useEffect(() => {
+    userIdRef.current = userId;
+  }, [userId]);
+
+  // 使用 ref 存储回调，避免依赖变化
+  const onMessageRef = useRef(onMessage);
+  const onConnectRef = useRef(onConnect);
+  const onDisconnectRef = useRef(onDisconnect);
+
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+    onConnectRef.current = onConnect;
+    onDisconnectRef.current = onDisconnect;
+  }, [onMessage, onConnect, onDisconnect]);
+
   // 多标签页同步
   const initBroadcastChannel = useCallback(() => {
     if (typeof BroadcastChannel !== 'undefined') {
       broadcastChannelRef.current = new BroadcastChannel('notification-sync');
       broadcastChannelRef.current.onmessage = (event) => {
         if (event.data.type === 'notification-update') {
-          onMessage?.(event.data.message);
+          onMessageRef.current?.(event.data.message);
         }
       };
     }
-  }, [onMessage]);
+  }, []);
 
   // 广播消息到其他标签页
   const broadcast = useCallback((message: WSMessage) => {
@@ -50,7 +67,8 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
 
   // 连接 WebSocket
   const connect = useCallback(() => {
-    if (!userId || statusRef.current === 'connecting') {
+    const currentUserId = userIdRef.current;
+    if (!currentUserId || statusRef.current === 'connecting') {
       return;
     }
 
@@ -62,14 +80,14 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
 
     if (import.meta.env.VITE_WS_URL) {
       // 使用配置的 WebSocket URL
-      wsUrl = `${import.meta.env.VITE_WS_URL}/ws/notifications?user_id=${userId}`;
+      wsUrl = `${import.meta.env.VITE_WS_URL}/ws/notifications?user_id=${currentUserId}`;
     } else if (import.meta.env.DEV) {
       // 开发环境：通过 vite proxy 代理，使用当前 host
       // vite.config.ts 中配置了 /ws 代理到后端
-      wsUrl = `${wsProtocol}//${window.location.host}/ws/notifications?user_id=${userId}`;
+      wsUrl = `${wsProtocol}//${window.location.host}/ws/notifications?user_id=${currentUserId}`;
     } else {
       // 生产环境：使用当前 host
-      wsUrl = `${wsProtocol}//${window.location.host}/ws/notifications?user_id=${userId}`;
+      wsUrl = `${wsProtocol}//${window.location.host}/ws/notifications?user_id=${currentUserId}`;
     }
 
     console.log('WebSocket: 正在连接', wsUrl);
@@ -81,14 +99,14 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       ws.onopen = () => {
         statusRef.current = 'connected';
         currentReconnectIntervalRef.current = reconnectInterval;
-        onConnect?.();
+        onConnectRef.current?.();
         console.log('WebSocket: 已连接');
       };
 
       ws.onmessage = (event) => {
         try {
           const message: WSMessage = JSON.parse(event.data);
-          onMessage?.(message);
+          onMessageRef.current?.(message);
           broadcast(message);
         } catch (error) {
           console.error('WebSocket: 解析消息失败', error);
@@ -97,7 +115,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
 
       ws.onclose = (event) => {
         statusRef.current = 'disconnected';
-        onDisconnect?.();
+        onDisconnectRef.current?.();
         console.log('WebSocket: 连接关闭', event.code, event.reason);
 
         // 只有在非正常关闭时才自动重连
@@ -116,7 +134,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       statusRef.current = 'disconnected';
       scheduleReconnect();
     }
-  }, [userId, onMessage, onConnect, onDisconnect, reconnectInterval, broadcast]);
+  }, [reconnectInterval, broadcast]);
 
   // 安排重连
   const scheduleReconnect = useCallback(() => {
@@ -173,7 +191,6 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
         broadcastChannelRef.current.close();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   return {
