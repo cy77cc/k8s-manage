@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Layout, Menu, Breadcrumb, Avatar, Dropdown, Input, Tooltip, Button } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Layout, Menu, Breadcrumb, Avatar, Dropdown, Input, Tooltip, Button, Drawer } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   DashboardOutlined,
@@ -17,6 +17,7 @@ import {
   QuestionCircleOutlined,
   CloudServerOutlined,
   FileTextOutlined,
+  MenuOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../Auth/AuthContext';
@@ -26,6 +27,10 @@ import { NotificationBell } from '../Notification';
 import '../Notification/notification.css';
 import { useI18n } from '../../i18n';
 import { usePermission } from '../RBAC';
+import CommandPalette from '../CommandPalette';
+import KeyboardShortcutsHelp from '../KeyboardShortcutsHelp';
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import PageTransition from '../PageTransition';
 
 const { Header, Sider, Content } = Layout;
 type MenuItem = Required<MenuProps>['items'][number];
@@ -36,6 +41,10 @@ interface AppLayoutProps {
 
 const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { logout } = useAuth();
@@ -43,6 +52,36 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const { t, lang, setLang } = useI18n();
   const governanceMenuEnabled = import.meta.env.VITE_FEATURE_GOVERNANCE_MENU !== 'false';
   const canReadGovernance = hasPermission('rbac', 'read');
+
+  // 4.1.9 使用键盘快捷键 Hook
+  useKeyboardShortcuts({
+    onOpenHelp: () => setHelpOpen(true),
+    enableNavigation: true,
+    enableListNavigation: false,
+  });
+
+  // 3.1.5 响应式布局检测
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // 4.1.4 全局快捷键 Cmd+K / Ctrl+K
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setCommandPaletteOpen((open) => !open);
+      }
+    };
+
+    document.addEventListener('keydown', down);
+    return () => document.removeEventListener('keydown', down);
+  }, []);
 
   const baseMenuItems: MenuItem[] = [
     { key: '/', icon: <DashboardOutlined />, label: t('menu.dashboard') },
@@ -60,6 +99,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     { key: '/tools', icon: <ToolOutlined />, label: t('menu.tools') },
     ...(governanceMenuEnabled ? [] : [{ key: '/settings', icon: <SettingOutlined />, label: '系统设置' }]),
   ];
+
   const governanceMenuItems: MenuItem[] =
     governanceMenuEnabled && canReadGovernance
       ? [
@@ -100,7 +140,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     const paths = location.pathname.split('/').filter(Boolean);
     const items = [{ title: '首页', path: '/' }];
     let currentPath = '';
-    
+
     paths.forEach((path) => {
       currentPath += `/${path}`;
       const menuItem = menuItems.find((item) => item && (item as any).key === currentPath) as any;
@@ -115,101 +155,192 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         }
       }
     });
-    
+
     return items;
   };
 
-  return (
-    <Layout className="min-h-screen">
-      <Sider 
-        trigger={null} 
-        collapsible 
-        collapsed={collapsed}
-        width={260}
-        className="fixed left-0 top-0 bottom-0 z-50"
-        style={{ background: 'linear-gradient(180deg, var(--color-sider-start) 0%, var(--color-sider-end) 100%)', borderRight: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <div className="h-16 flex items-center justify-center border-b border-gray-700">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center">
-              <CloudOutlined className="text-white text-lg" />
-            </div>
-            {!collapsed && (
-              <span className="text-white font-bold text-lg tracking-wider">OpsPilot</span>
-            )}
+  const handleMenuClick = (key: string) => {
+    navigate(key);
+    if (isMobile) {
+      setMobileDrawerOpen(false);
+    }
+  };
+
+  // 3.1.2 & 3.1.3 侧边栏内容
+  const sidebarContent = (
+    <>
+      {/* Logo 区域 */}
+      <div className="h-16 flex items-center justify-center border-b border-gray-200 px-4">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-sm">
+            <CloudOutlined className="text-white text-base" />
           </div>
+          {!collapsed && (
+            <span className="text-gray-900 font-semibold text-lg">OpsPilot</span>
+          )}
         </div>
-        
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[activeMenuKey]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-          style={{ marginTop: 8, border: 'none' }}
-        />
-        
+      </div>
+
+      {/* 菜单 */}
+      <Menu
+        theme="light"
+        mode="inline"
+        selectedKeys={[activeMenuKey]}
+        items={menuItems}
+        onClick={({ key }) => handleMenuClick(key)}
+        className="border-none mt-2"
+        style={{ background: 'transparent' }}
+      />
+
+      {/* 折叠按钮 (仅桌面端) */}
+      {!isMobile && (
         <div className="absolute bottom-4 left-0 right-0 px-4">
           <Button
             type="text"
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={() => setCollapsed(!collapsed)}
-            className="w-full text-gray-400 hover:text-white"
-            style={{ color: '#d4deef' }}
+            className="w-full text-gray-500 hover:text-gray-900 hover:bg-gray-100"
           />
         </div>
-      </Sider>
-      
-      <Layout style={{ marginLeft: collapsed ? 80 : 260, transition: 'margin-left 0.2s' }}>
-        <Header 
-          className="h-16 px-6 flex items-center justify-between"
-          style={{ 
-            background: 'var(--color-bg-surface)',
-            borderBottom: '1px solid var(--color-border)',
+      )}
+    </>
+  );
+
+  return (
+    <Layout className="min-h-screen">
+      {/* 4.1.2 & 4.1.3 命令面板 */}
+      <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />
+
+      {/* 4.1.13 快捷键帮助对话框 */}
+      <KeyboardShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      {/* 3.1.5 & 3.1.7 桌面端侧边栏 / 移动端抽屉 */}
+      {isMobile ? (
+        // 移动端抽屉式侧边栏
+        <Drawer
+          placement="left"
+          onClose={() => setMobileDrawerOpen(false)}
+          open={mobileDrawerOpen}
+          closable={false}
+          width={240}
+          bodyStyle={{ padding: 0 }}
+          className="mobile-sidebar-drawer"
+        >
+          {sidebarContent}
+        </Drawer>
+      ) : (
+        // 桌面端固定侧边栏
+        <Sider
+          trigger={null}
+          collapsible
+          collapsed={collapsed}
+          width={240}
+          theme="light"
+          className="fixed left-0 top-0 bottom-0 z-50 shadow-sm"
+          style={{
+            background: '#ffffff',
+            borderRight: '1px solid #e9ecef',
+          }}
+        >
+          {sidebarContent}
+        </Sider>
+      )}
+
+      <Layout
+        style={{
+          marginLeft: isMobile ? 0 : collapsed ? 80 : 240,
+          transition: 'margin-left 0.2s',
+        }}
+      >
+        {/* 3.1.4 顶部导航 */}
+        <Header
+          className="h-16 px-4 md:px-6 flex items-center justify-between bg-white shadow-sm"
+          style={{
             position: 'sticky',
             top: 0,
             zIndex: 40,
+            borderBottom: '1px solid #e9ecef',
           }}
         >
           <div className="flex items-center gap-4">
-            <Breadcrumb 
-              items={getBreadcrumbItems().map((item, index) => ({
-                title: index === getBreadcrumbItems().length - 1 ? item.title : <a onClick={() => navigate(item.path!)}>{item.title}</a>,
-              }))}
-              separator="/"
-              style={{ color: 'var(--color-text-secondary)' }}
-            />
+            {/* 移动端菜单按钮 */}
+            {isMobile && (
+              <Button
+                type="text"
+                icon={<MenuOutlined />}
+                onClick={() => setMobileDrawerOpen(true)}
+                className="text-gray-600"
+              />
+            )}
+
+            {/* 面包屑 (桌面端显示) */}
+            {!isMobile && (
+              <Breadcrumb
+                items={getBreadcrumbItems().map((item, index) => ({
+                  title:
+                    index === getBreadcrumbItems().length - 1 ? (
+                      <span className="text-gray-900 font-medium">{item.title}</span>
+                    ) : (
+                      <a
+                        onClick={() => navigate(item.path!)}
+                        className="text-gray-600 hover:text-primary-600 cursor-pointer"
+                      >
+                        {item.title}
+                      </a>
+                    ),
+                }))}
+                separator="/"
+              />
+            )}
           </div>
-          
-          <div className="flex items-center gap-4">
-            <ProjectSwitcher />
-            <select
-              value={lang}
-              onChange={(e) => setLang(e.target.value as 'zh-CN' | 'en-US')}
-              style={{ border: '1px solid var(--color-border)', borderRadius: 6, height: 32, padding: '0 8px' }}
-            >
-              <option value="zh-CN">{t('lang.zh')}</option>
-              <option value="en-US">{t('lang.en')}</option>
-            </select>
-            <Input
-              placeholder="搜索主机、配置、任务..."
-              prefix={<SearchOutlined style={{ color: '#8d98a8' }} />}
-              className="header-search-input"
-              style={{ width: 280, background: 'var(--color-bg-subtle)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
-            />
-            
-            <Tooltip title="帮助文档">
+
+          <div className="flex items-center gap-2 md:gap-3">
+            {/* 项目切换器 (桌面端显示) */}
+            {!isMobile && <ProjectSwitcher />}
+
+            {/* 语言切换 (桌面端显示) */}
+            {!isMobile && (
+              <select
+                value={lang}
+                onChange={(e) => setLang(e.target.value as 'zh-CN' | 'en-US')}
+                className="border border-gray-300 rounded-lg h-9 px-3 text-sm text-gray-700 bg-white hover:border-primary-500 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
+              >
+                <option value="zh-CN">{t('lang.zh')}</option>
+                <option value="en-US">{t('lang.en')}</option>
+              </select>
+            )}
+
+            {/* 搜索框 (桌面端显示) */}
+            {!isMobile && (
+              <Input
+                placeholder="搜索..."
+                prefix={<SearchOutlined className="text-gray-400" />}
+                className="w-48 lg:w-64"
+                style={{
+                  background: '#f8f9fa',
+                  border: '1px solid #e9ecef',
+                  borderRadius: '8px',
+                }}
+              />
+            )}
+
+            {/* 帮助按钮 */}
+            <Tooltip title={<span>帮助文档 <kbd className="ml-1 text-xs">?</kbd></span>}>
               <Button
                 type="text"
                 icon={<QuestionCircleOutlined />}
-                style={{ color: 'var(--color-text-secondary)' }}
-                onClick={() => navigate('/help')}
+                className="text-gray-600 hover:text-primary-600"
+                onClick={() => setHelpOpen(true)}
               />
             </Tooltip>
+
+            {/* AI 助手 */}
             <GlobalAIAssistant inlineTrigger />
 
+            {/* 通知 */}
             <NotificationBell onViewAll={() => navigate('/monitor')} />
-            
+
+            {/* 用户菜单 */}
             <Dropdown
               menu={{
                 items: userMenuItems,
@@ -225,16 +356,52 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               }}
               placement="bottomRight"
             >
-              <Avatar 
-                style={{ backgroundColor: 'var(--color-theme)', cursor: 'pointer' }}
+              <Avatar
+                className="bg-primary-500 cursor-pointer hover:bg-primary-600 transition-colors"
                 icon={<UserOutlined />}
               />
             </Dropdown>
           </div>
         </Header>
-        
-        <Content className="p-6 min-h-[calc(100vh-64px)]">
-          {children}
+
+        {/* 3.1.6 移动端底部导航 */}
+        {isMobile && (
+          <div className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-200 flex items-center justify-around z-50 shadow-lg">
+            <Button
+              type="text"
+              icon={<DashboardOutlined />}
+              onClick={() => navigate('/')}
+              className={location.pathname === '/' ? 'text-primary-600' : 'text-gray-600'}
+            />
+            <Button
+              type="text"
+              icon={<CloudServerOutlined />}
+              onClick={() => navigate('/services')}
+              className={location.pathname.startsWith('/services') ? 'text-primary-600' : 'text-gray-600'}
+            />
+            <Button
+              type="text"
+              icon={<DesktopOutlined />}
+              onClick={() => navigate('/hosts')}
+              className={location.pathname.startsWith('/hosts') ? 'text-primary-600' : 'text-gray-600'}
+            />
+            <Button
+              type="text"
+              icon={<SettingOutlined />}
+              onClick={() => navigate('/settings')}
+              className={location.pathname.startsWith('/settings') ? 'text-primary-600' : 'text-gray-600'}
+            />
+          </div>
+        )}
+
+        <Content
+          className="p-4 md:p-6 bg-gray-50"
+          style={{
+            minHeight: isMobile ? 'calc(100vh - 128px)' : 'calc(100vh - 64px)',
+          }}
+        >
+          {/* 4.2.1 页面切换动画 */}
+          <PageTransition>{children}</PageTransition>
         </Content>
       </Layout>
     </Layout>

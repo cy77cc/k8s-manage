@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Col, List, Progress, Row, Space, Statistic, Table, Tag, Button } from 'antd';
-import { AlertOutlined, CloudOutlined, DesktopOutlined, ReloadOutlined, ScheduleOutlined } from '@ant-design/icons';
+import { Card, Col, List, Progress, Row, Statistic, Table, Tag, Button, Empty } from 'antd';
+import {
+  AlertOutlined,
+  CloudOutlined,
+  DesktopOutlined,
+  ReloadOutlined,
+  ScheduleOutlined,
+  ArrowUpOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+} from '@ant-design/icons';
 import { Api } from '../../api';
 import { StaggerList, StaggerItem } from '../../components/Motion';
 
@@ -55,8 +64,20 @@ const Dashboard: React.FC = () => {
         jobRunning: jobList.filter((j) => j.status === 'running').length,
         clusterTotal: clusterList.length,
         alertTotal: alertList.filter((a) => a.status === 'firing').length,
-        topHosts: hostList.slice(0, 5).map((h) => ({ id: String(h.id), name: h.name, ip: h.ip, status: h.status, cpu: h.cpu ?? 0, memory: h.memory ?? 0 })),
-        recentAlerts: alertList.slice(0, 6).map((a) => ({ id: String(a.id), message: a.title || a.source || '告警事件', severity: a.severity, createdAt: a.createdAt })),
+        topHosts: hostList.slice(0, 5).map((h) => ({
+          id: String(h.id),
+          name: h.name,
+          ip: h.ip,
+          status: h.status,
+          cpu: h.cpu ?? 0,
+          memory: h.memory ?? 0,
+        })),
+        recentAlerts: alertList.slice(0, 6).map((a) => ({
+          id: String(a.id),
+          message: a.title || a.source || '告警事件',
+          severity: a.severity,
+          createdAt: a.createdAt,
+        })),
         recentFailedReleases,
       });
     } finally {
@@ -64,95 +85,338 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // 3.1.11 自动刷新（30秒）
   useEffect(() => {
     load();
     const handler = () => load();
     window.addEventListener('project:changed', handler as EventListener);
-    return () => window.removeEventListener('project:changed', handler as EventListener);
+
+    // 30秒自动刷新
+    const interval = setInterval(load, 30000);
+
+    return () => {
+      window.removeEventListener('project:changed', handler as EventListener);
+      clearInterval(interval);
+    };
   }, []);
 
-  const widgets = useMemo(() => [
-    { key: 'host-health', title: '主机健康', value: `${state.hostOnline}/${state.hostTotal}`, extra: `${Math.round((state.hostOnline / Math.max(1, state.hostTotal)) * 100)}%` },
-    { key: 'task-success', title: '任务成功率', value: `${state.jobTotal - state.jobRunning}/${Math.max(1, state.jobTotal)}`, extra: `${Math.round(((state.jobTotal - state.jobRunning) / Math.max(1, state.jobTotal)) * 100)}%` },
-    { key: 'release-frequency', title: '最近失败发布', value: state.recentFailedReleases, extra: '24h' },
-    { key: 'alert-trend', title: '告警趋势', value: state.alertTotal, extra: 'active' },
-    { key: 'k8s-capacity', title: 'K8s 容量', value: state.clusterTotal, extra: 'clusters' },
-    { key: 'service-slo', title: '服务 SLO', value: '99.90%', extra: '目标 99.95%' },
-    { key: 'error-rate', title: '错误率', value: `${state.alertTotal}%`, extra: '估算' },
-    { key: 'top-resources', title: 'Top 资源消耗', value: state.topHosts[0]?.name || '-', extra: `${state.topHosts[0]?.cpu || 0}% CPU` },
-  ], [state]);
+  // 计算健康率
+  const healthRate = useMemo(() => {
+    if (state.hostTotal === 0) return 0;
+    return Math.round((state.hostOnline / state.hostTotal) * 100);
+  }, [state.hostOnline, state.hostTotal]);
+
+  // 计算任务成功率
+  const taskSuccessRate = useMemo(() => {
+    if (state.jobTotal === 0) return 0;
+    return Math.round(((state.jobTotal - state.jobRunning) / state.jobTotal) * 100);
+  }, [state.jobTotal, state.jobRunning]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* 页面头部 */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">主控台</h1>
-        <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">主控台</h1>
+          <p className="text-sm text-gray-500 mt-1">实时监控系统运行状态</p>
+        </div>
+        <Button
+          type="primary"
+          icon={<ReloadOutlined />}
+          onClick={load}
+          loading={loading}
+        >
+          刷新数据
+        </Button>
       </div>
 
+      {/* 3.1.8 统计卡片 - 主要指标 */}
       <StaggerList staggerDelay={0.05}>
         <Row gutter={[16, 16]}>
-          <Col xs={24} sm={12} lg={6}><StaggerItem><Card><Statistic title="主机总数" value={state.hostTotal} prefix={<DesktopOutlined />} /></Card></StaggerItem></Col>
-          <Col xs={24} sm={12} lg={6}><StaggerItem><Card><Statistic title="在线主机" value={state.hostOnline} prefix={<CloudOutlined />} /></Card></StaggerItem></Col>
-          <Col xs={24} sm={12} lg={6}><StaggerItem><Card><Statistic title="任务总数" value={state.jobTotal} prefix={<ScheduleOutlined />} /></Card></StaggerItem></Col>
-          <Col xs={24} sm={12} lg={6}><StaggerItem><Card><Statistic title="活跃告警" value={state.alertTotal} prefix={<AlertOutlined />} /></Card></StaggerItem></Col>
+          <Col xs={24} sm={12} lg={6}>
+            <StaggerItem>
+              <Card className="hover:shadow-lg transition-shadow">
+                <Statistic
+                  title={<span className="text-gray-600">主机总数</span>}
+                  value={state.hostTotal}
+                  prefix={<DesktopOutlined className="text-primary-500" />}
+                  valueStyle={{ color: '#495057', fontSize: '28px', fontWeight: 600 }}
+                />
+                <div className="mt-2 flex items-center text-sm">
+                  <span className="text-success flex items-center">
+                    <ArrowUpOutlined className="mr-1" />
+                    {state.hostOnline} 在线
+                  </span>
+                  <span className="text-gray-400 mx-2">|</span>
+                  <span className="text-gray-500">
+                    {state.hostTotal - state.hostOnline} 离线
+                  </span>
+                </div>
+              </Card>
+            </StaggerItem>
+          </Col>
+
+          <Col xs={24} sm={12} lg={6}>
+            <StaggerItem>
+              <Card className="hover:shadow-lg transition-shadow">
+                <Statistic
+                  title={<span className="text-gray-600">主机健康率</span>}
+                  value={healthRate}
+                  suffix="%"
+                  prefix={
+                    healthRate >= 90 ? (
+                      <CheckCircleOutlined className="text-success" />
+                    ) : (
+                      <CloseCircleOutlined className="text-error" />
+                    )
+                  }
+                  valueStyle={{
+                    color: healthRate >= 90 ? '#10b981' : '#ef4444',
+                    fontSize: '28px',
+                    fontWeight: 600,
+                  }}
+                />
+                <Progress
+                  percent={healthRate}
+                  strokeColor={healthRate >= 90 ? '#10b981' : '#ef4444'}
+                  showInfo={false}
+                  className="mt-2"
+                />
+              </Card>
+            </StaggerItem>
+          </Col>
+
+          <Col xs={24} sm={12} lg={6}>
+            <StaggerItem>
+              <Card className="hover:shadow-lg transition-shadow">
+                <Statistic
+                  title={<span className="text-gray-600">任务总数</span>}
+                  value={state.jobTotal}
+                  prefix={<ScheduleOutlined className="text-primary-500" />}
+                  valueStyle={{ color: '#495057', fontSize: '28px', fontWeight: 600 }}
+                />
+                <div className="mt-2 flex items-center text-sm">
+                  <span className="text-primary-600 flex items-center">
+                    {state.jobRunning} 运行中
+                  </span>
+                  <span className="text-gray-400 mx-2">|</span>
+                  <span className="text-gray-500">
+                    成功率 {taskSuccessRate}%
+                  </span>
+                </div>
+              </Card>
+            </StaggerItem>
+          </Col>
+
+          <Col xs={24} sm={12} lg={6}>
+            <StaggerItem>
+              <Card className="hover:shadow-lg transition-shadow">
+                <Statistic
+                  title={<span className="text-gray-600">活跃告警</span>}
+                  value={state.alertTotal}
+                  prefix={<AlertOutlined className="text-warning" />}
+                  valueStyle={{
+                    color: state.alertTotal > 0 ? '#f59e0b' : '#10b981',
+                    fontSize: '28px',
+                    fontWeight: 600,
+                  }}
+                />
+                <div className="mt-2 text-sm">
+                  {state.alertTotal > 0 ? (
+                    <span className="text-warning">需要关注</span>
+                  ) : (
+                    <span className="text-success">系统正常</span>
+                  )}
+                </div>
+              </Card>
+            </StaggerItem>
+          </Col>
         </Row>
       </StaggerList>
 
+      {/* 次要指标 */}
       <StaggerList staggerDelay={0.05}>
         <Row gutter={[16, 16]}>
-          {widgets.map((w) => (
-            <Col xs={24} sm={12} md={8} lg={6} key={w.key}>
-              <StaggerItem>
-                <Card size="small" title={w.title}>
-                  <div className="text-lg font-bold">{w.value}</div>
-                  <div className="text-gray-500">{w.extra}</div>
-                </Card>
-              </StaggerItem>
-            </Col>
-          ))}
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <StaggerItem>
+              <Card size="small" className="hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-gray-600 mb-1">K8s 集群</div>
+                    <div className="text-2xl font-semibold text-gray-900">
+                      {state.clusterTotal}
+                    </div>
+                  </div>
+                  <CloudOutlined className="text-3xl text-primary-500 opacity-20" />
+                </div>
+              </Card>
+            </StaggerItem>
+          </Col>
+
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <StaggerItem>
+              <Card size="small" className="hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-gray-600 mb-1">失败发布</div>
+                    <div className="text-2xl font-semibold text-gray-900">
+                      {state.recentFailedReleases}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">最近 24h</div>
+                  </div>
+                  <CloseCircleOutlined
+                    className={`text-3xl opacity-20 ${
+                      state.recentFailedReleases > 0 ? 'text-error' : 'text-success'
+                    }`}
+                  />
+                </div>
+              </Card>
+            </StaggerItem>
+          </Col>
+
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <StaggerItem>
+              <Card size="small" className="hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-gray-600 mb-1">服务 SLO</div>
+                    <div className="text-2xl font-semibold text-gray-900">99.90%</div>
+                    <div className="text-xs text-gray-500 mt-1">目标 99.95%</div>
+                  </div>
+                  <CheckCircleOutlined className="text-3xl text-success opacity-20" />
+                </div>
+              </Card>
+            </StaggerItem>
+          </Col>
+
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <StaggerItem>
+              <Card size="small" className="hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-gray-600 mb-1">Top 资源</div>
+                    <div className="text-base font-medium text-gray-900 truncate">
+                      {state.topHosts[0]?.name || '-'}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      CPU {state.topHosts[0]?.cpu || 0}%
+                    </div>
+                  </div>
+                  <DesktopOutlined className="text-3xl text-primary-500 opacity-20" />
+                </div>
+              </Card>
+            </StaggerItem>
+          </Col>
         </Row>
       </StaggerList>
 
+      {/* 3.1.9 服务健康状态列表 */}
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={14}>
-          <Card title="主机概览">
-            <Table
-              rowKey="id"
-              pagination={false}
-              dataSource={state.topHosts}
-              columns={[
-                { title: '主机', dataIndex: 'name' },
-                { title: 'IP', dataIndex: 'ip' },
-                { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={v === 'online' ? 'success' : 'default'}>{v}</Tag> },
-                { title: 'CPU', dataIndex: 'cpu', render: (v: number) => <Progress percent={Math.min(100, v)} size="small" /> },
-              ]}
-            />
+          <Card
+            title={<span className="text-base font-semibold">主机概览</span>}
+            extra={<Button type="link">查看全部</Button>}
+            className="h-full"
+          >
+            {state.topHosts.length > 0 ? (
+              <Table
+                rowKey="id"
+                pagination={false}
+                dataSource={state.topHosts}
+                size="small"
+                columns={[
+                  {
+                    title: '主机名称',
+                    dataIndex: 'name',
+                    key: 'name',
+                    render: (text) => (
+                      <span className="font-medium text-gray-900">{text}</span>
+                    ),
+                  },
+                  {
+                    title: 'IP 地址',
+                    dataIndex: 'ip',
+                    key: 'ip',
+                    render: (text) => (
+                      <span className="text-gray-600 font-mono text-sm">{text}</span>
+                    ),
+                  },
+                  {
+                    title: '状态',
+                    dataIndex: 'status',
+                    key: 'status',
+                    render: (v: string) => (
+                      <Tag
+                        color={v === 'online' ? 'success' : 'default'}
+                        icon={
+                          v === 'online' ? (
+                            <CheckCircleOutlined />
+                          ) : (
+                            <CloseCircleOutlined />
+                          )
+                        }
+                      >
+                        {v === 'online' ? '在线' : '离线'}
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: 'CPU 使用率',
+                    dataIndex: 'cpu',
+                    key: 'cpu',
+                    render: (v: number) => (
+                      <div className="w-32">
+                        <Progress
+                          percent={Math.min(100, v)}
+                          size="small"
+                          strokeColor={v > 80 ? '#ef4444' : v > 60 ? '#f59e0b' : '#10b981'}
+                        />
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            ) : (
+              <Empty description="暂无主机数据" />
+            )}
           </Card>
         </Col>
+
         <Col xs={24} lg={10}>
-          <Card title="最近告警">
-            <List
-              dataSource={state.recentAlerts}
-              renderItem={(item) => (
-                <List.Item>
-                  <div className="w-full flex justify-between">
-                    <span>{item.message}</span>
-                    <Tag color={item.severity === 'critical' ? 'error' : item.severity === 'warning' ? 'warning' : 'blue'}>{item.severity}</Tag>
-                  </div>
-                </List.Item>
-              )}
-            />
+          <Card
+            title={<span className="text-base font-semibold">最近告警</span>}
+            extra={<Button type="link">查看全部</Button>}
+            className="h-full"
+          >
+            {state.recentAlerts.length > 0 ? (
+              <List
+                dataSource={state.recentAlerts}
+                renderItem={(item) => (
+                  <List.Item className="hover:bg-gray-50 transition-colors px-2 rounded">
+                    <div className="w-full flex items-center justify-between">
+                      <span className="text-gray-700 flex-1 truncate">{item.message}</span>
+                      <Tag
+                        color={
+                          item.severity === 'critical'
+                            ? 'error'
+                            : item.severity === 'warning'
+                            ? 'warning'
+                            : 'processing'
+                        }
+                        className="ml-2"
+                      >
+                        {item.severity}
+                      </Tag>
+                    </div>
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Empty description="暂无告警" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            )}
           </Card>
         </Col>
       </Row>
-
-      <Card title="运行摘要">
-        <Space wrap>
-          <Tag color="blue">在线主机: {state.hostOnline}</Tag>
-          <Tag color="geekblue">集群数: {state.clusterTotal}</Tag>
-          <Tag color={state.recentFailedReleases > 0 ? 'error' : 'success'}>失败发布: {state.recentFailedReleases}</Tag>
-        </Space>
-      </Card>
     </div>
   );
 };
