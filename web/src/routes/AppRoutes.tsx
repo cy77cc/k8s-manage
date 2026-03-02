@@ -13,7 +13,29 @@ const ServiceProvisionPage = lazy(() => import('../pages/Services/ServiceProvisi
 
 const DeploymentListPage = lazy(() => import('../pages/Deployment/DeploymentListPage'));
 const DeploymentCreatePage = lazy(() => import('../pages/Deployment/DeploymentCreatePage'));
+const EnhancedDeploymentCreatePage = lazy(() => import('../pages/Deployment/EnhancedDeploymentCreatePage'));
 const DeploymentDetailPage = lazy(() => import('../pages/Deployment/DeploymentDetailPage'));
+const DeploymentOverviewPage = lazy(() => import('../pages/Deployment/DeploymentOverviewPage'));
+const ApprovalCenterPage = lazy(() => import('../pages/Deployment/ApprovalCenterPage'));
+
+// 部署管理 - 基础设施
+const CredentialListPage = lazy(() => import('../pages/Deployment/Infrastructure/CredentialListPage'));
+const ClusterListPage = lazy(() => import('../pages/Deployment/Infrastructure/ClusterListPage'));
+const ClusterDetailPage = lazy(() => import('../pages/Deployment/Infrastructure/ClusterDetailPage'));
+const ClusterBootstrapWizard = lazy(() => import('../pages/Deployment/Infrastructure/ClusterBootstrapWizard'));
+
+// 部署管理 - 部署目标
+const DeploymentTargetListPage = lazy(() => import('../pages/Deployment/Targets/DeploymentTargetListPage'));
+const DeploymentTargetDetailPage = lazy(() => import('../pages/Deployment/Targets/DeploymentTargetDetailPage'));
+const CreateTargetWizard = lazy(() => import('../pages/Deployment/Targets/CreateTargetWizard'));
+const EnvironmentBootstrapWizard = lazy(() => import('../pages/Deployment/Targets/EnvironmentBootstrapWizard'));
+
+// 部署管理 - 可观测性
+const AuditLogsPage = lazy(() => import('../pages/Deployment/Observability/AuditLogsPage'));
+const DeploymentTopologyPage = lazy(() => import('../pages/Deployment/Observability/DeploymentTopologyPage'));
+const PolicyManagementPage = lazy(() => import('../pages/Deployment/Observability/PolicyManagementPage'));
+const MetricsDashboardPage = lazy(() => import('../pages/Deployment/Observability/MetricsDashboardPage'));
+const AIOpsInsightsPage = lazy(() => import('../pages/Deployment/Observability/AIOpsInsightsPage'));
 
 const HostListPage = lazy(() => import('../pages/Hosts/HostListPage'));
 const HostDetailPage = lazy(() => import('../pages/Hosts/HostDetailPage'));
@@ -84,11 +106,31 @@ const AppRoutes: React.FC = () => {
         }
       />
       <Route
+        path="/deployment/overview"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <DeploymentOverviewPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/approvals"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <ApprovalCenterPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
         path="/deployment/create"
         element={
           <AppLayout>
             <LazyPage>
-              <DeploymentCreatePage />
+              <EnhancedDeploymentCreatePage />
             </LazyPage>
           </AppLayout>
         }
@@ -99,6 +141,142 @@ const AppRoutes: React.FC = () => {
           <AppLayout>
             <LazyPage>
               <DeploymentDetailPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* 部署管理 - 基础设施 */}
+      <Route
+        path="/deployment/infrastructure/credentials"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <CredentialListPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/infrastructure/clusters"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <ClusterListPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/infrastructure/clusters/:id"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <ClusterDetailPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/infrastructure/clusters/bootstrap"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <ClusterBootstrapWizard />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* 部署管理 - 部署目标 */}
+      <Route
+        path="/deployment/targets"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <DeploymentTargetListPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/targets/:id"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <DeploymentTargetDetailPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/targets/create"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <CreateTargetWizard />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/targets/:targetId/bootstrap/:jobId?"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <EnvironmentBootstrapWizard />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* 部署管理 - 可观测性 */}
+      <Route
+        path="/deployment/observability/audit-logs"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <AuditLogsPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/observability/topology"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <DeploymentTopologyPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/observability/policies"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <PolicyManagementPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/observability/metrics"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <MetricsDashboardPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/deployment/observability/aiops"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <AIOpsInsightsPage />
             </LazyPage>
           </AppLayout>
         }

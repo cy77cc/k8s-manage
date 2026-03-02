@@ -94,7 +94,51 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     { key: '/help', icon: <FileTextOutlined />, label: '帮助中心' },
     { key: '/config', icon: <SettingOutlined />, label: t('menu.config') },
     { key: '/tasks', icon: <ClockCircleOutlined />, label: t('menu.tasks') },
-    { key: '/deployment', icon: <CloudOutlined />, label: '部署管理' },
+    {
+      key: '/deployment',
+      icon: <CloudOutlined />,
+      label: '部署管理',
+      children: [
+        {
+          key: 'infrastructure',
+          label: '基础设施',
+          children: [
+            { key: '/deployment/infrastructure/clusters', label: '集群管理' },
+            { key: '/deployment/infrastructure/credentials', label: '凭证管理' },
+            { key: '/hosts', label: '主机管理' },
+          ],
+        },
+        {
+          key: 'targets',
+          label: '部署目标',
+          children: [
+            { key: '/deployment/targets', label: '目标列表' },
+            { key: '/deployment/targets/create', label: '创建目标' },
+          ],
+        },
+        {
+          key: 'releases',
+          label: '发布管理',
+          children: [
+            { key: '/deployment/overview', label: '发布概览' },
+            { key: '/deployment/create', label: '创建发布' },
+            { key: '/deployment', label: '发布历史' },
+            { key: '/deployment/approvals', label: '审批中心' },
+          ],
+        },
+        {
+          key: 'observability',
+          label: '可观测性',
+          children: [
+            { key: '/deployment/observability/topology', label: '部署拓扑' },
+            { key: '/deployment/observability/metrics', label: '指标仪表板' },
+            { key: '/deployment/observability/audit-logs', label: '审计日志' },
+            { key: '/deployment/observability/policies', label: '策略管理' },
+            { key: '/deployment/observability/aiops', label: 'AIOps 洞察' },
+          ],
+        },
+      ],
+    },
     { key: '/monitor', icon: <AlertOutlined />, label: t('menu.monitor') },
     { key: '/tools', icon: <ToolOutlined />, label: t('menu.tools') },
     ...(governanceMenuEnabled ? [] : [{ key: '/settings', icon: <SettingOutlined />, label: '系统设置' }]),

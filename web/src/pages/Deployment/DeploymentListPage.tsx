@@ -34,23 +34,35 @@ const DeploymentListPage: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [releases, setReleases] = useState<DeployRelease[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+  const [targets, setTargets] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [runtimeFilter, setRuntimeFilter] = useState<string>('all');
+  const [serviceFilter, setServiceFilter] = useState<string>('all');
+  const [targetFilter, setTargetFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await Api.deployment.getReleasesByRuntime({
-        runtime_type: runtimeFilter === 'all' ? undefined : (runtimeFilter as any),
-      });
-      setReleases(res.data.list || []);
+      const [releasesRes, servicesRes, targetsRes] = await Promise.all([
+        Api.deployment.getReleasesByRuntime({
+          runtime_type: runtimeFilter === 'all' ? undefined : (runtimeFilter as any),
+          service_id: serviceFilter === 'all' ? undefined : Number(serviceFilter),
+          target_id: targetFilter === 'all' ? undefined : Number(targetFilter),
+        }),
+        Api.services.getList({ page: 1, pageSize: 500 }),
+        Api.deployment.listTargets(),
+      ]);
+      setReleases(releasesRes.data.list || []);
+      setServices(servicesRes.data.list || []);
+      setTargets(targetsRes.data.list || []);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '加载部署记录失败');
     } finally {
       setLoading(false);
     }
-  }, [runtimeFilter]);
+  }, [runtimeFilter, serviceFilter, targetFilter]);
 
   useEffect(() => {
     void load();
@@ -277,6 +289,24 @@ const DeploymentListPage: React.FC = () => {
               { value: 'compose', label: 'Compose' },
             ]}
             onChange={setRuntimeFilter}
+          />
+          <Select
+            value={serviceFilter}
+            style={{ width: 180 }}
+            options={[
+              { value: 'all', label: '全部服务' },
+              ...services.map((s) => ({ value: String(s.id), label: s.name })),
+            ]}
+            onChange={setServiceFilter}
+          />
+          <Select
+            value={targetFilter}
+            style={{ width: 180 }}
+            options={[
+              { value: 'all', label: '全部目标' },
+              ...targets.map((t) => ({ value: String(t.id), label: t.name })),
+            ]}
+            onChange={setTargetFilter}
           />
         </div>
       </Card>

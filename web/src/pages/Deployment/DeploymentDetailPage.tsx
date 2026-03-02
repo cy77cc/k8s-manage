@@ -13,6 +13,7 @@ import {
   Col,
   Empty,
   Modal,
+  Tabs,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -23,10 +24,19 @@ import {
   CloseCircleOutlined,
   CheckOutlined,
   CloseOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Api } from '../../api';
 import type { DeployRelease, DeployReleaseTimelineEvent } from '../../api/modules/deployment';
+import ReleaseStateFlow from '../../components/Deployment/ReleaseStateFlow';
+import DeploymentProgressBar from '../../components/Deployment/DeploymentProgressBar';
+import HealthCheckStatus from '../../components/Deployment/HealthCheckStatus';
+import LiveLogViewer from '../../components/Deployment/LiveLogViewer';
+import ApprovalWorkflow from '../../components/Deployment/ApprovalWorkflow';
+import { usePolling } from '../../hooks/usePolling';
+import { useCancelToken } from '../../hooks/useCancelToken';
+import { handleApiError } from '../../utils/apiErrorHandler';
 
 const DeploymentDetailPage: React.FC = () => {
   const navigate = useNavigate();
@@ -34,6 +44,7 @@ const DeploymentDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [release, setRelease] = useState<DeployRelease | null>(null);
   const [timeline, setTimeline] = useState<DeployReleaseTimelineEvent[]>([]);
+  const { getSignal, isCancelled } = useCancelToken();
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -49,23 +60,29 @@ const DeploymentDetailPage: React.FC = () => {
       setRelease(foundRelease || null);
       setTimeline(timelineRes.data.list || []);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '加载部署详情失败');
+      if (!isCancelled(err)) {
+        handleApiError(err, '加载部署详情失败');
+      }
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, isCancelled]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // 10秒自动刷新
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void load();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [load]);
+  // Check if release is in terminal state
+  const isTerminalState = (state: string) => {
+    return ['applied', 'failed', 'rejected', 'rolled_back'].includes(state);
+  };
+
+  // Auto-refresh with polling - stop when in terminal state
+  usePolling(load, {
+    interval: 10000,
+    enabled: release ? !isTerminalState(release.state) : false,
+    shouldStop: () => release ? isTerminalState(release.state) : false,
+  });
 
   // 获取状态配置
   const getStatusConfig = (status: string) => {
@@ -95,7 +112,7 @@ const DeploymentDetailPage: React.FC = () => {
       message.success(`Release #${release.id} 已审批并执行`);
       await load();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '审批失败');
+      handleApiError(err, '审批失败');
     }
   };
 
@@ -113,7 +130,7 @@ const DeploymentDetailPage: React.FC = () => {
           message.success(`Release #${release.id} 已拒绝`);
           await load();
         } catch (err) {
-          message.error(err instanceof Error ? err.message : '拒绝失败');
+          handleApiError(err, '拒绝失败');
         }
       },
     });
@@ -134,7 +151,7 @@ const DeploymentDetailPage: React.FC = () => {
           message.success(`回滚任务已提交，来源 Release #${release.id}`);
           await load();
         } catch (err) {
-          message.error(err instanceof Error ? err.message : '回滚失败');
+          handleApiError(err, '回滚失败');
         }
       },
     });
@@ -230,18 +247,18 @@ const DeploymentDetailPage: React.FC = () => {
           <Col xs={24} sm={12} lg={6}>
             <Card className="hover:shadow-lg transition-shadow">
               <Statistic
-                title={<span className="text-gray-600">服务 ID</span>}
-                value={release.service_id}
-                valueStyle={{ color: '#495057', fontSize: '24px', fontWeight: 600 }}
+                title={<span className="text-gray-600">服务</span>}
+                value={release.service_name || release.service_id}
+                valueStyle={{ color: '#495057', fontSize: '20px', fontWeight: 600 }}
               />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <Card className="hover:shadow-lg transition-shadow">
               <Statistic
-                title={<span className="text-gray-600">目标 ID</span>}
-                value={release.target_id}
-                valueStyle={{ color: '#495057', fontSize: '24px', fontWeight: 600 }}
+                title={<span className="text-gray-600">目标</span>}
+                value={release.target_name || release.target_id}
+                valueStyle={{ color: '#495057', fontSize: '20px', fontWeight: 600 }}
               />
             </Card>
           </Col>
@@ -250,7 +267,7 @@ const DeploymentDetailPage: React.FC = () => {
               <Statistic
                 title={<span className="text-gray-600">运行时</span>}
                 value={release.runtime_type}
-                valueStyle={{ color: '#6366f1', fontSize: '24px', fontWeight: 600 }}
+                valueStyle={{ color: '#6366f1', fontSize: '20px', fontWeight: 600 }}
               />
             </Card>
           </Col>
@@ -258,12 +275,75 @@ const DeploymentDetailPage: React.FC = () => {
             <Card className="hover:shadow-lg transition-shadow">
               <Statistic
                 title={<span className="text-gray-600">策略</span>}
-                value={release.strategy || '-'}
-                valueStyle={{ color: '#495057', fontSize: '24px', fontWeight: 600 }}
+                value={release.strategy || 'rolling'}
+                valueStyle={{ color: '#495057', fontSize: '20px', fontWeight: 600 }}
               />
             </Card>
           </Col>
         </Row>
+      )}
+
+      {/* Release state flow */}
+      {release && (
+        <ReleaseStateFlow currentState={release.state || release.status} />
+      )}
+
+      {/* Real-time progress for in-progress releases */}
+      {release && release.state === 'applying' && (
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={12}>
+            <DeploymentProgressBar
+              phase={release.phase}
+              progress={release.progress}
+              pods={release.pods}
+              runtimeType={release.runtime_type as 'k8s' | 'compose'}
+            />
+          </Col>
+          <Col xs={24} lg={12}>
+            <HealthCheckStatus probes={release.health_probes || []} />
+          </Col>
+        </Row>
+      )}
+
+      {/* Live logs for in-progress releases */}
+      {release && release.state === 'applying' && release.logs && release.logs.length > 0 && (
+        <LiveLogViewer logs={release.logs} title="部署日志" />
+      )}
+
+      {/* Approval workflow for pending releases */}
+      {release && release.state === 'pending_approval' && release.approval_info && (
+        <ApprovalWorkflow
+          approval={release.approval_info}
+          status="pending"
+        />
+      )}
+
+      {/* Approval workflow for approved/rejected releases */}
+      {release && (release.state === 'approved' || release.state === 'rejected') && release.approval_info && (
+        <ApprovalWorkflow
+          approval={release.approval_info}
+          status={release.state === 'approved' ? 'approved' : 'rejected'}
+        />
+      )}
+
+      {/* Rollback source info */}
+      {release && release.source_release_id && (
+        <Card>
+          <Alert
+            message="回滚发布"
+            description={
+              <div>
+                此发布是从 Release{' '}
+                <a onClick={() => navigate(`/deployment/${release.source_release_id}`)}>
+                  #{release.source_release_id}
+                </a>{' '}
+                回滚而来。
+              </div>
+            }
+            type="info"
+            showIcon
+          />
+        </Card>
       )}
 
       {/* 基本信息 */}

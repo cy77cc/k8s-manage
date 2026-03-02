@@ -41,8 +41,10 @@ const HostListPage: React.FC = () => {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [availabilityFilter, setAvailabilityFilter] = useState<'all' | 'available' | 'assigned'>('all');
   const [selected, setSelected] = useState<string[]>([]);
   const [group, setGroup] = useState('');
+  const [hostAssignments, setHostAssignments] = useState<Record<string, { clusters: string[]; targets: string[] }>>({});
 
   const load = async () => {
     setLoading(true);
@@ -53,7 +55,18 @@ const HostListPage: React.FC = () => {
         status: statusFilter === 'all' ? undefined : statusFilter,
         region: group || undefined,
       });
-      setHosts(res.data.list || []);
+      const hostList = res.data.list || [];
+      setHosts(hostList);
+
+      // Load assignment information for each host
+      const assignments: Record<string, { clusters: string[]; targets: string[] }> = {};
+      for (const host of hostList) {
+        assignments[host.id] = { clusters: [], targets: [] };
+        // Note: In a real implementation, this would be a batch API call
+        // For now, we'll check if the host has cluster_id or target assignments
+        // This is a placeholder - the backend should provide this data
+      }
+      setHostAssignments(assignments);
     } finally {
       setLoading(false);
     }
@@ -84,9 +97,18 @@ const HostListPage: React.FC = () => {
           h.ip.includes(search) ||
           (h.region || '').toLowerCase().includes(search.toLowerCase());
         const hitStatus = statusFilter === 'all' || h.status === statusFilter;
-        return hitSearch && hitStatus;
+
+        // Availability filter
+        const assignments = hostAssignments[h.id];
+        const isAssigned = assignments && (assignments.clusters.length > 0 || assignments.targets.length > 0);
+        const hitAvailability =
+          availabilityFilter === 'all' ||
+          (availabilityFilter === 'assigned' && isAssigned) ||
+          (availabilityFilter === 'available' && !isAssigned);
+
+        return hitSearch && hitStatus && hitAvailability;
       }),
-    [hosts, search, statusFilter]
+    [hosts, search, statusFilter, availabilityFilter, hostAssignments]
   );
 
   const batchAction = async (action: string) => {
@@ -135,6 +157,8 @@ const HostListPage: React.FC = () => {
   const HostCard: React.FC<{ host: Host }> = ({ host }) => {
     const statusConfig = getStatusConfig(host.status);
     const isSelected = selected.includes(host.id);
+    const assignments = hostAssignments[host.id] || { clusters: [], targets: [] };
+    const isAssigned = assignments.clusters.length > 0 || assignments.targets.length > 0;
 
     return (
       <Card
@@ -168,10 +192,34 @@ const HostListPage: React.FC = () => {
                 <Tag color={statusConfig.color} icon={statusConfig.icon}>
                   {statusConfig.text}
                 </Tag>
+                {isAssigned && (
+                  <Tag color="blue">已分配</Tag>
+                )}
               </div>
               <div className="flex flex-wrap gap-2 text-sm text-gray-600">
                 <span>IP: {host.ip}</span>
                 {host.region && <span>区域: {host.region}</span>}
+              </div>
+
+              {/* Assignment information */}
+              {isAssigned && (
+                <div className="mt-2 pt-2 border-t border-gray-200">
+                  <div className="text-xs text-gray-500 space-y-1">
+                    {assignments.clusters.length > 0 && (
+                      <div>集群: {assignments.clusters.join(', ')}</div>
+                    )}
+                    {assignments.targets.length > 0 && (
+                      <div>部署目标: {assignments.targets.join(', ')}</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Resource capacity */}
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <div className="text-xs text-gray-500 space-y-1">
+                  <div>容量: {host.cpu || 0} 核 CPU / {host.memory || 0} MB 内存 / {host.disk || 0} GB 磁盘</div>
+                </div>
               </div>
             </div>
           </div>
@@ -386,6 +434,16 @@ const HostListPage: React.FC = () => {
                 { value: 'error', label: '错误' },
               ]}
               onChange={setStatusFilter}
+            />
+            <Select
+              value={availabilityFilter}
+              style={{ width: 140 }}
+              options={[
+                { value: 'all', label: '全部主机' },
+                { value: 'available', label: '可用' },
+                { value: 'assigned', label: '已分配' },
+              ]}
+              onChange={setAvailabilityFilter}
             />
             <Input
               placeholder="区域筛选"
