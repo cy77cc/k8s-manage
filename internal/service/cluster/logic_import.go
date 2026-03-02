@@ -18,9 +18,16 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+type clusterCredentialMetadata struct {
+	SkipTLSVerify bool `json:"skip_tls_verify,omitempty"`
+}
+
 // ImportCluster imports an external Kubernetes cluster
 func (h *Handler) ImportCluster(ctx context.Context, uid uint64, req ClusterCreateReq) (*ClusterDetail, error) {
 	authMethod := strings.TrimSpace(req.AuthMethod)
+	if authMethod == "cert" {
+		authMethod = "certificate"
+	}
 	if authMethod == "" {
 		if strings.TrimSpace(req.Kubeconfig) != "" {
 			authMethod = "kubeconfig"
@@ -82,14 +89,18 @@ func (h *Handler) ImportCluster(ctx context.Context, uid uint64, req ClusterCrea
 
 	// Create credential record
 	cred := &model.ClusterCredential{
-		Name:       fmt.Sprintf("%s-credential", cluster.Name),
+		Name:        fmt.Sprintf("%s-credential", cluster.Name),
 		RuntimeType: "k8s",
-		Source:     "external_managed",
-		ClusterID:  cluster.ID,
-		Endpoint:   endpoint,
-		AuthMethod: authMethod,
-		Status:     "active",
-		CreatedBy:  uid,
+		Source:      "external_managed",
+		ClusterID:   cluster.ID,
+		Endpoint:    endpoint,
+		AuthMethod:  authMethod,
+		Status:      "active",
+		CreatedBy:   uid,
+	}
+	if req.SkipTLSVerify {
+		meta, _ := json.Marshal(clusterCredentialMetadata{SkipTLSVerify: true})
+		cred.MetadataJSON = string(meta)
 	}
 
 	if err := h.encryptCredentialMaterials(cred, req); err != nil {
@@ -183,11 +194,15 @@ func (h *Handler) buildRestConfigFromRequest(req ClusterCreateReq) (*rest.Config
 	config := &rest.Config{
 		Host: endpoint,
 	}
+	if req.SkipTLSVerify {
+		config.TLSClientConfig.Insecure = true
+	}
 
 	// Set CA cert if provided
 	if strings.TrimSpace(req.CACert) != "" {
 		config.TLSClientConfig = rest.TLSClientConfig{
-			CAData: []byte(strings.TrimSpace(req.CACert)),
+			CAData:   []byte(strings.TrimSpace(req.CACert)),
+			Insecure: req.SkipTLSVerify,
 		}
 	}
 
@@ -564,17 +579,25 @@ func (h *Handler) buildRestConfigFromCredential(cred *model.ClusterCredential) (
 		return clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
 	}
 
-	// Build from cert/token
-	ca, err := utils.DecryptText(cred.CACertEnc, enc)
-	if err != nil {
-		return nil, err
+	meta := clusterCredentialMetadata{}
+	if strings.TrimSpace(cred.MetadataJSON) != "" {
+		_ = json.Unmarshal([]byte(cred.MetadataJSON), &meta)
 	}
 
+	// Build from cert/token
 	result := &rest.Config{
 		Host: strings.TrimSpace(cred.Endpoint),
 		TLSClientConfig: rest.TLSClientConfig{
-			CAData: []byte(ca),
+			Insecure: meta.SkipTLSVerify,
 		},
+	}
+
+	if strings.TrimSpace(cred.CACertEnc) != "" {
+		ca, err := utils.DecryptText(cred.CACertEnc, enc)
+		if err != nil {
+			return nil, err
+		}
+		result.TLSClientConfig.CAData = []byte(ca)
 	}
 
 	if strings.TrimSpace(cred.CertEnc) != "" {
@@ -634,6 +657,9 @@ func (h *Handler) ValidateImport(c *gin.Context) {
 
 	// Determine auth method
 	authMethod := strings.TrimSpace(req.AuthMethod)
+	if authMethod == "cert" {
+		authMethod = "certificate"
+	}
 	if authMethod == "" {
 		if strings.TrimSpace(req.Kubeconfig) != "" {
 			authMethod = "kubeconfig"

@@ -112,12 +112,13 @@ export interface BootstrapStepStatus {
 export interface ClusterImportReq {
   name: string;
   description?: string;
-  kubeconfig: string;
+  kubeconfig?: string;
   endpoint?: string;
   ca_cert?: string;
   cert?: string;
   key?: string;
   token?: string;
+  skip_tls_verify?: boolean;
   auth_method?: string;
 }
 

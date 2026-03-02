@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { Api } from '../../../api';
-import type { Cluster } from '../../../api/modules/cluster';
+import type { Cluster, ClusterImportReq } from '../../../api/modules/cluster';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -86,10 +86,12 @@ const ClusterImportWizard: React.FC = () => {
     return false;
   };
 
-  const buildValidatePayload = () => {
-    const values = form.getFieldsValue(true);
+  const isBlank = (value: unknown): boolean => typeof value !== 'string' || value.trim() === '';
+
+  const buildValidatePayload = (values: Record<string, any>) => {
     const payload: Record<string, string | boolean | undefined> = {};
     payload.name = values.name;
+    payload.auth_method = authMethod;
 
     switch (authMethod) {
       case 'kubeconfig':
@@ -114,14 +116,19 @@ const ClusterImportWizard: React.FC = () => {
 
   const handleValidate = async () => {
     try {
-      const payload = buildValidatePayload();
+      const values = form.getFieldsValue(true);
+      const payload = buildValidatePayload(values);
 
       // 基本验证
-      if (authMethod === 'kubeconfig' && !payload.kubeconfig) {
+      if (isBlank(values.name)) {
+        message.error('请输入集群名称');
+        return;
+      }
+      if (authMethod === 'kubeconfig' && isBlank(values.kubeconfig)) {
         message.error('请输入或上传 kubeconfig');
         return;
       }
-      if ((authMethod === 'certificate' || authMethod === 'token') && !payload.endpoint) {
+      if ((authMethod === 'certificate' || authMethod === 'token') && isBlank(values.endpoint)) {
         message.error('请输入 API Server 地址');
         return;
       }
@@ -147,9 +154,13 @@ const ClusterImportWizard: React.FC = () => {
   const handleImport = async () => {
     try {
       setLoading(true);
-      const values = await form.validateFields();
+      const values = form.getFieldsValue(true);
+      if (isBlank(values.name)) {
+        message.error('请输入集群名称');
+        return;
+      }
 
-      const payload: Record<string, string | undefined> = {
+      const payload: ClusterImportReq = {
         name: values.name,
         description: values.description,
         auth_method: authMethod,
@@ -157,22 +168,35 @@ const ClusterImportWizard: React.FC = () => {
 
       switch (authMethod) {
         case 'kubeconfig':
+          if (isBlank(values.kubeconfig)) {
+            message.error('请输入或上传 kubeconfig');
+            return;
+          }
           payload.kubeconfig = values.kubeconfig;
           break;
         case 'certificate':
+          if (isBlank(values.endpoint) || isBlank(values.ca_cert) || isBlank(values.cert) || isBlank(values.key)) {
+            message.error('请完整填写证书认证所需参数');
+            return;
+          }
           payload.endpoint = values.endpoint;
           payload.ca_cert = values.ca_cert;
           payload.cert = values.cert;
           payload.key = values.key;
           break;
         case 'token':
+          if (isBlank(values.endpoint) || isBlank(values.token)) {
+            message.error('请完整填写 Token 认证所需参数');
+            return;
+          }
           payload.endpoint = values.endpoint;
           payload.ca_cert = values.ca_cert;
           payload.token = values.token;
+          payload.skip_tls_verify = values.skip_tls_verify;
           break;
       }
 
-      const res = await Api.cluster.importCluster(payload as any);
+      const res = await Api.cluster.importCluster(payload);
       setImportedCluster(res.data);
       setCurrentStep(5);
       message.success('集群导入成功');
