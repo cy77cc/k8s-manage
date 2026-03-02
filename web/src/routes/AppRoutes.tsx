@@ -40,6 +40,15 @@ const AIOpsInsightsPage = lazy(() => import('../pages/Deployment/Observability/A
 const HostListPage = lazy(() => import('../pages/Hosts/HostListPage'));
 const HostDetailPage = lazy(() => import('../pages/Hosts/HostDetailPage'));
 
+// 其他页面
+const CMDBPage = lazy(() => import('../pages/CMDB/CMDBPage'));
+const AutomationPage = lazy(() => import('../pages/Automation/AutomationPage'));
+const CICDPage = lazy(() => import('../pages/CICD/CICDPage'));
+const AICommandCenterPage = lazy(() => import('../pages/AI/AICommandCenterPage'));
+const HelpCenterPage = lazy(() => import('../pages/Help/HelpCenterPage'));
+const MonitorPage = lazy(() => import('../pages/Monitor/MonitorPage'));
+const ToolsPage = lazy(() => import('../pages/Tools/ToolsPage'));
+
 const ConfigPage = lazy(() => import('../pages/Config/ConfigPage'));
 const TasksPage = lazy(() => import('../pages/Tasks/TasksPage'));
 const SettingsPage = lazy(() => import('../pages/Settings/SettingsPage'));
@@ -282,9 +291,13 @@ const AppRoutes: React.FC = () => {
         }
       />
 
-      {/* 主机管理 */}
+      {/* 主机管理 - 重定向到新路由 */}
+      <Route path="/hosts" element={<Navigate to="/deployment/infrastructure/hosts" replace />} />
+      <Route path="/hosts/:path*" element={<Navigate to="/deployment/infrastructure/hosts/:path*" replace />} />
+
+      {/* 主机管理 - 新路由位置 */}
       <Route
-        path="/hosts"
+        path="/deployment/infrastructure/hosts"
         element={
           <AppLayout>
             <LazyPage>
@@ -294,7 +307,7 @@ const AppRoutes: React.FC = () => {
         }
       />
       <Route
-        path="/hosts/detail/:id"
+        path="/deployment/infrastructure/hosts/:id"
         element={
           <AppLayout>
             <LazyPage>
@@ -331,6 +344,90 @@ const AppRoutes: React.FC = () => {
           <AppLayout>
             <LazyPage>
               <SettingsPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* CMDB */}
+      <Route
+        path="/cmdb"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <CMDBPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* 自动化 */}
+      <Route
+        path="/automation"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <AutomationPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* CI/CD */}
+      <Route
+        path="/cicd"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <CICDPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* AI命令中心 */}
+      <Route
+        path="/ai"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <AICommandCenterPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* 帮助中心 */}
+      <Route
+        path="/help"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <HelpCenterPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* 监控中心 */}
+      <Route
+        path="/monitor"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <MonitorPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+
+      {/* 工具箱 */}
+      <Route
+        path="/tools"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <ToolsPage />
             </LazyPage>
           </AppLayout>
         }

@@ -200,7 +200,9 @@ export const hostApi = {
         page_size: params?.pageSize,
       },
     });
-    const list = (response.data || []).map((item: any) => ({
+    const rawData = response.data as any;
+    const items = Array.isArray(rawData) ? rawData : (rawData?.list || []);
+    const list = items.map((item: any) => ({
       id: String(item.id),
       name: item.name,
       ip: item.ip,

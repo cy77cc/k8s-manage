@@ -85,9 +85,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
   const baseMenuItems: MenuItem[] = [
     { key: '/', icon: <DashboardOutlined />, label: t('menu.dashboard') },
-    { key: '/hosts', icon: <DesktopOutlined />, label: t('menu.hosts') },
     { key: '/services', icon: <CloudServerOutlined />, label: t('menu.services') },
-    { key: '/cmdb/assets', icon: <CloudServerOutlined />, label: t('menu.cmdb') },
+    { key: '/cmdb', icon: <CloudServerOutlined />, label: t('menu.cmdb') },
     { key: '/automation', icon: <ToolOutlined />, label: t('menu.automation') },
     { key: '/cicd', icon: <ToolOutlined />, label: 'CI/CD' },
     { key: '/ai', icon: <ToolOutlined />, label: 'AI命令中心' },
@@ -105,7 +104,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           children: [
             { key: '/deployment/infrastructure/clusters', label: '集群管理' },
             { key: '/deployment/infrastructure/credentials', label: '凭证管理' },
-            { key: '/hosts', label: '主机管理' },
+            { key: '/deployment/infrastructure/hosts', label: '主机管理' },
           ],
         },
         {
@@ -163,10 +162,19 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const menuItems = [...baseMenuItems, ...governanceMenuItems];
 
   const activeMenuKey = React.useMemo(() => {
+    // 任务相关页面映射到任务中心
     if (location.pathname.startsWith('/jobs')) return '/tasks';
+    // 配置中心旧路由映射
     if (location.pathname.startsWith('/configcenter')) return '/config';
+    // K8s 相关页面映射到部署管理
     if (location.pathname.startsWith('/k8s')) return '/deployment';
+    // 主机相关页面映射到部署管理>基础设施>主机管理
+    if (location.pathname.startsWith('/deployment/infrastructure/hosts')) return '/deployment/infrastructure/hosts';
+    // 旧主机路由重定向
+    if (location.pathname.startsWith('/hosts')) return '/deployment/infrastructure/hosts';
+    // 帮助中心
     if (location.pathname.startsWith('/help')) return '/help';
+    // 访问治理子菜单
     if (location.pathname.startsWith('/governance/users')) return '/governance/users';
     if (location.pathname.startsWith('/governance/roles')) return '/governance/roles';
     if (location.pathname.startsWith('/governance/permissions')) return '/governance/permissions';
@@ -212,9 +220,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
   // 3.1.2 & 3.1.3 侧边栏内容
   const sidebarContent = (
-    <>
+    <div className="flex flex-col h-full">
       {/* Logo 区域 */}
-      <div className="h-16 flex items-center justify-center border-b border-gray-200 px-4">
+      <div className="h-16 flex-shrink-0 flex items-center justify-center border-b border-gray-200 px-4">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-sm">
             <CloudOutlined className="text-white text-base" />
@@ -225,20 +233,22 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         </div>
       </div>
 
-      {/* 菜单 */}
-      <Menu
-        theme="light"
-        mode="inline"
-        selectedKeys={[activeMenuKey]}
-        items={menuItems}
-        onClick={({ key }) => handleMenuClick(key)}
-        className="border-none mt-2"
-        style={{ background: 'transparent' }}
-      />
+      {/* 菜单 - 可滚动区域 */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <Menu
+          theme="light"
+          mode="inline"
+          selectedKeys={[activeMenuKey]}
+          items={menuItems}
+          onClick={({ key }) => handleMenuClick(key)}
+          className="border-none mt-2"
+          style={{ background: 'transparent' }}
+        />
+      </div>
 
       {/* 折叠按钮 (仅桌面端) */}
       {!isMobile && (
-        <div className="absolute bottom-4 left-0 right-0 px-4">
+        <div className="flex-shrink-0 p-4 border-t border-gray-200">
           <Button
             type="text"
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
@@ -247,7 +257,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           />
         </div>
       )}
-    </>
+    </div>
   );
 
   return (
@@ -267,7 +277,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           open={mobileDrawerOpen}
           closable={false}
           width={240}
-          bodyStyle={{ padding: 0 }}
+          bodyStyle={{ padding: 0, height: '100%', display: 'flex', flexDirection: 'column' }}
           className="mobile-sidebar-drawer"
         >
           {sidebarContent}
@@ -284,6 +294,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           style={{
             background: '#ffffff',
             borderRight: '1px solid #e9ecef',
+            height: '100vh',
           }}
         >
           {sidebarContent}

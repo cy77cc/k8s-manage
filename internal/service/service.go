@@ -14,6 +14,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/service/cmdb"
 	"github.com/cy77cc/k8s-manage/internal/service/deployment"
 	"github.com/cy77cc/k8s-manage/internal/service/host"
+	"github.com/cy77cc/k8s-manage/internal/service/jobs"
 	"github.com/cy77cc/k8s-manage/internal/service/monitoring"
 	"github.com/cy77cc/k8s-manage/internal/service/node"
 	"github.com/cy77cc/k8s-manage/internal/service/notification"
@@ -51,6 +52,7 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	ai.RegisterAIHandlers(v1, serverCtx)
 	aiops.RegisterAIOPSHandlers(v1, serverCtx)
 	notification.RegisterNotificationHandlers(v1, serverCtx)
+	jobs.RegisterJobsHandlers(v1, serverCtx)
 
 	// WebSocket 路由
 	r.GET("/ws/notifications", websocket.HandleWebSocket)

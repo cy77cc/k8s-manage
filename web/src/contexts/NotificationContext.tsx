@@ -121,18 +121,9 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
     onMessage: handleWSMessage,
     onConnect: () => {
       setWsStatus('connected');
-      // WebSocket 连接成功，停止轮询
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
     },
     onDisconnect: () => {
       setWsStatus('disconnected');
-      // WebSocket 断开，启动轮询作为降级
-      if (!pollingRef.current) {
-        pollingRef.current = setInterval(loadNotifications, pollInterval);
-      }
     },
     reconnectInterval: 1000,
     maxReconnectInterval: 30000,
@@ -195,21 +186,36 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
     setUnreadCount((prev) => ({ ...prev, total: 0 }));
   }, []);
 
-  // 初始化
+  // 初始化 - 只加载一次
   useEffect(() => {
     loadNotifications();
+    // 注意：轮询由 WebSocket 状态变化时自动处理，不在这里启动
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // 如果 WebSocket 未连接，启动轮询
-    if (wsStatus !== 'connected') {
-      pollingRef.current = setInterval(loadNotifications, pollInterval);
+  // 当 WebSocket 状态变化时处理轮询
+  useEffect(() => {
+    if (wsStatus === 'connected') {
+      // WebSocket 连接成功，停止轮询
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+        console.log('Notification: WebSocket 已连接，停止轮询');
+      }
+    } else {
+      // WebSocket 断开，启动轮询作为降级
+      if (!pollingRef.current) {
+        pollingRef.current = setInterval(loadNotifications, pollInterval);
+        console.log(`Notification: WebSocket 断开，启动轮询 (间隔 ${pollInterval}ms)`);
+      }
     }
 
     return () => {
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
+        pollingRef.current = null;
       }
     };
-  }, [loadNotifications, pollInterval, wsStatus]);
+  }, [wsStatus, loadNotifications, pollInterval]);
 
   // 更新 wsStatus 状态
   useEffect(() => {

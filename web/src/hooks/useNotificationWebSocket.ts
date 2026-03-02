@@ -56,9 +56,23 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
 
     statusRef.current = 'connecting';
 
+    // 构建 WebSocket URL
+    let wsUrl: string;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.host;
-    const wsUrl = `${wsProtocol}//${wsHost}/ws/notifications?user_id=${userId}`;
+
+    if (import.meta.env.VITE_WS_URL) {
+      // 使用配置的 WebSocket URL
+      wsUrl = `${import.meta.env.VITE_WS_URL}/ws/notifications?user_id=${userId}`;
+    } else if (import.meta.env.DEV) {
+      // 开发环境：通过 vite proxy 代理，使用当前 host
+      // vite.config.ts 中配置了 /ws 代理到后端
+      wsUrl = `${wsProtocol}//${window.location.host}/ws/notifications?user_id=${userId}`;
+    } else {
+      // 生产环境：使用当前 host
+      wsUrl = `${wsProtocol}//${window.location.host}/ws/notifications?user_id=${userId}`;
+    }
+
+    console.log('WebSocket: 正在连接', wsUrl);
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -81,18 +95,21 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         statusRef.current = 'disconnected';
         onDisconnect?.();
-        console.log('WebSocket: 连接关闭');
+        console.log('WebSocket: 连接关闭', event.code, event.reason);
 
-        // 自动重连
-        scheduleReconnect();
+        // 只有在非正常关闭时才自动重连
+        // 1000 = 正常关闭, 1001 = 端点离开, 1005 = 无状态码
+        if (event.code !== 1000 && event.code !== 1001 && event.code !== 1005) {
+          scheduleReconnect();
+        }
       };
 
       ws.onerror = (error) => {
         console.error('WebSocket: 连接错误', error);
-        ws.close();
+        // 注意：不要在这里调用 ws.close()，onclose 会自动触发
       };
     } catch (error) {
       console.error('WebSocket: 创建连接失败', error);
@@ -121,11 +138,15 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
 
   // 断开连接
   const disconnect = useCallback(() => {
+    // 清除重连定时器
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
+    // 正常关闭 WebSocket
     if (wsRef.current) {
-      wsRef.current.close();
+      // 使用 1000 状态码表示正常关闭，避免触发重连
+      wsRef.current.close(1000, 'Component unmounting');
       wsRef.current = null;
     }
     statusRef.current = 'disconnected';
@@ -138,9 +159,10 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
     }
   }, []);
 
-  // 初始化
+  // 初始化 - 只在 userId 变化时执行
   useEffect(() => {
     initBroadcastChannel();
+
     if (userId) {
       connect();
     }
@@ -151,7 +173,8 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
         broadcastChannelRef.current.close();
       }
     };
-  }, [userId, connect, disconnect, initBroadcastChannel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   return {
     connect,
