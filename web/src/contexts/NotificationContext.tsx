@@ -49,8 +49,10 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // 加载通知数据
-  const loadNotifications = useCallback(async () => {
+  // 使用 ref 存储加载函数，避免依赖变化
+  const loadNotificationsRef = useRef<(() => Promise<void>) | null>(null);
+
+  loadNotificationsRef.current = async () => {
     try {
       setLoading(true);
       const [listRes, countRes] = await Promise.all([
@@ -64,6 +66,11 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  // 加载通知数据
+  const loadNotifications = useCallback(async () => {
+    await loadNotificationsRef.current?.();
   }, []);
 
   // 处理 WebSocket 消息
@@ -215,7 +222,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
         pollingRef.current = null;
       }
     };
-  }, [wsStatus, loadNotifications, pollInterval]);
+  }, [wsStatus, pollInterval]); // 移除 loadNotifications 依赖
 
   // 更新 wsStatus 状态
   useEffect(() => {

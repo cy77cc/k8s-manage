@@ -34,8 +34,24 @@ interface GlobalAIAssistantProps {
 }
 
 const sceneFromPath = (pathname: string): string => {
-  const seg = pathname.split('/').filter(Boolean)[0];
-  return seg ? `scene:${seg}` : 'scene:home';
+  const segments = pathname.split('/').filter(Boolean);
+
+  // 首页
+  if (segments.length === 0) return 'scene:home';
+
+  // 部署管理子场景细分
+  if (segments[0] === 'deployment' && segments.length >= 2) {
+    const subScene = segments[1];
+    // infrastructure -> 基础设施, targets -> 部署目标, observability -> 可观测性
+    // 其他路径（如 /deployment, /deployment/create 等）归为 releases（发布管理）
+    if (subScene === 'infrastructure' || subScene === 'targets' || subScene === 'observability') {
+      return `scene:deployment:${subScene}`;
+    }
+    return 'scene:deployment:releases';
+  }
+
+  // 其他一级路由
+  return `scene:${segments[0]}`;
 };
 
 const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = false }) => {
