@@ -174,10 +174,11 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = f
   const handleClose = () => {
     if (isClosing) return;
     setIsClosing(true);
-    closeRafRef.current = requestAnimationFrame(() => {
+    // 延迟关闭，让动画先执行
+    setTimeout(() => {
       setOpen(false);
-      closeRafRef.current = null;
-    });
+      setIsClosing(false);
+    }, 200); // 匹配 CSS 动画时长
   };
 
   return (
@@ -197,12 +198,12 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = f
         title={<Space><MessageOutlined /><Text>AI 助手</Text></Space>}
         open={open}
         onClose={handleClose}
+        maskClosable={!isClosing}
+        keyboard={!isClosing}
         afterOpenChange={(nextOpen) => {
-          if (nextOpen) {
+          if (!nextOpen) {
             setIsClosing(false);
-            return;
           }
-          setIsClosing(false);
         }}
         width={isMobile ? '100vw' : drawerWidthRef.current}
         styles={{
