@@ -84,7 +84,7 @@ func (h *Handler) ImportCluster(ctx context.Context, uid uint64, req ClusterCrea
 		CreatedBy:   fmt.Sprintf("%d", uid),
 	}
 
-	if err := h.svcCtx.DB.WithContext(ctx).Create(cluster).Error; err != nil {
+	if err := h.repo.CreateCluster(ctx, cluster); err != nil {
 		return nil, fmt.Errorf("failed to create cluster record: %w", err)
 	}
 
@@ -109,16 +109,17 @@ func (h *Handler) ImportCluster(ctx context.Context, uid uint64, req ClusterCrea
 		return nil, fmt.Errorf("failed to encrypt credentials: %w", err)
 	}
 
-	if err := h.svcCtx.DB.WithContext(ctx).Create(cred).Error; err != nil {
-		h.svcCtx.DB.Delete(cluster)
+	if err := h.repo.CreateClusterCredential(ctx, cred); err != nil {
+		_ = h.repo.DeleteClusterWithRelations(ctx, cluster.ID)
 		return nil, fmt.Errorf("failed to create credential record: %w", err)
 	}
 
 	// Update cluster with credential ID
-	h.svcCtx.DB.WithContext(ctx).Model(cluster).Update("credential_id", cred.ID)
+	_ = h.repo.UpdateClusterCredentialID(ctx, cluster.ID, cred.ID)
 
 	// Sync nodes using the credential
 	h.syncClusterNodesWithCred(ctx, cluster.ID, cred)
+	h.invalidateClusterCache(ctx, cluster.ID)
 
 	return &ClusterDetail{
 		ID:          cluster.ID,

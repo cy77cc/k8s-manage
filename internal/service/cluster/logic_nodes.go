@@ -24,29 +24,29 @@ type AddNodeReq struct {
 
 // NodeDetail represents detailed node information
 type NodeDetail struct {
-	ID               uint       `json:"id"`
-	ClusterID        uint       `json:"cluster_id"`
-	HostID           *uint      `json:"host_id"`
-	HostName         string     `json:"host_name,omitempty"`
-	Name             string     `json:"name"`
-	IP               string     `json:"ip"`
-	Role             string     `json:"role"`
-	Status           string     `json:"status"`
-	KubeletVersion   string     `json:"kubelet_version"`
-	KubeProxyVersion string     `json:"kube_proxy_version"`
-	ContainerRuntime string     `json:"container_runtime"`
-	OSImage          string     `json:"os_image"`
-	KernelVersion    string     `json:"kernel_version"`
-	AllocatableCPU   string     `json:"allocatable_cpu"`
-	AllocatableMem   string     `json:"allocatable_mem"`
-	AllocatablePods  int        `json:"allocatable_pods"`
-	Labels           MapString  `json:"labels"`
-	Taints           []Taint    `json:"taints"`
+	ID               uint        `json:"id"`
+	ClusterID        uint        `json:"cluster_id"`
+	HostID           *uint       `json:"host_id"`
+	HostName         string      `json:"host_name,omitempty"`
+	Name             string      `json:"name"`
+	IP               string      `json:"ip"`
+	Role             string      `json:"role"`
+	Status           string      `json:"status"`
+	KubeletVersion   string      `json:"kubelet_version"`
+	KubeProxyVersion string      `json:"kube_proxy_version"`
+	ContainerRuntime string      `json:"container_runtime"`
+	OSImage          string      `json:"os_image"`
+	KernelVersion    string      `json:"kernel_version"`
+	AllocatableCPU   string      `json:"allocatable_cpu"`
+	AllocatableMem   string      `json:"allocatable_mem"`
+	AllocatablePods  int         `json:"allocatable_pods"`
+	Labels           MapString   `json:"labels"`
+	Taints           []Taint     `json:"taints"`
 	Conditions       []Condition `json:"conditions"`
-	JoinedAt         *time.Time `json:"joined_at"`
-	LastSeenAt       *time.Time `json:"last_seen_at"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	JoinedAt         *time.Time  `json:"joined_at"`
+	LastSeenAt       *time.Time  `json:"last_seen_at"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
 }
 
 type MapString map[string]string
@@ -66,15 +66,13 @@ type Condition struct {
 // SyncClusterNodes syncs nodes from Kubernetes API to database
 func (h *Handler) SyncClusterNodes(ctx context.Context, clusterID uint) error {
 	// Get credential
-	var cred model.ClusterCredential
-	if err := h.svcCtx.DB.WithContext(ctx).
-		Where("cluster_id = ?", clusterID).
-		First(&cred).Error; err != nil {
+	cred, err := h.repo.FindClusterCredentialByClusterID(ctx, clusterID)
+	if err != nil {
 		return fmt.Errorf("credential not found: %w", err)
 	}
 
 	// Build client
-	restConfig, err := h.buildRestConfigFromCredential(&cred)
+	restConfig, err := h.buildRestConfigFromCredential(cred)
 	if err != nil {
 		return fmt.Errorf("failed to build rest config: %w", err)
 	}
@@ -181,41 +179,34 @@ func (h *Handler) SyncClusterNodes(ctx context.Context, clusterID uint) error {
 			clusterNode.HostID = &hostID
 		}
 
-		// Upsert
-		var existing model.ClusterNode
-		result := h.svcCtx.DB.WithContext(ctx).
-			Where("cluster_id = ? AND name = ?", clusterID, node.Name).
-			First(&existing)
-
-		if result.Error == nil {
-			updates := map[string]interface{}{
-				"ip":                 ip,
-				"role":               role,
-				"status":             status,
-				"kubelet_version":    node.Status.NodeInfo.KubeletVersion,
-				"kube_proxy_version": node.Status.NodeInfo.KubeProxyVersion,
-				"container_runtime":  node.Status.NodeInfo.ContainerRuntimeVersion,
-				"os_image":           node.Status.NodeInfo.OSImage,
-				"kernel_version":     node.Status.NodeInfo.KernelVersion,
-				"allocatable_cpu":    allocatableCPU,
-				"allocatable_mem":    allocatableMem,
-				"allocatable_pods":   int(allocatablePods),
-				"labels":             string(labelsJSON),
-				"taints":             string(taintsJSON),
-				"conditions":         string(conditionsJSON),
-				"host_id":            clusterNode.HostID,
-				"last_seen_at":       &now,
-			}
-			h.svcCtx.DB.WithContext(ctx).Model(&existing).Updates(updates)
-		} else {
-			h.svcCtx.DB.WithContext(ctx).Create(&clusterNode)
+		updates := map[string]interface{}{
+			"ip":                 ip,
+			"role":               role,
+			"status":             status,
+			"kubelet_version":    node.Status.NodeInfo.KubeletVersion,
+			"kube_proxy_version": node.Status.NodeInfo.KubeProxyVersion,
+			"container_runtime":  node.Status.NodeInfo.ContainerRuntimeVersion,
+			"os_image":           node.Status.NodeInfo.OSImage,
+			"kernel_version":     node.Status.NodeInfo.KernelVersion,
+			"allocatable_cpu":    allocatableCPU,
+			"allocatable_mem":    allocatableMem,
+			"allocatable_pods":   int(allocatablePods),
+			"labels":             string(labelsJSON),
+			"taints":             string(taintsJSON),
+			"conditions":         string(conditionsJSON),
+			"host_id":            clusterNode.HostID,
+			"last_seen_at":       &now,
+		}
+		if err := h.repo.UpsertClusterNode(ctx, clusterID, node.Name, clusterNode, updates); err != nil {
+			return err
 		}
 	}
 
 	// Update cluster last_sync_at
-	h.svcCtx.DB.WithContext(ctx).Model(&model.Cluster{}).
-		Where("id = ?", clusterID).
-		Update("last_sync_at", &now)
+	if err := h.repo.UpdateClusterLastSync(ctx, clusterID, &now); err != nil {
+		return err
+	}
+	h.invalidateClusterCache(ctx, clusterID)
 
 	return nil
 }
@@ -319,6 +310,7 @@ func (h *Handler) AddClusterNodes(c *gin.Context) {
 
 	// Sync nodes
 	go h.SyncClusterNodes(context.Background(), cluster.ID)
+	h.invalidateClusterCache(c.Request.Context(), cluster.ID)
 
 	httpx.OK(c, gin.H{
 		"results": results,
@@ -394,6 +386,7 @@ func (h *Handler) RemoveClusterNode(c *gin.Context) {
 	if node.HostID != nil {
 		h.svcCtx.DB.Model(&model.Node{}).Where("id = ?", *node.HostID).Update("cluster_id", nil)
 	}
+	h.invalidateClusterCache(c.Request.Context(), clusterID)
 
 	httpx.OK(c, gin.H{
 		"message": fmt.Sprintf("Node %s removed from cluster", nodeName),

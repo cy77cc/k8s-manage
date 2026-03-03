@@ -34,8 +34,10 @@ func (d *NodeDao) Create(ctx context.Context, node *model.Node) error {
 
 	key := fmt.Sprintf("%s%d", constants.NodeKey, node.ID)
 
-	if bs, err := json.Marshal(node); err == nil {
-		d.rdb.SetEx(ctx, key, bs, constants.RdbTTL)
+	if d.rdb != nil {
+		if bs, err := json.Marshal(node); err == nil {
+			d.rdb.SetEx(ctx, key, bs, constants.RdbTTL)
+		}
 	}
 
 	return nil
@@ -44,8 +46,10 @@ func (d *NodeDao) Create(ctx context.Context, node *model.Node) error {
 func (d *NodeDao) Update(ctx context.Context, node *model.Node) error {
 	// 双删策略
 	key := fmt.Sprintf("%s%d", constants.NodeKey, node.ID)
-	if err := d.rdb.Del(ctx, key).Err(); err != nil {
-		return nil
+	if d.rdb != nil {
+		if err := d.rdb.Del(ctx, key).Err(); err != nil {
+			return nil
+		}
 	}
 
 	if err := d.db.WithContext(ctx).Save(node).Error; err != nil {
@@ -53,16 +57,20 @@ func (d *NodeDao) Update(ctx context.Context, node *model.Node) error {
 	}
 
 	time.Sleep(50 * time.Millisecond)
-	if err := d.rdb.Del(ctx, key).Err(); err != nil {
-		return nil
+	if d.rdb != nil {
+		if err := d.rdb.Del(ctx, key).Err(); err != nil {
+			return nil
+		}
 	}
 	return nil
 }
 
 func (d *NodeDao) Delete(ctx context.Context, id model.NodeID) error {
 	key := fmt.Sprintf("%s%d", constants.NodeKey, id)
-	if err := d.rdb.Del(ctx, key).Err(); err != nil {
-		return nil
+	if d.rdb != nil {
+		if err := d.rdb.Del(ctx, key).Err(); err != nil {
+			return nil
+		}
 	}
 
 	if err := d.db.WithContext(ctx).Delete(&model.Node{}, id).Error; err != nil {
@@ -74,10 +82,12 @@ func (d *NodeDao) Delete(ctx context.Context, id model.NodeID) error {
 func (d *NodeDao) FindSSHKeyByID(ctx context.Context, id model.NodeID) (*model.SSHKey, error) {
 	key := fmt.Sprintf("%s%d", constants.SSHKey, id)
 	var data model.SSHKey
-	bs, err := d.rdb.Get(ctx, key).Bytes()
-	if err == nil {
-		if err := json.Unmarshal(bs, &data); err != nil {
-			return &data, nil
+	if d.rdb != nil {
+		bs, err := d.rdb.Get(ctx, key).Bytes()
+		if err == nil {
+			if err := json.Unmarshal(bs, &data); err != nil {
+				return &data, nil
+			}
 		}
 	}
 
@@ -87,7 +97,7 @@ func (d *NodeDao) FindSSHKeyByID(ctx context.Context, id model.NodeID) (*model.S
 
 	// 保存到redis
 	b, err := json.Marshal(data)
-	if err == nil {
+	if err == nil && d.rdb != nil {
 		d.rdb.SetNX(ctx, key, b, constants.RdbTTL)
 	}
 

@@ -8,6 +8,7 @@ import (
 	"github.com/casbin/casbin/v2"
 	"github.com/cy77cc/k8s-manage/internal/ai"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/cache"
 	casbinadapter "github.com/cy77cc/k8s-manage/internal/component/casbin"
 	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/logger"
@@ -26,6 +27,7 @@ type ServiceContext struct {
 	DB             *gorm.DB                    // GORM 数据库实例
 	Rdb            redis.UniversalClient       // Redis 客户端
 	Cache          *expirable.LRU[string, any] // 本地缓存 (LRU)
+	CacheFacade    *cache.Facade               // L1-first cache facade
 	AI             *ai.PlatformAgent           // AI Platform Agent
 	CasbinEnforcer *casbin.Enforcer            // Casbin Enforcer
 }
@@ -74,11 +76,15 @@ func MustNewServiceContext() *ServiceContext {
 		}
 	}
 
+	l1 := expirable.NewLRU[string, any](5_000, nil, 24*time.Hour)
+	rdb := storage.MustNewRdb()
+
 	return &ServiceContext{
 		Clientset:      clientset,
 		DB:             db,
-		Rdb:            storage.MustNewRdb(),
-		Cache:          expirable.NewLRU[string, any](5_000, nil, 24*time.Hour),
+		Rdb:            rdb,
+		Cache:          l1,
+		CacheFacade:    cache.NewFacade(expirable.NewLRU[string, string](5_000, nil, 24*time.Hour), cache.NewRedisL2(rdb)),
 		AI:             platformAgent,
 		CasbinEnforcer: enforcer,
 	}

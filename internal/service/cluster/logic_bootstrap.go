@@ -130,17 +130,25 @@ func (h *Handler) GetBootstrapVersions(c *gin.Context) {
 }
 
 func (h *Handler) ListBootstrapProfiles(c *gin.Context) {
-	var rows []model.ClusterBootstrapProfile
-	if err := h.svcCtx.DB.WithContext(c.Request.Context()).
-		Order("id desc").
-		Find(&rows).Error; err != nil {
+	items := make([]BootstrapProfileItem, 0)
+	raw, _, err := h.svcCtx.CacheFacade.GetOrLoad(c.Request.Context(), CacheKeyBootstrapProfiles(), ClusterPhase1CachePolicies["clusters.bootstrap_profiles"].TTL, func(ctx context.Context) (string, error) {
+		rows, rerr := h.repo.ListBootstrapProfiles(ctx)
+		if rerr != nil {
+			return "", rerr
+		}
+		buf, merr := json.Marshal(rows)
+		if merr != nil {
+			return "", merr
+		}
+		return string(buf), nil
+	})
+	if err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
-
-	items := make([]BootstrapProfileItem, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, toBootstrapProfileItem(row))
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		httpx.ServerErr(c, err)
+		return
 	}
 
 	httpx.OK(c, gin.H{
@@ -187,6 +195,7 @@ func (h *Handler) CreateBootstrapProfile(c *gin.Context) {
 		httpx.ServerErr(c, err)
 		return
 	}
+	h.svcCtx.CacheFacade.Delete(c.Request.Context(), CacheKeyBootstrapProfiles())
 	httpx.OK(c, toBootstrapProfileItem(row))
 }
 
@@ -256,6 +265,7 @@ func (h *Handler) UpdateBootstrapProfile(c *gin.Context) {
 		httpx.ServerErr(c, err)
 		return
 	}
+	h.svcCtx.CacheFacade.Delete(c.Request.Context(), CacheKeyBootstrapProfiles())
 	httpx.OK(c, toBootstrapProfileItem(row))
 }
 
@@ -277,6 +287,7 @@ func (h *Handler) DeleteBootstrapProfile(c *gin.Context) {
 		httpx.NotFound(c, "bootstrap profile not found")
 		return
 	}
+	h.svcCtx.CacheFacade.Delete(c.Request.Context(), CacheKeyBootstrapProfiles())
 	httpx.OK(c, gin.H{"id": id, "deleted": true})
 }
 

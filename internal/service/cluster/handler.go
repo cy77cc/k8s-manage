@@ -1,10 +1,11 @@
 package cluster
 
 import (
+	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -13,53 +14,39 @@ import (
 // Handler handles cluster-related HTTP requests
 type Handler struct {
 	svcCtx *svc.ServiceContext
+	repo   *Repository
 }
 
 // NewHandler creates a new cluster handler
 func NewHandler(svcCtx *svc.ServiceContext) *Handler {
-	return &Handler{svcCtx: svcCtx}
+	return &Handler{
+		svcCtx: svcCtx,
+		repo:   NewRepository(svcCtx.DB),
+	}
 }
 
 // GetClusters returns list of clusters
 func (h *Handler) GetClusters(c *gin.Context) {
-	var clusters []model.Cluster
-	query := h.svcCtx.DB.WithContext(c.Request.Context()).Model(&model.Cluster{})
-
-	// Filter by status
-	if status := c.Query("status"); status != "" {
-		query = query.Where("status = ?", status)
-	}
-
-	// Filter by source
-	if source := c.Query("source"); source != "" {
-		query = query.Where("source = ?", source)
-	}
-
-	if err := query.Order("id DESC").Find(&clusters).Error; err != nil {
+	status := c.Query("status")
+	source := c.Query("source")
+	cacheKey := CacheKeyClusterList(status, source)
+	items := make([]ClusterListItem, 0)
+	raw, _, err := h.svcCtx.CacheFacade.GetOrLoad(c.Request.Context(), cacheKey, ClusterPhase1CachePolicies["clusters.list"].TTL, func(ctx context.Context) (string, error) {
+		rows, qerr := h.repo.ListClusters(ctx, status, source)
+		if qerr != nil {
+			return "", qerr
+		}
+		raw, merr := json.Marshal(rows)
+		if merr != nil {
+			return "", merr
+		}
+		return string(raw), nil
+	})
+	if err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
-
-	// Build response with node counts
-	items := make([]ClusterListItem, 0, len(clusters))
-	for _, cl := range clusters {
-		var nodeCount int64
-		h.svcCtx.DB.Model(&model.ClusterNode{}).Where("cluster_id = ?", cl.ID).Count(&nodeCount)
-
-		items = append(items, ClusterListItem{
-			ID:          cl.ID,
-			Name:        cl.Name,
-			Version:     cl.Version,
-			K8sVersion:  cl.K8sVersion,
-			Status:      cl.Status,
-			Source:      cl.Source,
-			NodeCount:   int(nodeCount),
-			Endpoint:    cl.Endpoint,
-			Description: cl.Description,
-			LastSyncAt:  cl.LastSyncAt,
-			CreatedAt:   cl.CreatedAt,
-		})
-	}
+	_ = json.Unmarshal([]byte(raw), &items)
 
 	httpx.OK(c, gin.H{
 		"list":  items,
@@ -75,8 +62,20 @@ func (h *Handler) GetClusterDetail(c *gin.Context) {
 		return
 	}
 
-	var cluster model.Cluster
-	if err := h.svcCtx.DB.WithContext(c.Request.Context()).First(&cluster, id).Error; err != nil {
+	cacheKey := CacheKeyClusterDetail(id)
+	var detail ClusterDetail
+	raw, _, err := h.svcCtx.CacheFacade.GetOrLoad(c.Request.Context(), cacheKey, ClusterPhase1CachePolicies["clusters.detail"].TTL, func(ctx context.Context) (string, error) {
+		d, derr := h.repo.GetClusterDetail(ctx, id)
+		if derr != nil {
+			return "", derr
+		}
+		buf, merr := json.Marshal(d)
+		if merr != nil {
+			return "", merr
+		}
+		return string(buf), nil
+	})
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			httpx.NotFound(c, "cluster not found")
 			return
@@ -84,29 +83,9 @@ func (h *Handler) GetClusterDetail(c *gin.Context) {
 		httpx.ServerErr(c, err)
 		return
 	}
-
-	// Get node count
-	var nodeCount int64
-	h.svcCtx.DB.Model(&model.ClusterNode{}).Where("cluster_id = ?", cluster.ID).Count(&nodeCount)
-
-	detail := ClusterDetail{
-		ID:             cluster.ID,
-		Name:           cluster.Name,
-		Description:    cluster.Description,
-		Version:        cluster.Version,
-		K8sVersion:     cluster.K8sVersion,
-		Status:         cluster.Status,
-		Source:         cluster.Source,
-		Type:           cluster.Type,
-		NodeCount:      int(nodeCount),
-		Endpoint:       cluster.Endpoint,
-		PodCIDR:        cluster.PodCIDR,
-		ServiceCIDR:    cluster.ServiceCIDR,
-		ManagementMode: cluster.ManagementMode,
-		CredentialID:   cluster.CredentialID,
-		LastSyncAt:     cluster.LastSyncAt,
-		CreatedAt:      cluster.CreatedAt,
-		UpdatedAt:      cluster.UpdatedAt,
+	if err := json.Unmarshal([]byte(raw), &detail); err != nil {
+		httpx.ServerErr(c, err)
+		return
 	}
 
 	httpx.OK(c, detail)
@@ -120,35 +99,26 @@ func (h *Handler) GetClusterNodes(c *gin.Context) {
 		return
 	}
 
-	var nodes []model.ClusterNode
-	if err := h.svcCtx.DB.WithContext(c.Request.Context()).
-		Where("cluster_id = ?", id).
-		Order("role DESC, name ASC").
-		Find(&nodes).Error; err != nil {
+	cacheKey := CacheKeyClusterNodes(id)
+	items := make([]ClusterNode, 0)
+	raw, _, err := h.svcCtx.CacheFacade.GetOrLoad(c.Request.Context(), cacheKey, ClusterPhase1CachePolicies["clusters.nodes"].TTL, func(ctx context.Context) (string, error) {
+		rows, rerr := h.repo.ListClusterNodes(ctx, id)
+		if rerr != nil {
+			return "", rerr
+		}
+		buf, merr := json.Marshal(rows)
+		if merr != nil {
+			return "", merr
+		}
+		return string(buf), nil
+	})
+	if err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
-
-	items := make([]ClusterNode, 0, len(nodes))
-	for _, n := range nodes {
-		items = append(items, ClusterNode{
-			ID:               n.ID,
-			ClusterID:        n.ClusterID,
-			HostID:           n.HostID,
-			Name:             n.Name,
-			IP:               n.IP,
-			Role:             n.Role,
-			Status:           n.Status,
-			KubeletVersion:   n.KubeletVersion,
-			ContainerRuntime: n.ContainerRuntime,
-			OSImage:          n.OSImage,
-			KernelVersion:    n.KernelVersion,
-			AllocatableCPU:   n.AllocatableCPU,
-			AllocatableMem:   n.AllocatableMem,
-			Labels:           n.Labels,
-			CreatedAt:        n.CreatedAt,
-			UpdatedAt:        n.UpdatedAt,
-		})
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		httpx.ServerErr(c, err)
+		return
 	}
 
 	httpx.OK(c, gin.H{
@@ -197,8 +167,8 @@ func (h *Handler) UpdateCluster(c *gin.Context) {
 		return
 	}
 
-	var cluster model.Cluster
-	if err := h.svcCtx.DB.First(&cluster, id).Error; err != nil {
+	cluster, err := h.repo.GetClusterModel(c.Request.Context(), id)
+	if err != nil {
 		httpx.NotFound(c, "cluster not found")
 		return
 	}
@@ -212,10 +182,11 @@ func (h *Handler) UpdateCluster(c *gin.Context) {
 	}
 	updates["updated_at"] = time.Now()
 
-	if err := h.svcCtx.DB.Model(&cluster).Updates(updates).Error; err != nil {
+	if err := h.repo.UpdateCluster(c.Request.Context(), id, updates); err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
+	h.invalidateClusterCache(c.Request.Context(), id)
 
 	httpx.OK(c, gin.H{"id": cluster.ID, "message": "updated"})
 }
@@ -232,35 +203,31 @@ func (h *Handler) DeleteCluster(c *gin.Context) {
 		return
 	}
 
-	var cluster model.Cluster
-	if err := h.svcCtx.DB.First(&cluster, id).Error; err != nil {
+	cluster, err := h.repo.GetClusterModel(c.Request.Context(), id)
+	if err != nil {
 		httpx.NotFound(c, "cluster not found")
 		return
 	}
 
-	// Delete in transaction
-	err := h.svcCtx.DB.Transaction(func(tx *gorm.DB) error {
-		// Delete cluster nodes
-		if err := tx.Where("cluster_id = ?", cluster.ID).Delete(&model.ClusterNode{}).Error; err != nil {
-			return err
-		}
-		// Delete credentials
-		if err := tx.Where("cluster_id = ?", cluster.ID).Delete(&model.ClusterCredential{}).Error; err != nil {
-			return err
-		}
-		// Delete cluster
-		if err := tx.Delete(&cluster).Error; err != nil {
-			return err
-		}
-		return nil
-	})
-
-	if err != nil {
+	if err := h.repo.DeleteClusterWithRelations(c.Request.Context(), cluster.ID); err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
+	h.invalidateClusterCache(c.Request.Context(), cluster.ID)
 
 	httpx.OK(c, gin.H{"id": cluster.ID, "message": "deleted"})
+}
+
+func (h *Handler) invalidateClusterCache(ctx context.Context, clusterID uint) {
+	if h.svcCtx == nil || h.svcCtx.CacheFacade == nil {
+		return
+	}
+	h.svcCtx.CacheFacade.Delete(ctx,
+		CacheKeyClusterList("", ""),
+		CacheKeyClusterList("active", ""),
+		CacheKeyClusterDetail(clusterID),
+		CacheKeyClusterNodes(clusterID),
+	)
 }
 
 // TestCluster tests cluster connectivity
