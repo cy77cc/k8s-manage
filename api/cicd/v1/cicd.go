@@ -63,11 +63,13 @@ type DeploymentCDConfigResp struct {
 }
 
 type TriggerReleaseReq struct {
-	ServiceID    uint   `json:"service_id" binding:"required"`
-	DeploymentID uint   `json:"deployment_id" binding:"required"`
-	Env          string `json:"env" binding:"required"`
-	RuntimeType  string `json:"runtime_type"`
-	Version      string `json:"version" binding:"required"`
+	ServiceID     uint   `json:"service_id" binding:"required"`
+	DeploymentID  uint   `json:"deployment_id"`
+	Env           string `json:"env" binding:"required"`
+	RuntimeType   string `json:"runtime_type"`
+	Version       string `json:"version" binding:"required"`
+	CIRunID       uint   `json:"ci_run_id,omitempty"`
+	TriggerSource string `json:"trigger_source,omitempty"` // manual|ci, defaults to ci for cicd endpoint
 }
 
 type ReleaseDecisionReq struct {
@@ -81,6 +83,7 @@ type RollbackReleaseReq struct {
 
 type ReleaseResp struct {
 	ID                    uint       `json:"id"`
+	UnifiedReleaseID      uint       `json:"unified_release_id,omitempty"`
 	ServiceID             uint       `json:"service_id"`
 	DeploymentID          uint       `json:"deployment_id"`
 	Env                   string     `json:"env"`
@@ -93,6 +96,9 @@ type ReleaseResp struct {
 	ApprovalComment       string     `json:"approval_comment"`
 	RollbackFromReleaseID uint       `json:"rollback_from_release_id"`
 	Diagnostics           any        `json:"diagnostics"`
+	TriggerSource         string     `json:"trigger_source,omitempty"`
+	TriggerContext        any        `json:"trigger_context,omitempty"`
+	CIRunID               uint       `json:"ci_run_id,omitempty"`
 	StartedAt             *time.Time `json:"started_at,omitempty"`
 	FinishedAt            *time.Time `json:"finished_at,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`

@@ -150,8 +150,7 @@ const ServiceProvisionPage: React.FC = () => {
     setLoading(true);
     try {
       const created = await Api.services.create({
-        project_id: Number(currentProjectId || localStorage.getItem('projectId') || 1),
-        team_id: 1, // 自动填充，不再显示
+        project_id: Number(currentProjectId || localStorage.getItem('projectId') || 0) || undefined,
         name: values.name,
         env: values.env,
         owner: values.owner,
@@ -238,9 +237,9 @@ const ServiceProvisionPage: React.FC = () => {
                   <Col span={12}>
                     <Form.Item label="环境" name="env">
                       <Select options={[
-                        { value: 'development', label: 'Development' },
-                        { value: 'staging', label: 'Staging' },
-                        { value: 'production', label: 'Production' },
+                        { value: 'development', label: '开发环境' },
+                        { value: 'staging', label: '测试环境' },
+                        { value: 'production', label: '生产环境' },
                       ]} />
                     </Form.Item>
                   </Col>

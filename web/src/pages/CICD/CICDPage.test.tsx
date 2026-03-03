@@ -58,7 +58,7 @@ const setupApi = () => {
   });
   mockApi.cicd.listReleases.mockResolvedValue({
     data: {
-      list: [{ id: 31, service_id: 101, deployment_id: 201, env: 'staging', runtime_type: 'k8s', version: 'v1.0.0', strategy: 'rolling', status: 'pending_approval' }],
+      list: [{ id: 31, unified_release_id: 31, service_id: 101, deployment_id: 201, env: 'staging', runtime_type: 'k8s', version: 'v1.0.0', strategy: 'rolling', status: 'pending_approval', trigger_source: 'ci' }],
     },
   });
   mockApi.cicd.listApprovals.mockResolvedValue({
@@ -104,6 +104,7 @@ describe('CICDPage', () => {
     render(<CICDPage />);
     const deployTabs = await screen.findAllByRole('tab', { name: '部署 CD 配置与发布' });
     fireEvent.click(deployTabs[0]);
+    await waitFor(() => expect(screen.getByText('Unified ID')).toBeInTheDocument());
     const approveButtons = await screen.findAllByTestId('approve-release-31');
     fireEvent.click(approveButtons[0]);
     await waitFor(() => expect(mockApi.cicd.approveRelease).toHaveBeenCalledWith(31, 'approved in UI'));

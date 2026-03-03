@@ -63,6 +63,7 @@ func (h *Handler) Create(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
+	h.fillOwnershipFromHeaders(c, &req)
 	if !h.checkOwnershipHeaders(c, req.ProjectID, req.TeamID) {
 		return
 	}
@@ -88,6 +89,7 @@ func (h *Handler) Update(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
+	h.fillOwnershipFromHeaders(c, &req)
 	if !h.checkOwnershipHeaders(c, req.ProjectID, req.TeamID) {
 		return
 	}
@@ -172,23 +174,19 @@ func (h *Handler) Deploy(c *gin.Context) {
 	var req DeployReq
 	_ = c.ShouldBindJSON(&req)
 
-	// 验证 cluster_id 必填
-	if req.ClusterID == 0 {
-		httpx.Fail(c, xcode.ParamError, "cluster_id is required")
-		return
-	}
-
 	item, err := h.logic.Get(c.Request.Context(), uint(id))
 	if err != nil {
 		httpx.Fail(c, xcode.ServerError, err.Error())
 		return
 	}
 
-	// 校验服务环境与集群环境类型匹配
-	envMatchErr := h.logic.ValidateEnvMatch(c.Request.Context(), item.Env, req.ClusterID)
-	if envMatchErr != nil {
-		httpx.Fail(c, xcode.ParamError, envMatchErr.Error())
-		return
+	// 若显式传入 cluster_id 则校验服务环境与集群环境类型匹配。
+	if req.ClusterID > 0 {
+		envMatchErr := h.logic.ValidateEnvMatch(c.Request.Context(), item.Env, req.ClusterID)
+		if envMatchErr != nil {
+			httpx.Fail(c, xcode.ParamError, envMatchErr.Error())
+			return
+		}
 	}
 
 	env := defaultIfEmpty(req.Env, item.Env)
@@ -201,7 +199,7 @@ func (h *Handler) Deploy(c *gin.Context) {
 		httpx.Fail(c, xcode.ServerError, err.Error())
 		return
 	}
-	httpx.OK(c, DeployResp{ReleaseRecordID: recordID})
+	httpx.OK(c, DeployResp{ReleaseRecordID: recordID, UnifiedReleaseID: recordID, TriggerSource: "manual"})
 }
 
 func (h *Handler) DeployPreview(c *gin.Context) {
@@ -469,4 +467,24 @@ func (h *Handler) checkOwnershipHeaders(c *gin.Context, projectID, teamID uint) 
 		}
 	}
 	return true
+}
+
+func (h *Handler) fillOwnershipFromHeaders(c *gin.Context, req *ServiceCreateReq) {
+	if req == nil || httpx.IsAdmin(h.svcCtx.DB, httpx.UIDFromCtx(c)) {
+		return
+	}
+	if req.ProjectID == 0 {
+		if hp := strings.TrimSpace(c.GetHeader("X-Project-ID")); hp != "" {
+			if p, err := strconv.ParseUint(hp, 10, 64); err == nil && p > 0 {
+				req.ProjectID = uint(p)
+			}
+		}
+	}
+	if req.TeamID == 0 {
+		if ht := strings.TrimSpace(c.GetHeader("X-Team-ID")); ht != "" {
+			if t, err := strconv.ParseUint(ht, 10, 64); err == nil && t > 0 {
+				req.TeamID = uint(t)
+			}
+		}
+	}
 }

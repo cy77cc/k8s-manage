@@ -233,10 +233,16 @@ const ServiceDetailPage: React.FC = () => {
         env: values.env || service?.env,
         variables: vars,
       });
-      message.success(`部署已触发，release #${resp.data.release_record_id}`);
+      const releaseId = resp.data.unified_release_id || resp.data.release_record_id;
+      message.success(`部署已触发，release #${releaseId}`);
       await load();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '部署失败');
+      const errorText = err instanceof Error ? err.message : '部署失败';
+      if (errorText.includes('deploy target not configured')) {
+        message.error('部署目标未配置：请先在部署目标中绑定项目/团队/环境对应目标，或为该服务设置默认部署目标');
+      } else {
+        message.error(errorText);
+      }
     } finally {
       setDeploying(false);
     }

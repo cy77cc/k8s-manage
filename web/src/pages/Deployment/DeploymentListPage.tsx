@@ -369,6 +369,11 @@ const DeploymentListPage: React.FC = () => {
                               {statusConfig.text}
                             </Tag>
                             <Tag color="blue">{release.runtime_type}</Tag>
+                            {release.trigger_source && (
+                              <Tag color={release.trigger_source === 'ci' ? 'purple' : 'geekblue'}>
+                                {release.trigger_source === 'ci' ? 'CI' : 'Manual'}
+                              </Tag>
+                            )}
                             {release.strategy && <Tag>{release.strategy}</Tag>}
                           </div>
                           <div className="flex flex-wrap gap-4 text-sm text-gray-600">

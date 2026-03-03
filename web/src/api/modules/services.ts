@@ -93,6 +93,7 @@ export interface ServiceDeployTarget {
 
 export interface ServiceReleaseRecord {
   id: number;
+  unified_release_id?: number;
   service_id: number;
   revision_id: number;
   cluster_id: number;
@@ -100,6 +101,8 @@ export interface ServiceReleaseRecord {
   env: string;
   deploy_target: ServiceRuntimeType;
   status: string;
+  trigger_source?: 'manual' | 'ci' | string;
+  ci_run_id?: number;
   error?: string;
   created_at: string;
 }
@@ -230,11 +233,15 @@ export const serviceApi = {
   },
 
   async create(data: ServiceCreateParams): Promise<ApiResponse<ServiceItem>> {
-    const response = await apiService.post<any>('/services', {
-      project_id: data.project_id || Number(localStorage.getItem('projectId') || '1'),
-      team_id: data.team_id || Number(localStorage.getItem('teamId') || '1'),
-      ...data,
-    });
+    const projectId = data.project_id ?? Number(localStorage.getItem('projectId') || '0');
+    const payload: Record<string, unknown> = { ...data };
+    if (projectId > 0) {
+      payload.project_id = projectId;
+    }
+    if (typeof data.team_id === 'number' && data.team_id > 0) {
+      payload.team_id = data.team_id;
+    }
+    const response = await apiService.post<any>('/services', payload);
     return { ...response, data: mapService(response.data) };
   },
 
@@ -247,11 +254,11 @@ export const serviceApi = {
     return apiService.delete(`/services/${id}`);
   },
 
-  async deploy(id: string, payload?: { deploy_target?: ServiceRuntimeType; cluster_id?: number; namespace?: string; env?: string; variables?: Record<string, string>; approval_token?: string }): Promise<ApiResponse<{ release_record_id: number }>> {
+  async deploy(id: string, payload?: { deploy_target?: ServiceRuntimeType; cluster_id?: number; namespace?: string; env?: string; variables?: Record<string, string>; approval_token?: string }): Promise<ApiResponse<{ release_record_id: number; unified_release_id?: number; trigger_source?: string }>> {
     return apiService.post(`/services/${id}/deploy`, payload || {});
   },
 
-  async deployPreview(id: string, payload: { env?: string; cluster_id?: number; namespace?: string; deploy_target?: ServiceRuntimeType; variables?: Record<string, string> }): Promise<ApiResponse<{ resolved_yaml: string; checks: Array<{ level: string; code: string; message: string }>; warnings: Array<{ level: string; code: string; message: string }>; target: ServiceDeployTarget }>> {
+  async deployPreview(id: string, payload: { env?: string; cluster_id?: number; namespace?: string; deploy_target?: ServiceRuntimeType; variables?: Record<string, string> }): Promise<ApiResponse<{ resolved_yaml: string; checks: Array<{ level: string; code: string; message: string }>; warnings: Array<{ level: string; code: string; message: string }>; target: ServiceDeployTarget; target_id?: number; preview_token?: string; preview_expires_at?: string }>> {
     return apiService.post(`/services/${id}/deploy/preview`, payload);
   },
 

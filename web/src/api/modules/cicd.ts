@@ -3,7 +3,7 @@ import type { ApiResponse, PaginatedResponse } from '../api';
 
 export type TriggerMode = 'manual' | 'source-event' | 'both';
 export type TriggerType = 'manual' | 'source-event';
-export type ReleaseStatus = 'pending_approval' | 'approved' | 'rejected' | 'executing' | 'succeeded' | 'failed' | 'rolled_back';
+export type ReleaseStatus = 'previewed' | 'pending_approval' | 'approved' | 'applying' | 'applied' | 'failed' | 'rejected' | 'rollback' | 'rolled_back' | 'executing' | 'succeeded';
 
 export interface ServiceCIConfig {
   id: number;
@@ -46,6 +46,7 @@ export interface DeploymentCDConfig {
 
 export interface ReleaseRecord {
   id: number;
+  unified_release_id?: number;
   service_id: number;
   deployment_id: number;
   env: string;
@@ -58,6 +59,9 @@ export interface ReleaseRecord {
   approval_comment: string;
   rollback_from_release_id: number;
   diagnostics?: any;
+  trigger_source?: 'manual' | 'ci' | string;
+  trigger_context?: any;
+  ci_run_id?: number;
   started_at?: string;
   finished_at?: string;
   created_at: string;

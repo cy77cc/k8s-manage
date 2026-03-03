@@ -343,11 +343,15 @@ func (h *Handler) authorizeRuntime(c *gin.Context, runtime, action string) bool 
 func (h *Handler) toReleaseSummary(row model.DeploymentRelease) ReleaseSummaryResp {
 	return ReleaseSummaryResp{
 		ID:                 row.ID,
+		UnifiedReleaseID:   row.ID,
 		ServiceID:          row.ServiceID,
 		TargetID:           row.TargetID,
 		NamespaceOrProject: row.NamespaceOrProject,
 		RuntimeType:        row.RuntimeType,
 		Strategy:           row.Strategy,
+		TriggerSource:      row.TriggerSource,
+		TriggerContextJSON: row.TriggerContextJSON,
+		CIRunID:            row.CIRunID,
 		RevisionID:         row.RevisionID,
 		SourceReleaseID:    row.SourceReleaseID,
 		TargetRevision:     row.TargetRevision,

@@ -226,6 +226,7 @@ const ServiceListPage: React.FC = () => {
       title: '服务名',
       dataIndex: 'name',
       key: 'name',
+      sorter: (a: ServiceItem, b: ServiceItem) => a.name.localeCompare(b.name, 'zh-CN'),
       render: (text: string, record: ServiceItem) => (
         <a onClick={() => navigate(`/services/${record.id}`)} className="font-medium">
           {text}
@@ -237,6 +238,7 @@ const ServiceListPage: React.FC = () => {
       dataIndex: 'status',
       key: 'status',
       width: 100,
+      sorter: (a: ServiceItem, b: ServiceItem) => a.status.localeCompare(b.status),
       render: (status: string) => {
         const config = getStatusConfig(status);
         return <Tag color={config.color} icon={config.icon}>{config.text}</Tag>;
@@ -292,6 +294,9 @@ const ServiceListPage: React.FC = () => {
           </Button>
           <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => message.info(`启动: ${record.name}`)}>
             启动
+          </Button>
+          <Button type="link" size="small" icon={<PauseCircleOutlined />} onClick={() => message.info(`停止: ${record.name}`)}>
+            停止
           </Button>
           <Button type="link" size="small" danger icon={<DeleteOutlined />} onClick={() => message.info(`删除: ${record.name}`)}>
             删除

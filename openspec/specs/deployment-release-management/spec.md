@@ -25,7 +25,7 @@ The system SHALL provide a dashboard displaying multi-environment deployment sta
 - **THEN** system displays currently executing deployments with progress percentage and status
 
 ### Requirement: Enhanced Release Creation Wizard
-The system SHALL provide a 5-step wizard for creating releases with service selection, configuration, preview, strategy selection, and confirmation.
+The system SHALL provide a release creation flow that supports both manual and CI/CD entry points while sharing the same preview, strategy, and confirmation contract.
 
 #### Scenario: Step 1 - Select service and target
 - **WHEN** user starts release creation
@@ -77,7 +77,15 @@ The system SHALL provide a 5-step wizard for creating releases with service sele
 
 #### Scenario: Submit release
 - **WHEN** user clicks "Create Release" with valid preview token
-- **THEN** system creates release record and initiates approval workflow if required
+- **THEN** system MUST create a unified release record and initiate approval workflow if required
+
+#### Scenario: Manual release draft creation
+- **WHEN** user starts release creation from deployment or service context
+- **THEN** system MUST create a release draft with explicit trigger source `manual` and continue with standard preview/strategy/confirmation flow
+
+#### Scenario: CI release draft creation
+- **WHEN** CI pipeline requests a release with validated artifact context
+- **THEN** system MUST create a release draft with trigger source `ci` and continue with the same preview/strategy/confirmation flow
 
 ### Requirement: Release Approval Workflow
 The system SHALL automatically require approval for Production environment deployments.
@@ -236,11 +244,11 @@ The system SHALL provide comprehensive release history with multi-dimensional fi
 - **THEN** system displays releases in timeline format with visual indicators for success/failure
 
 ### Requirement: Release Audit Trail
-The system SHALL maintain complete audit trail for all release operations.
+The system SHALL maintain a complete audit trail for all release operations from manual and CI/CD sources using a unified release identifier.
 
 #### Scenario: Record release creation
 - **WHEN** release is created
-- **THEN** system creates audit record with action "release.previewed" and operator ID
+- **THEN** system MUST create an audit record containing trigger source and trigger context metadata
 
 #### Scenario: Record approval request
 - **WHEN** approval is required
@@ -248,7 +256,7 @@ The system SHALL maintain complete audit trail for all release operations.
 
 #### Scenario: Record approval decision
 - **WHEN** release is approved or rejected
-- **THEN** system creates audit record with action "release.approved" or "release.rejected" and approver ID
+- **THEN** system MUST create audit record with action, approver, decision, and comment under the same unified release identifier
 
 #### Scenario: Record deployment execution
 - **WHEN** deployment starts
@@ -257,6 +265,10 @@ The system SHALL maintain complete audit trail for all release operations.
 #### Scenario: Record deployment completion
 - **WHEN** deployment completes
 - **THEN** system creates audit record with action "release.applied" or "release.failed"
+
+#### Scenario: View release timeline
+- **WHEN** user views release details
+- **THEN** system MUST display all lifecycle and audit records in chronological order without splitting by source-specific release tables
 
 #### Scenario: Record rollback
 - **WHEN** rollback is initiated

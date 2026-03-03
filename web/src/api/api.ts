@@ -59,6 +59,10 @@ class ApiService {
         if (projectId) {
           config.headers['X-Project-ID'] = projectId;
         }
+        const teamId = localStorage.getItem('teamId');
+        if (teamId) {
+          config.headers['X-Team-ID'] = teamId;
+        }
         return config;
       },
       (error) => {

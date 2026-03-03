@@ -235,25 +235,33 @@ type DeployTargetResp struct {
 }
 
 type DeployPreviewResp struct {
-	ResolvedYAML string             `json:"resolved_yaml"`
-	Checks       []RenderDiagnostic `json:"checks"`
-	Warnings     []RenderDiagnostic `json:"warnings"`
-	Target       DeployTargetResp   `json:"target"`
+	ResolvedYAML     string             `json:"resolved_yaml"`
+	Checks           []RenderDiagnostic `json:"checks"`
+	Warnings         []RenderDiagnostic `json:"warnings"`
+	Target           DeployTargetResp   `json:"target"`
+	TargetID         uint               `json:"target_id,omitempty"`
+	PreviewToken     string             `json:"preview_token,omitempty"`
+	PreviewExpiresAt *time.Time         `json:"preview_expires_at,omitempty"`
 }
 
 type DeployResp struct {
-	ReleaseRecordID uint `json:"release_record_id"`
+	ReleaseRecordID  uint   `json:"release_record_id"`
+	UnifiedReleaseID uint   `json:"unified_release_id,omitempty"`
+	TriggerSource    string `json:"trigger_source,omitempty"`
 }
 
 type ReleaseRecordItem struct {
-	ID           uint      `json:"id"`
-	ServiceID    uint      `json:"service_id"`
-	RevisionID   uint      `json:"revision_id"`
-	ClusterID    uint      `json:"cluster_id"`
-	Namespace    string    `json:"namespace"`
-	Env          string    `json:"env"`
-	DeployTarget string    `json:"deploy_target"`
-	Status       string    `json:"status"`
-	Error        string    `json:"error,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID               uint      `json:"id"`
+	UnifiedReleaseID uint      `json:"unified_release_id,omitempty"`
+	ServiceID        uint      `json:"service_id"`
+	RevisionID       uint      `json:"revision_id"`
+	ClusterID        uint      `json:"cluster_id"`
+	Namespace        string    `json:"namespace"`
+	Env              string    `json:"env"`
+	DeployTarget     string    `json:"deploy_target"`
+	Status           string    `json:"status"`
+	TriggerSource    string    `json:"trigger_source,omitempty"`
+	CIRunID          uint      `json:"ci_run_id,omitempty"`
+	Error            string    `json:"error,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }

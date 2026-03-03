@@ -252,8 +252,10 @@ const CICDPage: React.FC = () => {
 
               <Table rowKey="id" dataSource={releases} pagination={false} style={{ marginTop: 16 }} columns={[
                 { title: 'Release ID', dataIndex: 'id' },
+                { title: 'Unified ID', dataIndex: 'unified_release_id', render: (v) => v || '-' },
                 { title: '版本', dataIndex: 'version' },
-                { title: '状态', dataIndex: 'status', render: (v) => <Tag color={v === 'pending_approval' ? 'orange' : v === 'succeeded' ? 'green' : 'blue'}>{v}</Tag> },
+                { title: '状态', dataIndex: 'status', render: (v) => <Tag color={v === 'pending_approval' ? 'orange' : v === 'applied' || v === 'succeeded' ? 'green' : v === 'failed' ? 'red' : 'blue'}>{v}</Tag> },
+                { title: '来源', dataIndex: 'trigger_source', render: (v) => <Tag color={v === 'ci' ? 'purple' : 'geekblue'}>{v || 'manual'}</Tag> },
                 { title: '策略', dataIndex: 'strategy' },
                 {
                   title: '操作',

@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/cy77cc/k8s-manage/internal/model"
@@ -226,14 +224,7 @@ func toServiceListItem(s *model.Service) ServiceListItem {
 func (l *Logic) normalizeAndRender(req ServiceCreateReq) (ServiceCreateReq, string, error) {
 	r := req
 	if r.ProjectID == 0 {
-		if v := strings.TrimSpace(os.Getenv("DEFAULT_PROJECT_ID")); v != "" {
-			if n, _ := strconv.Atoi(v); n > 0 {
-				r.ProjectID = uint(n)
-			}
-		}
-	}
-	if r.ProjectID == 0 {
-		r.ProjectID = 1
+		return r, "", fmt.Errorf("project_id is required from request or X-Project-ID context")
 	}
 	r.Env = defaultIfEmpty(r.Env, "staging")
 	r.Owner = defaultIfEmpty(r.Owner, "system")

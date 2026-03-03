@@ -66,6 +66,18 @@ func (l *Logic) ApplyRelease(ctx context.Context, uid uint64, req ReleasePreview
 	if err != nil {
 		return ReleaseApplyResp{}, err
 	}
+	triggerSource := strings.TrimSpace(req.TriggerSource)
+	if triggerSource == "" {
+		triggerSource = "manual"
+	}
+	triggerContext := req.TriggerContext
+	if triggerContext == nil {
+		triggerContext = map[string]any{}
+	}
+	triggerContext["source"] = triggerSource
+	if req.CIRunID > 0 {
+		triggerContext["ci_run_id"] = req.CIRunID
+	}
 	env := strings.ToLower(strings.TrimSpace(defaultIfEmpty(req.Env, defaultIfEmpty(target.Env, svc.Env))))
 	previewContextHash, previewTokenHash, previewExpiresAt, reasonCode, err := validatePreviewToken(req, target.TargetType, env, manifest)
 	if err != nil {
@@ -79,6 +91,7 @@ func (l *Logic) ApplyRelease(ctx context.Context, uid uint64, req ReleasePreview
 		RuntimeType:        target.TargetType,
 		Strategy:           defaultIfEmpty(req.Strategy, "rolling"),
 		RevisionID:         svc.LastRevisionID,
+		TriggerSource:      triggerSource,
 		PreviewContextHash: previewContextHash,
 		PreviewTokenHash:   previewTokenHash,
 		PreviewExpiresAt:   previewExpiresAt,
@@ -90,11 +103,13 @@ func (l *Logic) ApplyRelease(ctx context.Context, uid uint64, req ReleasePreview
 			"env":       env,
 			"service":   svc.Name,
 		}),
-		ChecksJSON:       "[]",
-		WarningsJSON:     "[]",
-		DiagnosticsJSON:  "[]",
-		VerificationJSON: "{}",
-		Operator:         uint(uid),
+		TriggerContextJSON: toJSON(triggerContext),
+		ChecksJSON:         "[]",
+		WarningsJSON:       "[]",
+		DiagnosticsJSON:    "[]",
+		VerificationJSON:   "{}",
+		Operator:           uint(uid),
+		CIRunID:            req.CIRunID,
 	}
 	if err := l.svcCtx.DB.WithContext(ctx).Create(release).Error; err != nil {
 		return ReleaseApplyResp{}, err
@@ -117,8 +132,12 @@ func (l *Logic) ApplyRelease(ctx context.Context, uid uint64, req ReleasePreview
 		l.writeReleaseAudit(ctx, release.ID, uint(uid), "release.pending_approval", map[string]any{"ticket": ticket})
 		return ReleaseApplyResp{
 			ReleaseID:        release.ID,
+			UnifiedReleaseID: release.ID,
 			Status:           release.Status,
 			RuntimeType:      release.RuntimeType,
+			TriggerSource:    release.TriggerSource,
+			TriggerContext:   triggerContext,
+			CIRunID:          release.CIRunID,
 			ApprovalRequired: true,
 			ApprovalTicket:   ticket,
 			LifecycleState:   l.releaseLifecycleState(release.Status),
@@ -130,17 +149,25 @@ func (l *Logic) ApplyRelease(ctx context.Context, uid uint64, req ReleasePreview
 	l.writeReleaseAudit(ctx, release.ID, uint(uid), "release.approved", map[string]any{"auto": true})
 	if execErr := l.executeRelease(ctx, release, target); execErr != nil {
 		return ReleaseApplyResp{
-			ReleaseID:      release.ID,
-			Status:         release.Status,
-			RuntimeType:    release.RuntimeType,
-			LifecycleState: l.releaseLifecycleState(release.Status),
+			ReleaseID:        release.ID,
+			UnifiedReleaseID: release.ID,
+			Status:           release.Status,
+			RuntimeType:      release.RuntimeType,
+			TriggerSource:    release.TriggerSource,
+			TriggerContext:   triggerContext,
+			CIRunID:          release.CIRunID,
+			LifecycleState:   l.releaseLifecycleState(release.Status),
 		}, execErr
 	}
 	return ReleaseApplyResp{
-		ReleaseID:      release.ID,
-		Status:         release.Status,
-		RuntimeType:    release.RuntimeType,
-		LifecycleState: l.releaseLifecycleState(release.Status),
+		ReleaseID:        release.ID,
+		UnifiedReleaseID: release.ID,
+		Status:           release.Status,
+		RuntimeType:      release.RuntimeType,
+		TriggerSource:    release.TriggerSource,
+		TriggerContext:   triggerContext,
+		CIRunID:          release.CIRunID,
+		LifecycleState:   l.releaseLifecycleState(release.Status),
 	}, nil
 }
 
@@ -161,17 +188,20 @@ func (l *Logic) RollbackRelease(ctx context.Context, id uint, uid uint64) (Relea
 		NamespaceOrProject: current.NamespaceOrProject,
 		RuntimeType:        current.RuntimeType,
 		Strategy:           "rollback",
+		TriggerSource:      current.TriggerSource,
 		RevisionID:         prev.RevisionID,
 		SourceReleaseID:    current.ID,
 		TargetRevision:     fmt.Sprintf("%d", prev.RevisionID),
 		Status:             releaseStatusRollback,
 		ManifestSnapshot:   prev.ManifestSnapshot,
 		RuntimeContextJSON: toJSON(map[string]any{"runtime": current.RuntimeType, "rollback_from": current.ID}),
+		TriggerContextJSON: toJSON(map[string]any{"rollback_from_release_id": current.ID}),
 		ChecksJSON:         "[]",
 		WarningsJSON:       "[]",
 		DiagnosticsJSON:    "[]",
 		VerificationJSON:   "{}",
 		Operator:           uint(uid),
+		CIRunID:            current.CIRunID,
 	}
 	if err := l.svcCtx.DB.WithContext(ctx).Create(rollback).Error; err != nil {
 		return ReleaseApplyResp{}, err
@@ -226,10 +256,14 @@ func (l *Logic) RollbackRelease(ctx context.Context, id uint, uid uint64) (Relea
 	_ = l.svcCtx.DB.WithContext(ctx).Save(rollback).Error
 	l.writeReleaseAudit(ctx, rollback.ID, uint(uid), "release.rollback_completed", map[string]any{"from_release_id": current.ID})
 	return ReleaseApplyResp{
-		ReleaseID:      rollback.ID,
-		Status:         rollback.Status,
-		RuntimeType:    rollback.RuntimeType,
-		LifecycleState: l.releaseLifecycleState(rollback.Status),
+		ReleaseID:        rollback.ID,
+		UnifiedReleaseID: rollback.ID,
+		Status:           rollback.Status,
+		RuntimeType:      rollback.RuntimeType,
+		TriggerSource:    rollback.TriggerSource,
+		TriggerContext:   map[string]any{"from_release_id": current.ID},
+		CIRunID:          rollback.CIRunID,
+		LifecycleState:   l.releaseLifecycleState(rollback.Status),
 	}, nil
 }
 
@@ -264,17 +298,25 @@ func (l *Logic) ApproveRelease(ctx context.Context, id uint, uid uint64, comment
 	}
 	if execErr := l.executeRelease(ctx, &release, &target); execErr != nil {
 		return ReleaseApplyResp{
-			ReleaseID:      release.ID,
-			Status:         release.Status,
-			RuntimeType:    release.RuntimeType,
-			LifecycleState: l.releaseLifecycleState(release.Status),
+			ReleaseID:        release.ID,
+			UnifiedReleaseID: release.ID,
+			Status:           release.Status,
+			RuntimeType:      release.RuntimeType,
+			TriggerSource:    release.TriggerSource,
+			TriggerContext:   map[string]any{"approval_ticket": approval.Ticket},
+			CIRunID:          release.CIRunID,
+			LifecycleState:   l.releaseLifecycleState(release.Status),
 		}, execErr
 	}
 	return ReleaseApplyResp{
-		ReleaseID:      release.ID,
-		Status:         release.Status,
-		RuntimeType:    release.RuntimeType,
-		LifecycleState: l.releaseLifecycleState(release.Status),
+		ReleaseID:        release.ID,
+		UnifiedReleaseID: release.ID,
+		Status:           release.Status,
+		RuntimeType:      release.RuntimeType,
+		TriggerSource:    release.TriggerSource,
+		TriggerContext:   map[string]any{"approval_ticket": approval.Ticket},
+		CIRunID:          release.CIRunID,
+		LifecycleState:   l.releaseLifecycleState(release.Status),
 	}, nil
 }
 
@@ -304,10 +346,14 @@ func (l *Logic) RejectRelease(ctx context.Context, id uint, uid uint64, comment 
 	}
 	l.writeReleaseAudit(ctx, release.ID, uint(uid), "release.rejected", map[string]any{"ticket": approval.Ticket, "comment": approval.Comment})
 	return ReleaseApplyResp{
-		ReleaseID:      release.ID,
-		Status:         release.Status,
-		RuntimeType:    release.RuntimeType,
-		LifecycleState: l.releaseLifecycleState(release.Status),
+		ReleaseID:        release.ID,
+		UnifiedReleaseID: release.ID,
+		Status:           release.Status,
+		RuntimeType:      release.RuntimeType,
+		TriggerSource:    release.TriggerSource,
+		TriggerContext:   map[string]any{"approval_ticket": approval.Ticket},
+		CIRunID:          release.CIRunID,
+		LifecycleState:   l.releaseLifecycleState(release.Status),
 	}, nil
 }
 

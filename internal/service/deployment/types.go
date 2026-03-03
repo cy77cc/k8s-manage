@@ -51,13 +51,16 @@ type TargetResp struct {
 }
 
 type ReleasePreviewReq struct {
-	ServiceID     uint              `json:"service_id" binding:"required"`
-	TargetID      uint              `json:"target_id" binding:"required"`
-	Env           string            `json:"env"`
-	Strategy      string            `json:"strategy"`
-	Variables     map[string]string `json:"variables"`
-	ApprovalToken string            `json:"approval_token"` // backward compatibility
-	PreviewToken  string            `json:"preview_token"`
+	ServiceID      uint              `json:"service_id" binding:"required"`
+	TargetID       uint              `json:"target_id" binding:"required"`
+	Env            string            `json:"env"`
+	Strategy       string            `json:"strategy"`
+	Variables      map[string]string `json:"variables"`
+	TriggerSource  string            `json:"trigger_source,omitempty"` // manual|ci
+	TriggerContext map[string]any    `json:"trigger_context,omitempty"`
+	CIRunID        uint              `json:"ci_run_id,omitempty"`
+	ApprovalToken  string            `json:"approval_token"` // backward compatibility
+	PreviewToken   string            `json:"preview_token"`
 }
 
 type ReleasePreviewResp struct {
@@ -71,8 +74,12 @@ type ReleasePreviewResp struct {
 
 type ReleaseApplyResp struct {
 	ReleaseID        uint   `json:"release_id"`
+	UnifiedReleaseID uint   `json:"unified_release_id,omitempty"`
 	Status           string `json:"status"`
 	RuntimeType      string `json:"runtime_type"`
+	TriggerSource    string `json:"trigger_source,omitempty"`
+	TriggerContext   any    `json:"trigger_context,omitempty"`
+	CIRunID          uint   `json:"ci_run_id,omitempty"`
 	ApprovalRequired bool   `json:"approval_required,omitempty"`
 	ApprovalTicket   string `json:"approval_ticket,omitempty"`
 	LifecycleState   string `json:"lifecycle_state,omitempty"`
@@ -81,11 +88,15 @@ type ReleaseApplyResp struct {
 
 type ReleaseSummaryResp struct {
 	ID                 uint       `json:"id"`
+	UnifiedReleaseID   uint       `json:"unified_release_id,omitempty"`
 	ServiceID          uint       `json:"service_id"`
 	TargetID           uint       `json:"target_id"`
 	NamespaceOrProject string     `json:"namespace_or_project"`
 	RuntimeType        string     `json:"runtime_type"`
 	Strategy           string     `json:"strategy"`
+	TriggerSource      string     `json:"trigger_source,omitempty"`
+	TriggerContextJSON string     `json:"trigger_context_json,omitempty"`
+	CIRunID            uint       `json:"ci_run_id,omitempty"`
 	RevisionID         uint       `json:"revision_id"`
 	SourceReleaseID    uint       `json:"source_release_id"`
 	TargetRevision     string     `json:"target_revision"`

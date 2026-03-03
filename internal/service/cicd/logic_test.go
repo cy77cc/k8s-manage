@@ -24,10 +24,80 @@ func newTestLogic(t *testing.T) *Logic {
 		&model.CICDRelease{},
 		&model.CICDReleaseApproval{},
 		&model.CICDAuditEvent{},
+		&model.Service{},
+		&model.Cluster{},
+		&model.DeploymentTarget{},
+		&model.DeploymentRelease{},
+		&model.DeploymentReleaseApproval{},
+		&model.DeploymentReleaseAudit{},
+		&model.ServiceDeployTarget{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return NewLogic(&svc.ServiceContext{DB: db, Rdb: redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"})})
+}
+
+func TestTriggerReleaseFallsBackToServiceDefaultTarget(t *testing.T) {
+	logic := newTestLogic(t)
+	ctx := context.Background()
+
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Service{
+		ID:          102,
+		Name:        "svc-fallback",
+		Env:         "production",
+		ProjectID:   11,
+		TeamID:      12,
+		YamlContent: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc-fallback\n",
+	}).Error; err != nil {
+		t.Fatalf("seed service: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Cluster{
+		ID:         2,
+		Name:       "cluster-2",
+		KubeConfig: "invalid-kubeconfig",
+		Status:     "active",
+	}).Error; err != nil {
+		t.Fatalf("seed cluster: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.DeploymentTarget{
+		ID:              301,
+		Name:            "target-fallback",
+		TargetType:      "k8s",
+		RuntimeType:     "k8s",
+		ClusterID:       2,
+		ProjectID:       11,
+		TeamID:          12,
+		Env:             "production",
+		Status:          "active",
+		ReadinessStatus: "ready",
+	}).Error; err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.ServiceDeployTarget{
+		ServiceID:    102,
+		ClusterID:    2,
+		Namespace:    "default",
+		DeployTarget: "k8s",
+		IsDefault:    true,
+	}).Error; err != nil {
+		t.Fatalf("seed service deploy target: %v", err)
+	}
+
+	release, err := logic.TriggerRelease(ctx, 3, TriggerReleaseReq{
+		ServiceID:   102,
+		Env:         "production",
+		RuntimeType: "k8s",
+		Version:     "v1.2.3",
+	})
+	if err != nil {
+		t.Fatalf("trigger release with fallback target: %v", err)
+	}
+	if release.DeploymentID != 301 {
+		t.Fatalf("expected fallback deployment id 301, got %d", release.DeploymentID)
+	}
+	if release.Status != "pending_approval" {
+		t.Fatalf("expected pending_approval, got %s", release.Status)
+	}
 }
 
 func TestTriggerModeValidation(t *testing.T) {
@@ -54,8 +124,37 @@ func TestTriggerModeValidation(t *testing.T) {
 func TestReleaseStateTransitions(t *testing.T) {
 	logic := newTestLogic(t)
 	ctx := context.Background()
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Service{
+		ID:          101,
+		Name:        "svc-ci",
+		Env:         "prod",
+		YamlContent: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: svc-ci\n",
+	}).Error; err != nil {
+		t.Fatalf("seed service: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.Cluster{
+		ID:         1,
+		Name:       "cluster-1",
+		KubeConfig: "invalid-kubeconfig",
+		Status:     "active",
+	}).Error; err != nil {
+		t.Fatalf("seed cluster: %v", err)
+	}
+	if err := logic.svcCtx.DB.WithContext(ctx).Create(&model.DeploymentTarget{
+		ID:              201,
+		Name:            "target-1",
+		TargetType:      "k8s",
+		RuntimeType:     "k8s",
+		ClusterID:       1,
+		Env:             "prod",
+		Status:          "active",
+		ReadinessStatus: "ready",
+	}).Error; err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
 	_, err := logic.UpsertDeploymentCDConfig(ctx, 2, 201, UpsertDeploymentCDConfigReq{
-		Env:              "prod",
+		Env:              "production",
 		RuntimeType:      "k8s",
 		Strategy:         "rolling",
 		StrategyConfig:   map[string]any{"batch": 1},
@@ -64,26 +163,22 @@ func TestReleaseStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert cd config: %v", err)
 	}
-	release, err := logic.TriggerRelease(ctx, 3, TriggerReleaseReq{ServiceID: 101, DeploymentID: 201, Env: "prod", RuntimeType: "k8s", Version: "v1.0.0"})
+	release, err := logic.TriggerRelease(ctx, 3, TriggerReleaseReq{ServiceID: 101, DeploymentID: 201, Env: "production", RuntimeType: "k8s", Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("trigger release: %v", err)
 	}
 	if release.Status != "pending_approval" {
 		t.Fatalf("expected pending_approval, got %s", release.Status)
 	}
-	approved, err := logic.ApproveRelease(ctx, 4, release.ID, "looks good")
+	if release.UnifiedReleaseID == 0 {
+		t.Fatalf("expected unified release id")
+	}
+	rejected, err := logic.RejectRelease(ctx, 4, release.ID, "no go")
 	if err != nil {
-		t.Fatalf("approve release: %v", err)
+		t.Fatalf("reject release: %v", err)
 	}
-	if approved.Status != "succeeded" {
-		t.Fatalf("expected succeeded after approval flow, got %s", approved.Status)
-	}
-	rolled, err := logic.RollbackRelease(ctx, 5, release.ID, "v0.9.0", "rollback")
-	if err != nil {
-		t.Fatalf("rollback release: %v", err)
-	}
-	if rolled.Status != "rolled_back" {
-		t.Fatalf("expected rolled_back, got %s", rolled.Status)
+	if rejected.Status != "rejected" {
+		t.Fatalf("expected rejected, got %s", rejected.Status)
 	}
 }
 

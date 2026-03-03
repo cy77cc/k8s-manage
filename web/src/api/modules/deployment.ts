@@ -38,11 +38,15 @@ export interface DeployTarget {
 
 export interface DeployRelease {
   id: number;
+  unified_release_id?: number;
   service_id: number;
   target_id: number;
   namespace_or_project: string;
   runtime_type: 'k8s' | 'compose';
   strategy: string;
+  trigger_source?: 'manual' | 'ci' | string;
+  trigger_context_json?: string;
+  ci_run_id?: number;
   revision_id: number;
   status: string;
   state?: string; // 发布状态：pending_approval, applied, failed, rejected, rolled_back
@@ -268,16 +272,16 @@ export const deploymentApi = {
     strategy?: string;
     variables?: Record<string, string>;
     preview_token?: string;
-  }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; approval_required?: boolean; approval_ticket?: string; lifecycle_state?: string; reason_code?: string }>> {
+  }): Promise<ApiResponse<{ release_id: number; unified_release_id?: number; status: string; runtime_type: string; trigger_source?: string; trigger_context?: Record<string, any>; ci_run_id?: number; approval_required?: boolean; approval_ticket?: string; lifecycle_state?: string; reason_code?: string }>> {
     return apiService.post('/deploy/releases/apply', payload);
   },
-  approveRelease(id: number, payload?: { comment?: string }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; lifecycle_state?: string }>> {
+  approveRelease(id: number, payload?: { comment?: string }): Promise<ApiResponse<{ release_id: number; unified_release_id?: number; status: string; runtime_type: string; trigger_source?: string; trigger_context?: Record<string, any>; ci_run_id?: number; lifecycle_state?: string }>> {
     return apiService.post(`/deploy/releases/${id}/approve`, payload || {});
   },
-  rejectRelease(id: number, payload?: { comment?: string }): Promise<ApiResponse<{ release_id: number; status: string; runtime_type: string; lifecycle_state?: string }>> {
+  rejectRelease(id: number, payload?: { comment?: string }): Promise<ApiResponse<{ release_id: number; unified_release_id?: number; status: string; runtime_type: string; trigger_source?: string; trigger_context?: Record<string, any>; ci_run_id?: number; lifecycle_state?: string }>> {
     return apiService.post(`/deploy/releases/${id}/reject`, payload || {});
   },
-  rollbackRelease(id: number): Promise<ApiResponse<{ release_id: number; status: string }>> {
+  rollbackRelease(id: number): Promise<ApiResponse<{ release_id: number; unified_release_id?: number; status: string; trigger_source?: string; trigger_context?: Record<string, any>; ci_run_id?: number }>> {
     return apiService.post(`/deploy/releases/${id}/rollback`);
   },
   getReleases(params?: { service_id?: number; target_id?: number }): Promise<ApiResponse<PaginatedResponse<DeployRelease>>> {
