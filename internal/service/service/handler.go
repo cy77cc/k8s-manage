@@ -171,11 +171,26 @@ func (h *Handler) Deploy(c *gin.Context) {
 	}
 	var req DeployReq
 	_ = c.ShouldBindJSON(&req)
+
+	// 验证 cluster_id 必填
+	if req.ClusterID == 0 {
+		httpx.Fail(c, xcode.ParamError, "cluster_id is required")
+		return
+	}
+
 	item, err := h.logic.Get(c.Request.Context(), uint(id))
 	if err != nil {
 		httpx.Fail(c, xcode.ServerError, err.Error())
 		return
 	}
+
+	// 校验服务环境与集群环境类型匹配
+	envMatchErr := h.logic.ValidateEnvMatch(c.Request.Context(), item.Env, req.ClusterID)
+	if envMatchErr != nil {
+		httpx.Fail(c, xcode.ParamError, envMatchErr.Error())
+		return
+	}
+
 	env := defaultIfEmpty(req.Env, item.Env)
 	if strings.EqualFold(env, "production") && !httpx.HasAnyPermission(h.svcCtx.DB, httpx.UIDFromCtx(c), "service:approve") {
 		httpx.Fail(c, xcode.Forbidden, "production deploy requires service:approve")

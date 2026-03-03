@@ -13,6 +13,7 @@ type Cluster struct {
 	Status          string     `gorm:"column:status;type:varchar(32);not null;index" json:"status"`
 	Type            string     `gorm:"column:type;type:varchar(32);not null" json:"type"` // kubernetes / openshift
 	Source          string     `gorm:"column:source;type:varchar(32);default:'platform_managed';index" json:"source"` // platform_managed / external_managed
+	EnvType         string     `gorm:"column:env_type;type:varchar(32);not null;default:'development';index" json:"env_type"` // development / staging / production
 	Endpoint        string     `gorm:"column:endpoint;type:varchar(256)" json:"endpoint"`
 	KubeConfig      string     `gorm:"column:kubeconfig;type:mediumtext" json:"-"` // 逐步废弃，迁移到 credential
 	CACert          string     `gorm:"column:ca_cert;type:text" json:"-"`

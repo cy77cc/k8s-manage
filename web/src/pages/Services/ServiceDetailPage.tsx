@@ -7,8 +7,6 @@ import {
   Descriptions,
   Form,
   Input,
-  InputNumber,
-  Modal,
   Row,
   Select,
   Space,
@@ -20,6 +18,7 @@ import {
   Progress,
   Badge,
   Empty,
+  Modal,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -37,8 +36,9 @@ import {
   BarChartOutlined,
   SettingOutlined,
   FileSearchOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Api } from '../../api';
 import type {
   LabelKV,
@@ -100,6 +100,7 @@ const getStatusConfig = (status: string) => {
 const ServiceDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [service, setService] = useState<ServiceItem | null>(null);
   const [events, setEvents] = useState<ServiceEvent[]>([]);
@@ -110,12 +111,11 @@ const ServiceDetailPage: React.FC = () => {
   const [previewYAML, setPreviewYAML] = useState('');
   const [previewWarnings, setPreviewWarnings] = useState<Array<{ level: string; code: string; message: string }>>([]);
   const [deploying, setDeploying] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editSaving, setEditSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [targetForm] = Form.useForm();
+  const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'overview');
   const [varForm] = Form.useForm();
   const [editForm] = Form.useForm<ServiceEditFormValues>();
+  const [editing, setEditing] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
 
   const env = Form.useWatch('env', varForm) || 'staging';
 
@@ -135,18 +135,28 @@ const ServiceDetailPage: React.FC = () => {
       setRevisions(revRes.data.list || []);
       setReleases(relRes.data.list || []);
       setVarSchema(schemaRes.data.vars || []);
-      targetForm.setFieldsValue({
-        cluster_id: Number(localStorage.getItem('clusterId') || 1),
-        namespace: 'default',
-        deploy_target: detail.data.runtimeType || 'k8s',
-      });
       varForm.setFieldValue('env', detail.data.env || 'staging');
+      // 初始化编辑表单
+      editForm.setFieldsValue({
+        name: detail.data.name,
+        env: detail.data.env,
+        owner: detail.data.owner,
+        service_kind: detail.data.serviceKind,
+        service_type: detail.data.serviceType || 'stateless',
+        runtime_type: detail.data.runtimeType,
+        config_mode: detail.data.configMode,
+        render_target: detail.data.renderTarget || (detail.data.runtimeType === 'helm' ? 'k8s' : detail.data.runtimeType),
+        status: detail.data.status,
+        labels_text: (detail.data.labels || []).map((x) => `${x.key}=${x.value}`).join('\n'),
+        standard_config_text: detail.data.standardConfig ? JSON.stringify(detail.data.standardConfig, null, 2) : '{\n  "image": "",\n  "replicas": 1,\n  "ports": [],\n  "envs": []\n}',
+        custom_yaml: detail.data.customYaml || '',
+      });
     } catch (err) {
       message.error(err instanceof Error ? err.message : '加载服务详情失败');
     } finally {
       setLoading(false);
     }
-  }, [id, targetForm, varForm]);
+  }, [id, varForm, editForm]);
 
   const loadVarSet = useCallback(async () => {
     if (!id) return;
@@ -188,18 +198,6 @@ const ServiceDetailPage: React.FC = () => {
 
   const statusConfig = service ? getStatusConfig(service.status) : null;
 
-  const saveDeployTarget = async () => {
-    if (!id) return;
-    const v = await targetForm.validateFields();
-    await Api.services.upsertDeployTarget(id, {
-      cluster_id: Number(v.cluster_id),
-      namespace: v.namespace,
-      deploy_target: v.deploy_target,
-      policy: {},
-    });
-    message.success('默认部署目标已保存');
-  };
-
   const saveVarValues = async () => {
     if (!id) return;
     const values = await varForm.validateFields();
@@ -219,32 +217,10 @@ const ServiceDetailPage: React.FC = () => {
     message.success('变量集已保存');
   };
 
-  const doDeployPreview = async () => {
-    if (!id) return;
-    const target = await targetForm.validateFields();
-    const values = varForm.getFieldsValue(true);
-    const vars: Record<string, string> = {};
-    Object.keys(values).forEach((k) => {
-      if (k.startsWith('var_') && String(values[k] || '').trim() !== '') {
-        vars[k.replace(/^var_/, '')] = String(values[k]);
-      }
-    });
-    const resp = await Api.services.deployPreview(id, {
-      env: values.env || service?.env,
-      cluster_id: Number(target.cluster_id),
-      namespace: target.namespace,
-      deploy_target: target.deploy_target,
-      variables: vars,
-    });
-    setPreviewYAML(resp.data.resolved_yaml || '');
-    setPreviewWarnings(resp.data.warnings || []);
-  };
-
   const deploy = async () => {
     if (!id) return;
     setDeploying(true);
     try {
-      const target = await targetForm.validateFields();
       const values = varForm.getFieldsValue(true);
       const vars: Record<string, string> = {};
       Object.keys(values).forEach((k) => {
@@ -252,11 +228,9 @@ const ServiceDetailPage: React.FC = () => {
           vars[k.replace(/^var_/, '')] = String(values[k]);
         }
       });
+      // TODO: 弹窗选择集群和命名空间
       const resp = await Api.services.deploy(id, {
         env: values.env || service?.env,
-        cluster_id: Number(target.cluster_id),
-        namespace: target.namespace,
-        deploy_target: target.deploy_target,
         variables: vars,
       });
       message.success(`部署已触发，release #${resp.data.release_record_id}`);
@@ -281,7 +255,7 @@ const ServiceDetailPage: React.FC = () => {
     await load();
   };
 
-  const openEdit = () => {
+  const startEditing = () => {
     if (!service) return;
     editForm.setFieldsValue({
       name: service.name,
@@ -297,7 +271,28 @@ const ServiceDetailPage: React.FC = () => {
       standard_config_text: service.standardConfig ? JSON.stringify(service.standardConfig, null, 2) : '{\n  "image": "",\n  "replicas": 1,\n  "ports": [],\n  "envs": []\n}',
       custom_yaml: service.customYaml || '',
     });
-    setEditOpen(true);
+    setEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setEditing(false);
+    // 恢复原始值
+    if (service) {
+      editForm.setFieldsValue({
+        name: service.name,
+        env: service.env,
+        owner: service.owner,
+        service_kind: service.serviceKind,
+        service_type: service.serviceType || 'stateless',
+        runtime_type: service.runtimeType,
+        config_mode: service.configMode,
+        render_target: service.renderTarget || (service.runtimeType === 'helm' ? 'k8s' : service.runtimeType),
+        status: service.status,
+        labels_text: (service.labels || []).map((x) => `${x.key}=${x.value}`).join('\n'),
+        standard_config_text: service.standardConfig ? JSON.stringify(service.standardConfig, null, 2) : '{\n  "image": "",\n  "replicas": 1,\n  "ports": [],\n  "envs": []\n}',
+        custom_yaml: service.customYaml || '',
+      });
+    }
   };
 
   const saveServiceEdit = async () => {
@@ -333,7 +328,7 @@ const ServiceDetailPage: React.FC = () => {
     try {
       await Api.services.update(id, payload);
       message.success('服务配置已更新');
-      setEditOpen(false);
+      setEditing(false);
       await load();
       Modal.confirm({
         title: '是否基于最新配置创建 Revision？',
@@ -347,6 +342,169 @@ const ServiceDetailPage: React.FC = () => {
       setEditSaving(false);
     }
   };
+
+  // 渲染配置 Tab 内容
+  const renderConfigTab = () => (
+    <Row gutter={16}>
+      <Col xs={24} lg={12}>
+        <div className="space-y-4">
+          {/* 服务配置卡片 */}
+          <Card
+            title="服务配置"
+            size="small"
+            extra={
+              editing ? (
+                <Space>
+                  <Button size="small" icon={<CloseOutlined />} onClick={cancelEditing} disabled={editSaving}>
+                    取消
+                  </Button>
+                  <Button size="small" type="primary" icon={<SaveOutlined />} onClick={saveServiceEdit} loading={editSaving}>
+                    保存
+                  </Button>
+                </Space>
+              ) : (
+                <Button size="small" icon={<EditOutlined />} onClick={startEditing}>
+                  编辑
+                </Button>
+              )
+            }
+          >
+            <Form form={editForm} layout="vertical">
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="name" label="服务名" rules={[{ required: true, message: '请输入服务名' }]}>
+                    <Input disabled={!editing} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="env" label="环境" rules={[{ required: true }]}>
+                    <Select disabled={!editing} options={[{ value: 'development' }, { value: 'staging' }, { value: 'production' }]} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="owner" label="负责人" rules={[{ required: true, message: '请输入负责人' }]}>
+                    <Input disabled={!editing} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="status" label="状态" rules={[{ required: true }]}>
+                    <Select disabled={!editing} options={[{ value: 'draft' }, { value: 'running' }, { value: 'stopped' }, { value: 'error' }]} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={12}>
+                <Col span={8}>
+                  <Form.Item name="service_kind" label="服务分类" rules={[{ required: true }]}>
+                    <Input disabled={!editing} placeholder="web/worker/job" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="service_type" label="服务类型" rules={[{ required: true }]}>
+                    <Select disabled={!editing} options={[{ value: 'stateless' }, { value: 'stateful' }]} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="runtime_type" label="运行时" rules={[{ required: true }]}>
+                    <Select disabled={!editing} options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="config_mode" label="配置模式" rules={[{ required: true }]}>
+                    <Select disabled={!editing} options={[{ value: 'standard' }, { value: 'custom' }]} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="render_target" label="渲染目标" rules={[{ required: true }]}>
+                    <Select disabled={!editing} options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item name="labels_text" label="标签（每行 key=value）">
+                <Input.TextArea rows={3} disabled={!editing} placeholder={'app=api\nteam=platform'} />
+              </Form.Item>
+
+              <Form.Item noStyle shouldUpdate={(prev, next) => prev.config_mode !== next.config_mode}>
+                {({ getFieldValue }) => (
+                  getFieldValue('config_mode') === 'standard' ? (
+                    <Form.Item name="standard_config_text" label="标准配置（JSON）" rules={[{ required: true, message: '请输入标准配置 JSON' }]}>
+                      <Input.TextArea rows={10} disabled={!editing} />
+                    </Form.Item>
+                  ) : (
+                    <Form.Item name="custom_yaml" label="自定义 YAML" rules={[{ required: true, message: '请输入 YAML 配置' }]}>
+                      <Input.TextArea rows={10} disabled={!editing} />
+                    </Form.Item>
+                  )
+                )}
+              </Form.Item>
+            </Form>
+          </Card>
+
+          {/* 环境变量集卡片 */}
+          <Card title="环境变量集" size="small">
+            <Form form={varForm} layout="vertical">
+              <Form.Item name="env" label="环境">
+                <Select
+                  options={[
+                    { value: 'development', label: 'Development' },
+                    { value: 'staging', label: 'Staging' },
+                    { value: 'production', label: 'Production' },
+                  ]}
+                />
+              </Form.Item>
+              {varSchema.map((v) => (
+                <Form.Item
+                  key={v.name}
+                  name={`var_${v.name}`}
+                  label={`${v.name}${v.required ? ' *' : ''}`}
+                >
+                  <Input placeholder={v.default || ''} />
+                </Form.Item>
+              ))}
+              <Button onClick={saveVarValues}>保存变量集</Button>
+            </Form>
+            {varSet?.updated_at && (
+              <Alert
+                type="info"
+                style={{ marginTop: 8 }}
+                message={`最近更新: ${new Date(varSet.updated_at).toLocaleString()}`}
+              />
+            )}
+          </Card>
+        </div>
+      </Col>
+      <Col xs={24} lg={12}>
+        {/* 渲染输出预览 */}
+        <Card title="渲染输出预览" size="small">
+          {previewWarnings.length > 0 && (
+            <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }}>
+              {previewWarnings.map((w, idx) => (
+                <Alert
+                  key={`${w.code}-${idx}`}
+                  type={w.level === 'error' ? 'error' : 'warning'}
+                  showIcon
+                  message={w.message}
+                />
+              ))}
+            </Space>
+          )}
+          <pre
+            className="bg-gray-50 p-4 rounded-lg text-sm overflow-auto"
+            style={{ maxHeight: 600 }}
+          >
+            {previewYAML || service?.renderedYaml || service?.customYaml || '# 暂无输出'}
+          </pre>
+        </Card>
+      </Col>
+    </Row>
+  );
 
   return (
     <div className="space-y-6">
@@ -374,9 +532,6 @@ const ServiceDetailPage: React.FC = () => {
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
             刷新
-          </Button>
-          <Button icon={<EditOutlined />} onClick={openEdit}>
-            编辑配置
           </Button>
           <Button icon={<SaveOutlined />} onClick={createRevision}>
             创建 Revision
@@ -564,90 +719,7 @@ const ServiceDetailPage: React.FC = () => {
                   配置
                 </span>
               ),
-              children: (
-                <Row gutter={16}>
-                  <Col xs={24} lg={10}>
-                    <div className="space-y-4">
-                      <Card title="部署目标" size="small">
-                        <Form form={targetForm} layout="vertical">
-                          <Form.Item name="cluster_id" label="Cluster ID" rules={[{ required: true }]}>
-                            <InputNumber min={1} style={{ width: '100%' }} />
-                          </Form.Item>
-                          <Form.Item name="namespace" label="Namespace" rules={[{ required: true }]}>
-                            <Input />
-                          </Form.Item>
-                          <Form.Item name="deploy_target" label="Deploy Target">
-                            <Select
-                              options={[
-                                { value: 'k8s', label: 'Kubernetes' },
-                                { value: 'compose', label: 'Compose' },
-                                { value: 'helm', label: 'Helm' },
-                              ]}
-                            />
-                          </Form.Item>
-                          <Space>
-                            <Button onClick={saveDeployTarget}>保存默认目标</Button>
-                            <Button onClick={doDeployPreview}>预览部署</Button>
-                          </Space>
-                        </Form>
-                      </Card>
-
-                      <Card title="环境变量集" size="small">
-                        <Form form={varForm} layout="vertical">
-                          <Form.Item name="env" label="环境">
-                            <Select
-                              options={[
-                                { value: 'development', label: 'Development' },
-                                { value: 'staging', label: 'Staging' },
-                                { value: 'production', label: 'Production' },
-                              ]}
-                            />
-                          </Form.Item>
-                          {varSchema.map((v) => (
-                            <Form.Item
-                              key={v.name}
-                              name={`var_${v.name}`}
-                              label={`${v.name}${v.required ? ' *' : ''}`}
-                            >
-                              <Input placeholder={v.default || ''} />
-                            </Form.Item>
-                          ))}
-                          <Button onClick={saveVarValues}>保存变量集</Button>
-                        </Form>
-                        {varSet?.updated_at && (
-                          <Alert
-                            type="info"
-                            style={{ marginTop: 8 }}
-                            message={`最近更新: ${new Date(varSet.updated_at).toLocaleString()}`}
-                          />
-                        )}
-                      </Card>
-                    </div>
-                  </Col>
-                  <Col xs={24} lg={14}>
-                    <Card title="渲染输出 / Deploy Preview" size="small">
-                      {previewWarnings.length > 0 && (
-                        <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }}>
-                          {previewWarnings.map((w, idx) => (
-                            <Alert
-                              key={`${w.code}-${idx}`}
-                              type={w.level === 'error' ? 'error' : 'warning'}
-                              showIcon
-                              message={w.message}
-                            />
-                          ))}
-                        </Space>
-                      )}
-                      <pre
-                        className="bg-gray-50 p-4 rounded-lg text-sm overflow-auto"
-                        style={{ maxHeight: 600 }}
-                      >
-                        {previewYAML || service?.renderedYaml || service?.customYaml || '# 暂无输出'}
-                      </pre>
-                    </Card>
-                  </Col>
-                </Row>
-              ),
+              children: renderConfigTab(),
             },
             {
               key: 'logs',
@@ -817,93 +889,6 @@ const ServiceDetailPage: React.FC = () => {
           ]}
         />
       </Card>
-
-      <Modal
-        title="编辑服务配置"
-        open={editOpen}
-        onCancel={() => setEditOpen(false)}
-        onOk={() => void saveServiceEdit()}
-        okText="保存"
-        confirmLoading={editSaving}
-        width={860}
-      >
-        <Form form={editForm} layout="vertical">
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="name" label="服务名" rules={[{ required: true, message: '请输入服务名' }]}>
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="env" label="环境" rules={[{ required: true }]}>
-                <Select options={[{ value: 'development' }, { value: 'staging' }, { value: 'production' }]} />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="owner" label="负责人" rules={[{ required: true, message: '请输入负责人' }]}>
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="status" label="状态" rules={[{ required: true }]}>
-                <Select options={[{ value: 'draft' }, { value: 'running' }, { value: 'stopped' }, { value: 'error' }]} />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Row gutter={12}>
-            <Col span={8}>
-              <Form.Item name="service_kind" label="服务分类" rules={[{ required: true }]}>
-                <Input placeholder="web/worker/job" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="service_type" label="服务类型" rules={[{ required: true }]}>
-                <Select options={[{ value: 'stateless' }, { value: 'stateful' }]} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="runtime_type" label="运行时" rules={[{ required: true }]}>
-                <Select options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Row gutter={12}>
-            <Col span={8}>
-              <Form.Item name="config_mode" label="配置模式" rules={[{ required: true }]}>
-                <Select options={[{ value: 'standard' }, { value: 'custom' }]} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="render_target" label="渲染目标" rules={[{ required: true }]}>
-                <Select options={[{ value: 'k8s' }, { value: 'compose' }, { value: 'helm' }]} />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Form.Item name="labels_text" label="标签（每行 key=value）">
-            <Input.TextArea rows={3} placeholder={'app=api\nteam=platform'} />
-          </Form.Item>
-
-          <Form.Item noStyle shouldUpdate={(prev, next) => prev.config_mode !== next.config_mode}>
-            {({ getFieldValue }) => (
-              getFieldValue('config_mode') === 'standard' ? (
-                <Form.Item name="standard_config_text" label="标准配置（JSON）" rules={[{ required: true, message: '请输入标准配置 JSON' }]}> 
-                  <Input.TextArea rows={10} />
-                </Form.Item>
-              ) : (
-                <Form.Item name="custom_yaml" label="自定义 YAML" rules={[{ required: true, message: '请输入 YAML 配置' }]}> 
-                  <Input.TextArea rows={10} />
-                </Form.Item>
-              )
-            )}
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   );
 };

@@ -38,14 +38,20 @@
 - `PUT /api/v1/services/:id/deploy-target`
   - request: `{ cluster_id, namespace, deploy_target, policy }`
   - response: `ServiceDeployTarget`
+  - **DEPRECATED**: 部署目标不再在服务配置中存储，部署时直接指定
 
 - `POST /api/v1/services/:id/deploy/preview`
-  - request: `{ env, cluster_id?, namespace?, variables?, deploy_target? }`
+  - request: `{ env, cluster_id, namespace?, variables?, deploy_target? }`
   - response: `{ resolved_yaml, checks, warnings, target }`
+  - **注意**: `cluster_id` 为必填参数
 
 - `POST /api/v1/services/:id/deploy`
-  - request: `{ env, cluster_id?, namespace?, variables?, deploy_target?, approval_token? }`
+  - request: `{ cluster_id, namespace?, env?, variables?, deploy_target?, approval_token? }`
   - response: `{ release_record_id }`
+  - **注意**:
+    - `cluster_id` 为必填参数
+    - 部署时校验 `Service.env` 与 `Cluster.env_type` 是否匹配
+    - 不匹配时返回 `400 ENV_MISMATCH` 错误
 
 - `GET /api/v1/services/:id/releases`
   - response: `{ list, total }`

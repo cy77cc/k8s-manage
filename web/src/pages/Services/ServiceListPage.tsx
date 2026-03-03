@@ -164,6 +164,7 @@ const ServiceListPage: React.FC = () => {
               ],
               onClick: ({ key }) => {
                 if (key === 'view') navigate(`/services/${service.id}`);
+                else if (key === 'edit') navigate(`/services/${service.id}?tab=config`);
                 else message.info(`${key}: ${service.name}`);
               },
             }}
