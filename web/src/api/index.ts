@@ -98,6 +98,8 @@ export * from './modules/aiops';
 import { aiopsApi } from './modules/aiops';
 export * from './modules/dashboard';
 import { dashboardApi } from './modules/dashboard';
+export * from './modules/catalog';
+import { catalogApi } from './modules/catalog';
 
 // 统一导出所有API
 export const Api = {
@@ -125,6 +127,7 @@ export const Api = {
   notification: notificationApi,
   aiops: aiopsApi,
   dashboard: dashboardApi,
+  catalog: catalogApi,
 };
 
 export default Api;

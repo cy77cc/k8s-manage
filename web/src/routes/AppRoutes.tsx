@@ -10,6 +10,14 @@ import Dashboard from '../pages/Dashboard/Dashboard';
 const ServiceListPage = lazy(() => import('../pages/Services/ServiceListPage'));
 const ServiceDetailPage = lazy(() => import('../pages/Services/ServiceDetailPage'));
 const ServiceProvisionPage = lazy(() => import('../pages/Services/ServiceProvisionPage'));
+const CatalogListPage = lazy(() => import('../pages/Catalog/CatalogListPage'));
+const CatalogDetailPage = lazy(() => import('../pages/Catalog/CatalogDetailPage'));
+const CatalogDeployPage = lazy(() => import('../pages/Catalog/CatalogDeployPage'));
+const TemplateListPage = lazy(() => import('../pages/Catalog/TemplateListPage'));
+const TemplateCreatePage = lazy(() => import('../pages/Catalog/TemplateCreatePage'));
+const TemplateEditPage = lazy(() => import('../pages/Catalog/TemplateEditPage'));
+const ReviewListPage = lazy(() => import('../pages/Catalog/ReviewListPage'));
+const CategoryManagePage = lazy(() => import('../pages/Catalog/CategoryManagePage'));
 
 const DeploymentListPage = lazy(() => import('../pages/Deployment/DeploymentListPage'));
 const DeploymentCreatePage = lazy(() => import('../pages/Deployment/DeploymentCreatePage'));
@@ -99,6 +107,86 @@ const AppRoutes: React.FC = () => {
           <AppLayout>
             <LazyPage>
               <ServiceProvisionPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/catalog"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <CatalogListPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/catalog/:id"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <CatalogDetailPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/catalog/:id/deploy"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <CatalogDeployPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/catalog/my-templates"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <TemplateListPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/catalog/templates/create"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <TemplateCreatePage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/catalog/templates/:id/edit"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <TemplateEditPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/catalog/reviews"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <ReviewListPage />
+            </LazyPage>
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/catalog/categories"
+        element={
+          <AppLayout>
+            <LazyPage>
+              <CategoryManagePage />
             </LazyPage>
           </AppLayout>
         }

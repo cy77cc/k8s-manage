@@ -9,6 +9,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/service/ai"
 	"github.com/cy77cc/k8s-manage/internal/service/aiops"
 	"github.com/cy77cc/k8s-manage/internal/service/automation"
+	"github.com/cy77cc/k8s-manage/internal/service/catalog"
 	"github.com/cy77cc/k8s-manage/internal/service/cicd"
 	"github.com/cy77cc/k8s-manage/internal/service/cluster"
 	"github.com/cy77cc/k8s-manage/internal/service/cmdb"
@@ -42,6 +43,7 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	project.RegisterProjectHandlers(v1, serverCtx)
 	servicemgr.RegisterServiceHandlers(v1, serverCtx)
 	cicd.RegisterCICDHandlers(v1, serverCtx)
+	catalog.RegisterCatalogHandlers(v1, serverCtx)
 	automation.RegisterAutomationHandlers(v1, serverCtx)
 	host.RegisterHostHandlers(v1, serverCtx)
 	cluster.RegisterClusterHandlers(v1, serverCtx)
