@@ -10,6 +10,7 @@ const mockApi = vi.hoisted(() => ({
     deleteSession: vi.fn(),
     updateSessionTitle: vi.fn(),
     chatStream: vi.fn(),
+    confirmApproval: vi.fn(),
   },
 }));
 
@@ -28,6 +29,7 @@ describe('ChatInterface', () => {
     mockApi.ai.deleteSession.mockResolvedValue({ data: true });
     mockApi.ai.updateSessionTitle.mockResolvedValue({ data: { id: 's1', title: 'AI Session', updatedAt: '' } });
     mockApi.ai.chatStream.mockResolvedValue(undefined);
+    mockApi.ai.confirmApproval.mockResolvedValue({ data: { success: true } });
   });
 
   it('reloads scene data when scene prop changes', async () => {
@@ -44,4 +46,5 @@ describe('ChatInterface', () => {
     await waitFor(() => expect(mockApi.ai.getCurrentSession).toHaveBeenCalledWith('scene:services'));
     await waitFor(() => expect(mockApi.ai.getSessions).toHaveBeenCalledWith('scene:services'));
   });
+
 });

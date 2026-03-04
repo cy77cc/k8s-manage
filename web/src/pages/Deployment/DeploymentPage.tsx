@@ -404,7 +404,7 @@ const DeploymentPage: React.FC = () => {
                                 <Select
                                   options={clusterOptions}
                                   placeholder="选择已有 K8s 集群"
-                                  dropdownRender={(menu) => (
+                                  popupRender={(menu) => (
                                     <div>
                                       {menu}
                                       <div style={{ padding: 8, borderTop: '1px solid #f0f0f0' }}>
@@ -503,8 +503,8 @@ const DeploymentPage: React.FC = () => {
                 <Col span={14}>
                   <Card size="small" title="Preview Manifest">
                     {previewWarnings.length > 0 ? (
-                      <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }}>
-                        {previewWarnings.map((w, idx) => <Alert key={`${w.code}-${idx}`} type={w.level === 'error' ? 'error' : 'warning'} showIcon message={w.message} />)}
+                      <Space orientation="vertical" style={{ width: '100%', marginBottom: 8 }}>
+                        {previewWarnings.map((w, idx) => <Alert key={`${w.code}-${idx}`} type={w.level === 'error' ? 'error' : 'warning'} showIcon title={w.message} />)}
                       </Space>
                     ) : null}
                     <pre style={{ maxHeight: 280, overflow: 'auto' }}>{previewManifest || '# 暂无预览'}</pre>
@@ -640,11 +640,11 @@ const DeploymentPage: React.FC = () => {
                       <Alert
                         type="info"
                         showIcon
-                        message={`预计 API Endpoint: ${bootstrapPreview.expected_endpoint || '-'}`}
+                        title={`预计 API Endpoint: ${bootstrapPreview.expected_endpoint || '-'}`}
                         description={(bootstrapPreview.steps || []).map((s, idx) => <div key={idx}>{idx + 1}. {s}</div>)}
                         style={{ marginBottom: 12 }}
                       />
-                    ) : <Alert type="warning" showIcon message="尚未生成预览步骤" style={{ marginBottom: 12 }} />}
+                    ) : <Alert type="warning" showIcon title="尚未生成预览步骤" style={{ marginBottom: 12 }} />}
                     <Table
                       rowKey="id"
                       dataSource={bootstrapTasks}

@@ -234,6 +234,7 @@ func (h *handler) chat(c *gin.Context) {
 					"approval_token": apErr.Token,
 					"expiresAt":      apErr.ExpiresAt,
 					"message":        apErr.Error(),
+					"can_review":     h.hasPermission(uid, "ai:approval:review"),
 				})
 				streamErr = recvErr
 				break

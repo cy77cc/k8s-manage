@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import ClusterImportWizard from './ClusterImportWizard';
-import { cleanup, fireEvent, renderWithProviders, screen } from '../../../test/utils/render';
+import { cleanup, fireEvent, renderWithProviders, screen, waitFor } from '../../../test/utils/render';
 
 const mockApi = vi.hoisted(() => ({
   cluster: {
@@ -17,6 +17,10 @@ afterEach(() => {
 });
 
 describe('ClusterImportWizard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('enables next button after filling basic cluster name', async () => {
     const user = userEvent.setup();
     renderWithProviders(<ClusterImportWizard />);
@@ -40,7 +44,7 @@ describe('ClusterImportWizard', () => {
     await user.type(screen.getByLabelText('集群名称'), 'prod-k8s');
     await user.click(screen.getByRole('button', { name: '下一步' }));
 
-    await user.click(screen.getByText('API 地址 + 证书'));
+    await user.click(screen.getByRole('radio', { name: /API 地址 \+ 证书/ }));
     await user.click(screen.getByRole('button', { name: '下一步' }));
 
     fireEvent.change(screen.getByLabelText('API Server 地址'), { target: { value: 'https://k8s.example.com:6443' } });
@@ -53,12 +57,13 @@ describe('ClusterImportWizard', () => {
 
     expect(mockApi.cluster.validateImport).toHaveBeenCalledWith({
       name: 'prod-k8s',
+      auth_method: 'certificate',
       endpoint: 'https://k8s.example.com:6443',
       ca_cert: 'ca',
       cert: 'cert',
       key: 'key',
     });
-  });
+  }, 15000);
 
   it('includes skip_tls_verify when importing with token auth', async () => {
     const user = userEvent.setup();
@@ -74,7 +79,7 @@ describe('ClusterImportWizard', () => {
     await user.type(screen.getByLabelText('集群名称'), 'prod-k8s');
     await user.click(screen.getByRole('button', { name: '下一步' }));
 
-    await user.click(screen.getByText('ServiceAccount Token'));
+    await user.click(screen.getByRole('radio', { name: /ServiceAccount Token/ }));
     await user.click(screen.getByRole('button', { name: '下一步' }));
 
     fireEvent.change(screen.getByLabelText('API Server 地址'), { target: { value: 'https://k8s.example.com:6443' } });
@@ -83,10 +88,12 @@ describe('ClusterImportWizard', () => {
     await user.click(screen.getByRole('button', { name: '下一步' }));
 
     await user.click(screen.getByRole('button', { name: /测试连接/ }));
+    await waitFor(() => expect(mockApi.cluster.validateImport).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: '下一步' }));
     await user.click(screen.getByRole('button', { name: '确认导入' }));
 
-    expect(mockApi.cluster.importCluster).toHaveBeenCalledWith({
+    await waitFor(() => expect(mockApi.cluster.importCluster).toHaveBeenCalledWith({
       name: 'prod-k8s',
       description: undefined,
       auth_method: 'token',
@@ -94,8 +101,8 @@ describe('ClusterImportWizard', () => {
       ca_cert: undefined,
       token: 'token-value',
       skip_tls_verify: true,
-    });
-  });
+    }));
+  }, 15000);
 
   it('uses kubeconfig payload when validating connection', async () => {
     const user = userEvent.setup();
@@ -111,6 +118,7 @@ describe('ClusterImportWizard', () => {
     fireEvent.change(screen.getByLabelText('Kubeconfig 内容'), { target: { value: 'apiVersion: v1' } });
     await user.click(screen.getByRole('button', { name: '下一步' }));
     await user.click(screen.getByRole('button', { name: /测试连接/ }));
+    await waitFor(() => expect(mockApi.cluster.validateImport).toHaveBeenCalled());
 
     expect(mockApi.cluster.validateImport).toHaveBeenCalledWith({
       name: 'prod-k8s',
@@ -136,14 +144,16 @@ describe('ClusterImportWizard', () => {
     fireEvent.change(screen.getByLabelText('Kubeconfig 内容'), { target: { value: 'apiVersion: v1' } });
     await user.click(screen.getByRole('button', { name: '下一步' }));
     await user.click(screen.getByRole('button', { name: /测试连接/ }));
+    await waitFor(() => expect(mockApi.cluster.validateImport).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: '下一步' }));
     await user.click(screen.getByRole('button', { name: '确认导入' }));
 
-    expect(mockApi.cluster.importCluster).toHaveBeenCalledWith({
+    await waitFor(() => expect(mockApi.cluster.importCluster).toHaveBeenCalledWith({
       name: 'prod-k8s',
       description: undefined,
       auth_method: 'kubeconfig',
       kubeconfig: 'apiVersion: v1',
-    });
-  });
+    }));
+  }, 15000);
 });

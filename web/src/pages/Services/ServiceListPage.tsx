@@ -341,7 +341,7 @@ const ServiceListPage: React.FC = () => {
                 <Statistic
                   title={<span className="text-gray-600">服务总数</span>}
                   value={stats.total}
-                  valueStyle={{ color: '#495057', fontSize: '28px', fontWeight: 600 }}
+                  styles={{ content: { color: '#495057', fontSize: '28px', fontWeight: 600 } }}
                 />
               </Card>
             </StaggerItem>
@@ -353,7 +353,7 @@ const ServiceListPage: React.FC = () => {
                   title={<span className="text-gray-600">运行中</span>}
                   value={stats.running}
                   prefix={<CheckCircleOutlined className="text-success" />}
-                  valueStyle={{ color: '#10b981', fontSize: '28px', fontWeight: 600 }}
+                  styles={{ content: { color: '#10b981', fontSize: '28px', fontWeight: 600 } }}
                 />
               </Card>
             </StaggerItem>
@@ -365,7 +365,7 @@ const ServiceListPage: React.FC = () => {
                   title={<span className="text-gray-600">部署中</span>}
                   value={stats.deploying}
                   prefix={<ClockCircleOutlined className="text-primary-500" />}
-                  valueStyle={{ color: '#6366f1', fontSize: '28px', fontWeight: 600 }}
+                  styles={{ content: { color: '#6366f1', fontSize: '28px', fontWeight: 600 } }}
                 />
               </Card>
             </StaggerItem>
@@ -377,7 +377,7 @@ const ServiceListPage: React.FC = () => {
                   title={<span className="text-gray-600">错误</span>}
                   value={stats.error}
                   prefix={<ExclamationCircleOutlined className="text-error" />}
-                  valueStyle={{ color: '#ef4444', fontSize: '28px', fontWeight: 600 }}
+                  styles={{ content: { color: '#ef4444', fontSize: '28px', fontWeight: 600 } }}
                 />
               </Card>
             </StaggerItem>
@@ -387,7 +387,7 @@ const ServiceListPage: React.FC = () => {
 
       {/* 筛选和搜索 */}
       <Card>
-        <Space direction="vertical" size="middle" className="w-full">
+        <Space orientation="vertical" size="middle" className="w-full">
           <div className="flex flex-wrap gap-3">
             <Input
               placeholder="搜索服务名称或负责人"

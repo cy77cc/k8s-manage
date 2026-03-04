@@ -32,16 +32,17 @@ vi.mock('../../api/modules/notification', () => ({
             id: '2',
             user_id: '1',
             notification_id: '102',
-            read_at: new Date().toISOString(),
+            read_at: null,
             notification: {
               id: '102',
-              type: 'task',
-              title: '部署任务完成',
-              content: 'deployment-web 部署成功',
-              severity: 'info',
-              source: 'deployment-web',
-              source_id: 'task-001',
-              action_url: '/tasks/task-001',
+              type: 'approval',
+              title: '主机批量命令审批',
+              content: '请审批 host.batch.exec.apply',
+              severity: 'warning',
+              source: 'AI 助手',
+              source_id: 'approval-001',
+              action_url: '/ai',
+              action_type: 'approve',
               created_at: new Date(Date.now() - 3600000).toISOString(),
             },
           },
@@ -60,6 +61,15 @@ vi.mock('../../api/modules/notification', () => ({
     dismiss: vi.fn().mockResolvedValue({ success: true }),
     confirm: vi.fn().mockResolvedValue({ success: true }),
     markAllAsRead: vi.fn().mockResolvedValue({ success: true }),
+  },
+}));
+
+const aiConfirmApprovalMock = vi.fn().mockResolvedValue({ success: true });
+vi.mock('../../api', () => ({
+  Api: {
+    ai: {
+      confirmApproval: (...args: unknown[]) => aiConfirmApprovalMock(...args),
+    },
   },
 }));
 
@@ -107,14 +117,14 @@ describe('NotificationPanel', () => {
     renderWithProviders(<NotificationPanel />);
 
     await waitFor(() => {
-      expect(screen.getByText('告警')).toBeInTheDocument();
+      expect(screen.getAllByRole('tab', { name: '告警' })[0]).toBeInTheDocument();
     });
 
     // Click on alert tab
-    fireEvent.click(screen.getByText('告警'));
+    fireEvent.click(screen.getAllByRole('tab', { name: '告警' })[0]);
 
     await waitFor(() => {
-      expect(screen.getByText('CPU 使用率超过 90%')).toBeInTheDocument();
+      expect(screen.getAllByText('CPU 使用率超过 90%')[0]).toBeInTheDocument();
     });
   });
 
@@ -122,11 +132,11 @@ describe('NotificationPanel', () => {
     renderWithProviders(<NotificationPanel />);
 
     await waitFor(() => {
-      expect(screen.getByText('CPU 使用率超过 90%')).toBeInTheDocument();
+      expect(screen.getAllByText('CPU 使用率超过 90%')[0]).toBeInTheDocument();
     });
 
     // Click on notification title
-    fireEvent.click(screen.getByText('CPU 使用率超过 90%'));
+    fireEvent.click(screen.getAllByText('CPU 使用率超过 90%')[0]);
   });
 });
 
@@ -144,7 +154,7 @@ describe('NotificationItem', () => {
     renderWithProviders(<NotificationPanel />);
 
     await waitFor(() => {
-      expect(screen.getByText('确认告警')).toBeInTheDocument();
+      expect(screen.getAllByText('确认告警')[0]).toBeInTheDocument();
     });
   });
 
@@ -153,6 +163,26 @@ describe('NotificationItem', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('标记已读')[0]).toBeInTheDocument();
+    });
+  });
+
+  it('supports approval approve/reject workflow from notification item', async () => {
+    renderWithProviders(<NotificationPanel />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('主机批量命令审批')[0]).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole('tab', { name: '审批' })[0]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('批准请求')[0]).toBeInTheDocument();
+      expect(screen.getAllByText('驳回请求')[0]).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByText('批准请求')[0]);
+    await waitFor(() => {
+      expect(aiConfirmApprovalMock).toHaveBeenCalledWith('approval-001', true);
     });
   });
 });

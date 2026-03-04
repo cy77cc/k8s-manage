@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/cy77cc/k8s-manage/internal/model"
+	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
 	"gorm.io/gorm"
 )
 
@@ -205,13 +206,9 @@ func (l *Logic) ReplaceTargetNodes(ctx context.Context, targetID uint, nodes []T
 			if err := tx.Select("id,ip,status").First(&host, n.HostID).Error; err != nil {
 				return fmt.Errorf("host node %d not found", n.HostID)
 			}
-			if strings.TrimSpace(host.IP) == "" {
-				return fmt.Errorf("host node %d has empty ip", n.HostID)
-			}
 			if target.TargetType == "compose" {
-				status := strings.ToLower(strings.TrimSpace(host.Status))
-				if status == "offline" || status == "error" || status == "inactive" {
-					return fmt.Errorf("host node %d is unavailable: %s", n.HostID, host.Status)
+				if ok, reason := hostlogic.EvaluateOperationalEligibility(&host); !ok {
+					return fmt.Errorf("host node %d is unavailable: %s", n.HostID, reason)
 				}
 			}
 			row := model.DeploymentTargetNode{TargetID: targetID, HostID: n.HostID, Role: defaultIfEmpty(n.Role, "worker"), Weight: defaultInt(n.Weight, 100), Status: "active"}

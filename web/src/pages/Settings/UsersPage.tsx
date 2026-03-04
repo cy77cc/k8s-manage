@@ -304,9 +304,9 @@ const UsersPage: React.FC = () => {
         </Form>
       </Modal>
 
-      <Drawer title="用户详情" open={Boolean(active)} onClose={() => setActive(null)} width={420}>
+      <Drawer title="用户详情" open={Boolean(active)} onClose={() => setActive(null)} size="large">
         {!active ? null : (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             <div><strong>用户名：</strong>{active.username}</div>
             <div><strong>姓名：</strong>{active.name}</div>
             <div><strong>邮箱：</strong>{active.email}</div>

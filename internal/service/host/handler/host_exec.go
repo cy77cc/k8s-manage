@@ -14,6 +14,9 @@ import (
 )
 
 func (h *Handler) SSHCheck(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:read", "host:*") {
+		return
+	}
 	id, ok := parseID(c)
 	if !ok {
 		return
@@ -42,6 +45,9 @@ func (h *Handler) SSHCheck(c *gin.Context) {
 }
 
 func (h *Handler) SSHExec(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:execute", "host:*") {
+		return
+	}
 	id, ok := parseID(c)
 	if !ok {
 		return
@@ -82,6 +88,9 @@ func (h *Handler) SSHExec(c *gin.Context) {
 }
 
 func (h *Handler) BatchExec(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:execute", "host:*") {
+		return
+	}
 	var req struct {
 		HostIDs []uint64 `json:"host_ids"`
 		Command string   `json:"command" binding:"required"`

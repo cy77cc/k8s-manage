@@ -2,7 +2,9 @@ package handler
 
 import (
 	"strings"
+	"time"
 
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
@@ -24,6 +26,9 @@ func (h *Handler) Probe(c *gin.Context) {
 }
 
 func (h *Handler) Create(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:*") {
+		return
+	}
 	var req hostlogic.CreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BindErr(c, err)
@@ -44,6 +49,9 @@ func (h *Handler) Create(c *gin.Context) {
 }
 
 func (h *Handler) Update(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:*") {
+		return
+	}
 	id, ok := parseID(c)
 	if !ok {
 		return
@@ -62,6 +70,9 @@ func (h *Handler) Update(c *gin.Context) {
 }
 
 func (h *Handler) Delete(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:*") {
+		return
+	}
 	id, ok := parseID(c)
 	if !ok {
 		return
@@ -74,22 +85,41 @@ func (h *Handler) Delete(c *gin.Context) {
 }
 
 func (h *Handler) Action(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:*") {
+		return
+	}
 	id, ok := parseID(c)
 	if !ok {
 		return
 	}
 	var req struct {
-		Action string `json:"action"`
+		Action string     `json:"action"`
+		Reason string     `json:"reason"`
+		Until  *time.Time `json:"until"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	if err := h.hostService.UpdateStatus(c.Request.Context(), id, req.Action); err != nil {
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "maintenance" && !config.HostMaintenanceModeEnabled() {
+		httpx.Fail(c, xcode.Forbidden, "host maintenance mode is disabled")
+		return
+	}
+	var err error
+	if config.HostMaintenanceModeEnabled() {
+		err = h.hostService.UpdateStatusWithMeta(c.Request.Context(), id, req.Action, req.Reason, req.Until, getUID(c))
+	} else {
+		err = h.hostService.UpdateStatus(c.Request.Context(), id, req.Action)
+	}
+	if err != nil {
 		httpx.Fail(c, xcode.ServerError, err.Error())
 		return
 	}
-	httpx.OK(c, gin.H{"id": id, "action": req.Action})
+	httpx.OK(c, gin.H{"id": id, "action": req.Action, "reason": req.Reason, "until": req.Until})
 }
 
 func (h *Handler) Batch(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:*") {
+		return
+	}
 	var req struct {
 		HostIDs []uint64 `json:"host_ids"`
 		Action  string   `json:"action"`
@@ -107,6 +137,9 @@ func (h *Handler) Batch(c *gin.Context) {
 }
 
 func (h *Handler) AddTag(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:*") {
+		return
+	}
 	id, ok := parseID(c)
 	if !ok {
 		return
@@ -134,6 +167,9 @@ func (h *Handler) AddTag(c *gin.Context) {
 }
 
 func (h *Handler) RemoveTag(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:*") {
+		return
+	}
 	id, ok := parseID(c)
 	if !ok {
 		return
@@ -160,6 +196,9 @@ func (h *Handler) RemoveTag(c *gin.Context) {
 }
 
 func (h *Handler) UpdateCredentials(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "host:write", "host:*") {
+		return
+	}
 	id, ok := parseID(c)
 	if !ok {
 		return

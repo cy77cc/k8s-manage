@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"encoding/json"
+	"math"
 	"time"
 
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
@@ -58,9 +61,61 @@ func (h *Handler) Tags(c *gin.Context) {
 }
 
 func (h *Handler) Metrics(c *gin.Context) {
-	now := time.Now()
-	rows := []gin.H{{"id": 1, "cpu": 10, "memory": 256, "disk": 20, "network": 5, "created_at": now.Add(-2 * time.Minute)}, {"id": 2, "cpu": 12, "memory": 260, "disk": 20, "network": 6, "created_at": now.Add(-time.Minute)}, {"id": 3, "cpu": 14, "memory": 262, "disk": 20, "network": 8, "created_at": now}}
+	if !config.HostHealthDiagnosticsEnabled() {
+		httpx.Fail(c, xcode.Forbidden, "host health diagnostics is disabled")
+		return
+	}
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	snapshots, err := h.hostService.ListHealthSnapshots(c.Request.Context(), id, 50)
+	if err != nil {
+		httpx.Fail(c, xcode.ServerError, err.Error())
+		return
+	}
+	rows := make([]gin.H, 0, len(snapshots))
+	for _, s := range snapshots {
+		cpuPct := math.Min(100, s.CpuLoad*20)
+		memoryPct := 0.0
+		if s.MemoryTotalMB > 0 {
+			memoryPct = math.Min(100, float64(s.MemoryUsedMB)*100/float64(s.MemoryTotalMB))
+		}
+		extra := map[string]any{}
+		if s.SummaryJSON != "" {
+			_ = json.Unmarshal([]byte(s.SummaryJSON), &extra)
+		}
+		rows = append(rows, gin.H{
+			"id":            s.ID,
+			"cpu":           int(cpuPct),
+			"memory":        int(memoryPct),
+			"disk":          int(s.DiskUsedPct),
+			"network":       0,
+			"latency_ms":    s.LatencyMS,
+			"health_state":  s.State,
+			"error_message": s.ErrorMessage,
+			"summary":       extra,
+			"created_at":    s.CheckedAt,
+		})
+	}
 	httpx.OK(c, rows)
+}
+
+func (h *Handler) HealthCheck(c *gin.Context) {
+	if !config.HostHealthDiagnosticsEnabled() {
+		httpx.Fail(c, xcode.Forbidden, "host health diagnostics is disabled")
+		return
+	}
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	snapshot, err := h.hostService.RunHealthCheck(c.Request.Context(), id, getUID(c))
+	if err != nil {
+		httpx.Fail(c, xcode.ServerError, err.Error())
+		return
+	}
+	httpx.OK(c, snapshot)
 }
 
 func (h *Handler) Audits(c *gin.Context) {

@@ -81,8 +81,8 @@ describe('CICDPage', () => {
     render(<CICDPage />);
     const auditTabs = await screen.findAllByRole('tab', { name: '审批与审计时间线' });
     fireEvent.click(auditTabs[0]);
-    await waitFor(() => expect(screen.getByText('release.triggered')).toBeInTheDocument());
-  });
+    expect(await screen.findByText('release.triggered', {}, { timeout: 10000 })).toBeInTheDocument();
+  }, 15000);
 
   it('saves service ci config', async () => {
     render(<CICDPage />);

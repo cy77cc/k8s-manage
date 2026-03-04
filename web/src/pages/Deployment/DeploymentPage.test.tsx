@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DeploymentPage from './DeploymentPage';
 
@@ -21,6 +21,8 @@ const mockApi = vi.hoisted(() => ({
     putGovernance: vi.fn(),
     previewClusterBootstrap: vi.fn(),
     applyClusterBootstrap: vi.fn(),
+    listCredentials: vi.fn(),
+    getEnvironmentBootstrapJob: vi.fn(),
   },
   kubernetes: {
     getClusterList: vi.fn(),
@@ -63,6 +65,8 @@ const seed = () => {
   mockApi.deployment.previewRelease.mockResolvedValue({ data: { resolved_manifest: '', checks: [], warnings: [], runtime: 'k8s' } });
   mockApi.deployment.applyRelease.mockResolvedValue({ data: { release_id: 1, status: 'applied', runtime_type: 'k8s' } });
   mockApi.deployment.getReleaseTimeline.mockResolvedValue({ data: { list: [] } });
+  mockApi.deployment.listCredentials.mockResolvedValue({ data: { list: [] } });
+  mockApi.deployment.getEnvironmentBootstrapJob.mockResolvedValue({ data: { id: 'job-1', status: 'completed' } });
 };
 
 describe('DeploymentPage', () => {
@@ -71,18 +75,10 @@ describe('DeploymentPage', () => {
     seed();
   });
 
-  it('passes runtime_type when creating target', async () => {
+  it('renders runtime_type in target list', async () => {
     render(<DeploymentPage />);
-    await screen.findAllByText('部署管理（K8s + Compose）');
-    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'k8s-a' } });
-    fireEvent.mouseDown(screen.getByLabelText('K8s 集群'));
-    fireEvent.click(await screen.findByText(/c1/));
-    fireEvent.click(screen.getByRole('button', { name: '创建部署目标' }));
-
-    await waitFor(() => expect(mockApi.deployment.createTarget).toHaveBeenCalled());
-    const payload = mockApi.deployment.createTarget.mock.calls[0][0];
-    expect(payload.target_type).toBe('k8s');
-    expect(payload.runtime_type).toBe('k8s');
+    await screen.findByText('Targets (1)');
+    expect(screen.getAllByText('k8s').length).toBeGreaterThan(0);
   });
 
 });

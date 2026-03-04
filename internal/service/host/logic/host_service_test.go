@@ -21,6 +21,10 @@ func setupHostTestDB(t *testing.T) *gorm.DB {
 		&model.Node{},
 		&model.HostProbeSession{},
 		&model.SSHKey{},
+		&model.HostHealthSnapshot{},
+		&model.AuditLog{},
+		&model.Notification{},
+		&model.UserNotification{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -43,15 +47,15 @@ func TestHostOnboarding(t *testing.T) {
 	hash := hashToken(token)
 	now := time.Now()
 	probe := &model.HostProbeSession{
-		TokenHash:    hash,
-		Name:         "test-node",
-		IP:           "10.0.0.1",
-		Port:         22,
-		AuthType:     "password",
-		Username:     "root",
-		Reachable:    true,
-		FactsJSON:    `{"hostname":"test-host","os":"linux","arch":"amd64"}`,
-		ExpiresAt:    now.Add(10 * time.Minute),
+		TokenHash:      hash,
+		Name:           "test-node",
+		IP:             "10.0.0.1",
+		Port:           22,
+		AuthType:       "password",
+		Username:       "root",
+		Reachable:      true,
+		FactsJSON:      `{"hostname":"test-host","os":"linux","arch":"amd64"}`,
+		ExpiresAt:      now.Add(10 * time.Minute),
 		PasswordCipher: "encrypted-password",
 	}
 	if err := svc.svcCtx.DB.Create(probe).Error; err != nil {
@@ -182,6 +186,106 @@ func TestHostUpdateStatus(t *testing.T) {
 	found, _ := svc.Get(ctx, uint64(node.ID))
 	if found.Status != "maintenance" {
 		t.Fatalf("expected status maintenance, got %s", found.Status)
+	}
+}
+
+func TestUpdateStatusWithMeta_EmitsAuditAndNotification(t *testing.T) {
+	svc := newTestHostService(t)
+	ctx := context.Background()
+	node := &model.Node{Name: "node-a", IP: "10.0.0.10", Port: 22, Status: "online"}
+	if err := svc.svcCtx.DB.Create(node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	until := time.Now().Add(2 * time.Hour)
+	if err := svc.UpdateStatusWithMeta(ctx, uint64(node.ID), "maintenance", "disk migration", &until, 1001); err != nil {
+		t.Fatalf("update status with meta: %v", err)
+	}
+
+	var refreshed model.Node
+	if err := svc.svcCtx.DB.First(&refreshed, node.ID).Error; err != nil {
+		t.Fatalf("reload node: %v", err)
+	}
+	if refreshed.Status != "maintenance" {
+		t.Fatalf("expected maintenance status, got %s", refreshed.Status)
+	}
+	if refreshed.MaintenanceReason != "disk migration" {
+		t.Fatalf("expected maintenance reason persisted")
+	}
+	if refreshed.MaintenanceBy != 1001 {
+		t.Fatalf("expected maintenance_by=1001, got %d", refreshed.MaintenanceBy)
+	}
+
+	var notif model.Notification
+	if err := svc.svcCtx.DB.Where("type = ?", "system").Order("id DESC").First(&notif).Error; err != nil {
+		t.Fatalf("expected notification: %v", err)
+	}
+	if notif.Title == "" {
+		t.Fatalf("expected non-empty notification title")
+	}
+}
+
+func TestUpdateStatusWithMeta_ExitMaintenanceEmitsAudit(t *testing.T) {
+	svc := newTestHostService(t)
+	ctx := context.Background()
+	node := &model.Node{Name: "node-b", IP: "10.0.0.11", Port: 22, Status: "online"}
+	if err := svc.svcCtx.DB.Create(node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := svc.UpdateStatusWithMeta(ctx, uint64(node.ID), "maintenance", "upgrade", nil, 2002); err != nil {
+		t.Fatalf("enter maintenance: %v", err)
+	}
+	if err := svc.UpdateStatusWithMeta(ctx, uint64(node.ID), "online", "", nil, 2002); err != nil {
+		t.Fatalf("exit maintenance: %v", err)
+	}
+
+	var refreshed model.Node
+	if err := svc.svcCtx.DB.First(&refreshed, node.ID).Error; err != nil {
+		t.Fatalf("reload node: %v", err)
+	}
+	if refreshed.Status != "online" {
+		t.Fatalf("expected online after exit, got %s", refreshed.Status)
+	}
+	if refreshed.MaintenanceStartedAt != nil || refreshed.MaintenanceUntil != nil {
+		t.Fatalf("expected maintenance window cleared on exit")
+	}
+	var notif model.Notification
+	if err := svc.svcCtx.DB.Where("type = ?", "system").Order("id DESC").First(&notif).Error; err != nil {
+		t.Fatalf("expected notification after maintenance exit: %v", err)
+	}
+}
+
+func TestRunHealthCheck_MissingSSHKeyMapsToCritical(t *testing.T) {
+	svc := newTestHostService(t)
+	ctx := context.Background()
+	keyID := model.NodeID(99999)
+	node := &model.Node{
+		Name:     "node-health-critical",
+		IP:       "10.0.0.50",
+		Port:     22,
+		SSHUser:  "root",
+		Status:   "online",
+		SSHKeyID: &keyID,
+	}
+	if err := svc.svcCtx.DB.Create(node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	snapshot, err := svc.RunHealthCheck(ctx, uint64(node.ID), 3001)
+	if err != nil {
+		t.Fatalf("run health check: %v", err)
+	}
+	if snapshot.State != "critical" {
+		t.Fatalf("expected critical state, got %s", snapshot.State)
+	}
+	if snapshot.ConnectivityStatus != "critical" {
+		t.Fatalf("expected critical connectivity, got %s", snapshot.ConnectivityStatus)
+	}
+	var refreshed model.Node
+	if err := svc.svcCtx.DB.First(&refreshed, node.ID).Error; err != nil {
+		t.Fatalf("reload node: %v", err)
+	}
+	if refreshed.HealthState != "critical" {
+		t.Fatalf("expected node health_state critical, got %s", refreshed.HealthState)
 	}
 }
 

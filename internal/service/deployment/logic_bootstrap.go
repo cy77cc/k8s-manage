@@ -8,6 +8,7 @@ import (
 
 	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
 	"github.com/cy77cc/k8s-manage/internal/model"
+	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
 )
 
 func (l *Logic) PreviewClusterBootstrap(ctx context.Context, req ClusterBootstrapPreviewReq) (ClusterBootstrapPreviewResp, error) {
@@ -144,8 +145,8 @@ func (l *Logic) loadBootstrapHosts(ctx context.Context, controlID uint, workerID
 	if err := l.svcCtx.DB.WithContext(ctx).First(&control, controlID).Error; err != nil {
 		return nil, nil, fmt.Errorf("control plane host not found: %w", err)
 	}
-	if strings.TrimSpace(control.IP) == "" {
-		return nil, nil, fmt.Errorf("control plane host missing ip")
+	if ok, reason := hostlogic.EvaluateOperationalEligibility(&control); !ok {
+		return nil, nil, fmt.Errorf("control plane host unavailable: %s", reason)
 	}
 	workers := make([]model.Node, 0, len(workerIDs))
 	for _, id := range workerIDs {
@@ -155,6 +156,9 @@ func (l *Logic) loadBootstrapHosts(ctx context.Context, controlID uint, workerID
 		var row model.Node
 		if err := l.svcCtx.DB.WithContext(ctx).First(&row, id).Error; err != nil {
 			return nil, nil, fmt.Errorf("worker host %d not found", id)
+		}
+		if ok, reason := hostlogic.EvaluateOperationalEligibility(&row); !ok {
+			return nil, nil, fmt.Errorf("worker host %d unavailable: %s", id, reason)
 		}
 		workers = append(workers, row)
 	}

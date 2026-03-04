@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Breadcrumb,
   Button,
   Card,
@@ -21,7 +22,7 @@ import {
 import { ArrowLeftOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Api } from '../../api';
-import type { Host, HostAuditItem, HostMetricPoint, SSHKeyItem } from '../../api/modules/hosts';
+import type { Host, HostAuditItem, HostHealthSnapshot, HostMetricPoint, SSHKeyItem } from '../../api/modules/hosts';
 
 type HostEditFormValues = {
   name: string;
@@ -113,6 +114,27 @@ const HostDetailPage: React.FC = () => {
     });
   };
 
+  const runHealthCheck = async () => {
+    if (!id) return;
+    const res = await Api.hosts.runHealthCheck(id, true);
+    const data: Partial<HostHealthSnapshot> = res.data || {};
+    Modal.info({
+      title: '健康检查结果',
+      width: 680,
+      content: (
+        <Descriptions bordered size="small" column={1}>
+          <Descriptions.Item label="健康状态">{data.state || 'unknown'}</Descriptions.Item>
+          <Descriptions.Item label="连通性">{data.connectivityStatus || '-'}</Descriptions.Item>
+          <Descriptions.Item label="资源">{data.resourceStatus || '-'}</Descriptions.Item>
+          <Descriptions.Item label="系统">{data.systemStatus || '-'}</Descriptions.Item>
+          <Descriptions.Item label="延迟">{data.latencyMs || 0} ms</Descriptions.Item>
+          <Descriptions.Item label="错误">{data.errorMessage || '-'}</Descriptions.Item>
+        </Descriptions>
+      ),
+    });
+    await load();
+  };
+
   const openEditModal = () => {
     if (!host) return;
     editForm.setFieldsValue({
@@ -188,10 +210,13 @@ const HostDetailPage: React.FC = () => {
 
   return (
     <div>
-      <Breadcrumb className="mb-4">
-        <Breadcrumb.Item><Link to="/hosts">主机管理</Link></Breadcrumb.Item>
-        <Breadcrumb.Item>{host?.name || id}</Breadcrumb.Item>
-      </Breadcrumb>
+      <Breadcrumb
+        className="mb-4"
+        items={[
+          { title: <Link to="/hosts">主机管理</Link> },
+          { title: host?.name || id },
+        ]}
+      />
 
       <Card
         loading={loading}
@@ -201,12 +226,19 @@ const HostDetailPage: React.FC = () => {
             <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
             <Button icon={<EditOutlined />} onClick={openEditModal}>编辑主机</Button>
             <Button onClick={() => navigate(`/deployment/infrastructure/hosts/${id}/terminal`)}>终端</Button>
-            <Button onClick={() => runAction('check')}>巡检</Button>
+            <Button onClick={() => void runHealthCheck()}>健康检查</Button>
             <Button onClick={() => runAction('restart', true)}>重启</Button>
             <Button danger onClick={() => runAction('shutdown', true)}>关机</Button>
           </Space>
         )}
       >
+        <Alert
+          type={host?.healthState === 'critical' ? 'error' : host?.healthState === 'degraded' ? 'warning' : 'info'}
+          showIcon
+          title={`健康状态: ${host?.healthState || 'unknown'}`}
+          description={host?.maintenanceReason ? `维护信息: ${host.maintenanceReason}` : undefined}
+          style={{ marginBottom: 16 }}
+        />
         <Row gutter={[16, 16]}>
           <Col span={6}><Card><Statistic title="CPU" value={latest.cpu} suffix="%" /></Card></Col>
           <Col span={6}><Card><Statistic title="内存" value={latest.memory} suffix="%" /></Card></Col>
@@ -218,10 +250,14 @@ const HostDetailPage: React.FC = () => {
         <Descriptions bordered size="small" column={2}>
           <Descriptions.Item label="名称">{host?.name}</Descriptions.Item>
           <Descriptions.Item label="状态"><Tag color={host?.status === 'online' ? 'success' : host?.status === 'maintenance' ? 'warning' : 'default'}>{host?.status || '-'}</Tag></Descriptions.Item>
+          <Descriptions.Item label="健康"><Tag color={host?.healthState === 'healthy' ? 'success' : host?.healthState === 'degraded' ? 'warning' : host?.healthState === 'critical' ? 'error' : 'default'}>{host?.healthState || 'unknown'}</Tag></Descriptions.Item>
+          <Descriptions.Item label="维护原因">{host?.maintenanceReason || '-'}</Descriptions.Item>
           <Descriptions.Item label="IP">{host?.ip}</Descriptions.Item>
           <Descriptions.Item label="系统">{host?.os || '-'}</Descriptions.Item>
           <Descriptions.Item label="SSH">{host?.username || 'root'}:{host?.port || 22}</Descriptions.Item>
           <Descriptions.Item label="区域">{host?.region || '-'}</Descriptions.Item>
+          <Descriptions.Item label="维护开始">{host?.maintenanceStartedAt ? new Date(host.maintenanceStartedAt).toLocaleString() : '-'}</Descriptions.Item>
+          <Descriptions.Item label="维护截止">{host?.maintenanceUntil ? new Date(host.maintenanceUntil).toLocaleString() : '-'}</Descriptions.Item>
           <Descriptions.Item label="CPU 核数">{host?.cpu}</Descriptions.Item>
           <Descriptions.Item label="内存 MB">{host?.memory}</Descriptions.Item>
           <Descriptions.Item label="磁盘 GB">{host?.disk}</Descriptions.Item>

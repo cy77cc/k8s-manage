@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Card, Input, List, Modal, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Input, Modal, Space, Tag, Typography, message } from 'antd';
 import { Api } from '../../api';
 import type { AICommandHistoryItem, AICommandResult } from '../../api';
 
@@ -118,7 +118,7 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
   const paramDiff = buildParamDiff(lastPreviewParams || {}, currentParams);
 
   return (
-    <Space className="ai-command-panel-root" direction="vertical" style={{ width: '100%' }} size={12}>
+    <Space className="ai-command-panel-root" orientation="vertical" style={{ width: '100%' }} size={12}>
       <Card size="small" title="命令输入">
         <Space.Compact style={{ width: '100%' }}>
           <Input
@@ -129,26 +129,25 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
           />
           <Button type="primary" loading={loading} onClick={() => void handlePreview()}>预览</Button>
         </Space.Compact>
-        <List
-          style={{ marginTop: 12 }}
-          size="small"
-          dataSource={suggestions}
-          renderItem={(item) => (
-            <List.Item
-              actions={[<Button size="small" key="use" onClick={() => setCommand(item.command)}>使用</Button>]}
+        <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+          {suggestions.map((item) => (
+            <div
+              key={item.command}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, border: '1px solid #f0f0f0', borderRadius: 8, padding: 8 }}
             >
-              <Space direction="vertical" size={0}>
+              <Space orientation="vertical" size={0}>
                 <Text code>{item.command}</Text>
                 <Text type="secondary">{item.hint || ''}</Text>
               </Space>
-            </List.Item>
-          )}
-        />
+              <Button size="small" onClick={() => setCommand(item.command)}>使用</Button>
+            </div>
+          ))}
+        </div>
       </Card>
 
       <Card size="small" title="执行计划预览">
         {!preview ? <Text type="secondary">先预览命令以查看计划。</Text> : (
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             <Space>
               <Tag color={preview.status === 'blocked' ? 'orange' : preview.status === 'failed' ? 'red' : 'blue'}>{preview.status}</Tag>
               <Tag color={preview.risk === 'high' ? 'red' : preview.risk === 'low' ? 'gold' : 'blue'}>{preview.risk}</Tag>
@@ -159,16 +158,16 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
               <Alert
                 type="error"
                 className="motion-high-risk-pulse"
-                message="高风险命令"
+                title="高风险命令"
                 description="请重点核对目标资源、关键参数和回滚路径，再执行确认。"
               />
             ) : null}
             {preview.missing && preview.missing.length > 0 ? (
-              <Alert type="warning" message={`缺失参数: ${preview.missing.join(', ')}`} />
+              <Alert type="warning" title={`缺失参数: ${preview.missing.join(', ')}`} />
             ) : null}
             {paramDiff.length > 0 ? (
               <Card size="small" title="参数 Diff（相对上一次预览）">
-                <Space direction="vertical" style={{ width: '100%' }}>
+                <Space orientation="vertical" style={{ width: '100%' }}>
                   {paramDiff.map((row) => (
                     <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <Tag color={row.type === 'added' ? 'green' : row.type === 'removed' ? 'default' : 'orange'}>{row.type}</Tag>
@@ -192,12 +191,13 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
       </Card>
 
       <Card size="small" title="命令历史与回放">
-        <List
-          size="small"
-          dataSource={history}
-          renderItem={(item) => (
-            <List.Item actions={[<Button size="small" key="detail" onClick={() => void openHistoryDetail(item.id)}>回放</Button>]}> 
-              <Space direction="vertical" size={0}>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {history.map((item) => (
+            <div
+              key={item.id}
+              style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, border: '1px solid #f0f0f0', borderRadius: 8, padding: 8 }}
+            >
+              <Space orientation="vertical" size={0}>
                 <Space>
                   <Tag>{item.status}</Tag>
                   <Tag>{item.risk}</Tag>
@@ -206,9 +206,10 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
                 <Text>{item.command}</Text>
                 <Text type="secondary">{new Date(item.created_at).toLocaleString()}</Text>
               </Space>
-            </List.Item>
-          )}
-        />
+              <Button size="small" onClick={() => void openHistoryDetail(item.id)}>回放</Button>
+            </div>
+          ))}
+        </div>
       </Card>
 
       <Modal
@@ -221,7 +222,7 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
         okButtonProps={{ danger: preview?.risk === 'high' }}
       >
         {!preview ? null : (
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             <Space>
               <Tag color={preview.risk === 'high' ? 'red' : preview.risk === 'low' ? 'gold' : 'blue'}>{preview.risk}</Tag>
               <Tag>{preview.status}</Tag>
@@ -233,11 +234,11 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
               <Text code>{String(preview.artifacts?.approval_token || '-')}</Text>
             </Text>
             {preview.risk === 'high' ? (
-              <Alert type="error" className="motion-high-risk-pulse" message="高风险操作将直接影响线上状态，请确认审批与回滚方案。" />
+              <Alert type="error" className="motion-high-risk-pulse" title="高风险操作将直接影响线上状态，请确认审批与回滚方案。" />
             ) : null}
             {paramDiff.length > 0 ? (
               <Card size="small" title="参数 Diff 摘要">
-                <Space direction="vertical" style={{ width: '100%' }}>
+                <Space orientation="vertical" style={{ width: '100%' }}>
                   {paramDiff.map((row) => (
                     <div key={`confirm-${row.key}`} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                       <Tag color={row.type === 'added' ? 'green' : row.type === 'removed' ? 'default' : 'orange'}>{row.type}</Tag>

@@ -235,6 +235,29 @@ export interface AIToolExecution {
   };
 }
 
+export interface AIHostExecutionPlan {
+  execution_id: string;
+  command_id?: string;
+  host_ids: number[];
+  mode: 'command' | 'script';
+  command?: string;
+  script_path?: string;
+  risk: 'low' | 'medium' | 'high';
+}
+
+export interface AIHostExecutionResult {
+  execution_id: string;
+  host_id: number;
+  host_ip: string;
+  host_name: string;
+  status: 'running' | 'succeeded' | 'failed';
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+  started_at?: string;
+  finished_at?: string;
+}
+
 // AI功能API
 export const aiApi = {
   // AI对话（SSE流式）

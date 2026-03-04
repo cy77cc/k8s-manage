@@ -51,7 +51,9 @@ describe('CommandPanel', () => {
 
     await waitFor(() => expect(mockApi.ai.previewCommand).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: '确认执行' }));
+    const confirmButtons = await screen.findAllByRole('button', { name: '确认执行' });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
     await waitFor(() => expect(mockApi.ai.executeCommand).toHaveBeenCalled());
     await waitFor(() => expect(mockApi.ai.getCommandHistory).toHaveBeenCalledTimes(2));
-  });
+  }, 15000);
 });

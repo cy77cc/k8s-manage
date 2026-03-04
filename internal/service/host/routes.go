@@ -10,6 +10,7 @@ import (
 
 func RegisterHostHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	h := handler.NewHandler(svcCtx)
+	h.StartHealthCollector()
 	g := v1.Group("/hosts", middleware.JWTAuth())
 	{
 		g.GET("/sources", func(c *gin.Context) {
@@ -34,6 +35,7 @@ func RegisterHostHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.PUT("/:id/credentials", h.UpdateCredentials)
 		g.DELETE("/:id", h.Delete)
 		g.POST("/:id/actions", h.Action)
+		g.POST("/:id/health/check", h.HealthCheck)
 		g.POST("/:id/ssh/check", h.SSHCheck)
 		g.POST("/:id/ssh/exec", h.SSHExec)
 		g.POST("/:id/terminal/sessions", h.CreateTerminalSession)

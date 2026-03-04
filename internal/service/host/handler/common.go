@@ -3,6 +3,7 @@ package handler
 import (
 	"strconv"
 
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
@@ -20,6 +21,13 @@ func NewHandler(svcCtx *svc.ServiceContext) *Handler {
 		svcCtx:      svcCtx,
 		hostService: hostlogic.NewHostService(svcCtx),
 	}
+}
+
+func (h *Handler) StartHealthCollector() {
+	if !config.HostHealthDiagnosticsEnabled() {
+		return
+	}
+	h.hostService.StartHealthSnapshotCollector()
 }
 
 func parseID(c *gin.Context) (uint64, bool) {

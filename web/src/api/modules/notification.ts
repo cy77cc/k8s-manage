@@ -222,6 +222,16 @@ export const notificationApi = {
     return apiService.post(`/notifications/${encodeURIComponent(id)}/confirm`);
   },
 
+  // 审批通过（通知维度）
+  async approve(id: string): Promise<ApiResponse<void>> {
+    return this.confirm(id);
+  },
+
+  // 审批驳回（通知维度）
+  async reject(id: string): Promise<ApiResponse<void>> {
+    return this.dismiss(id);
+  },
+
   // 全部已读
   async markAllAsRead(): Promise<ApiResponse<void>> {
     if (USE_MOCK) {

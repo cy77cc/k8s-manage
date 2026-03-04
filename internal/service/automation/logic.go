@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cy77cc/k8s-manage/internal/model"
+	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 )
 
@@ -102,14 +104,55 @@ func (l *Logic) executeRun(ctx context.Context, actor uint, req executeRunReq) (
 	if err := l.svcCtx.DB.WithContext(ctx).Create(&run).Error; err != nil {
 		return nil, err
 	}
+
+	hostScope, skippedReasons, err := l.resolveAutomationHostScope(ctx, req.Params)
+	if err != nil {
+		run.Status = "failed"
+		run.ResultJSON = fmt.Sprintf(`{"error":%q}`, err.Error())
+		run.FinishedAt = time.Now()
+		_ = l.svcCtx.DB.WithContext(ctx).Model(&model.AutomationRun{}).
+			Where("id = ?", run.ID).
+			Updates(map[string]any{
+				"status":      run.Status,
+				"result_json": run.ResultJSON,
+				"finished_at": run.FinishedAt,
+			}).Error
+		return &run, err
+	}
+
 	_ = l.svcCtx.DB.WithContext(ctx).Create(&model.AutomationRunLog{
 		RunID:   run.ID,
 		Level:   "info",
 		Message: "run queued and started",
 	}).Error
+	for _, reason := range skippedReasons {
+		_ = l.svcCtx.DB.WithContext(ctx).Create(&model.AutomationRunLog{
+			RunID:   run.ID,
+			Level:   "warning",
+			Message: reason,
+		}).Error
+	}
+	if len(hostScope) == 0 {
+		run.Status = "succeeded"
+		run.ResultJSON = `{"summary":"no eligible hosts, skipped execution","executed_host_ids":[]}`
+		run.FinishedAt = time.Now()
+		_ = l.svcCtx.DB.WithContext(ctx).Model(&model.AutomationRun{}).
+			Where("id = ?", run.ID).
+			Updates(map[string]any{
+				"status":      run.Status,
+				"result_json": run.ResultJSON,
+				"finished_at": run.FinishedAt,
+			}).Error
+		return &run, nil
+	}
 
 	run.Status = "succeeded"
-	run.ResultJSON = `{"summary":"skeleton execution completed"}`
+	result, _ := json.Marshal(map[string]any{
+		"summary":           "skeleton execution completed",
+		"executed_host_ids": hostScope,
+		"skipped_hosts":     skippedReasons,
+	})
+	run.ResultJSON = string(result)
 	run.FinishedAt = time.Now()
 	_ = l.svcCtx.DB.WithContext(ctx).Model(&model.AutomationRun{}).
 		Where("id = ?", run.ID).
@@ -136,6 +179,75 @@ func (l *Logic) executeRun(ctx context.Context, actor uint, req executeRunReq) (
 		DetailJSON: string(detail),
 	}).Error
 	return &run, nil
+}
+
+func (l *Logic) resolveAutomationHostScope(ctx context.Context, params map[string]any) ([]uint64, []string, error) {
+	if len(params) == 0 {
+		return nil, nil, nil
+	}
+	candidates := parseHostIDs(params["host_ids"])
+	if len(candidates) == 0 {
+		candidates = parseHostIDs(params["node_ids"])
+	}
+	if len(candidates) == 0 {
+		return nil, nil, nil
+	}
+	allowed := make([]uint64, 0, len(candidates))
+	skipped := make([]string, 0)
+	for _, hostID := range candidates {
+		var host model.Node
+		if err := l.svcCtx.DB.WithContext(ctx).First(&host, hostID).Error; err != nil {
+			skipped = append(skipped, fmt.Sprintf("host %d skipped: not found", hostID))
+			continue
+		}
+		if ok, reason := hostlogic.EvaluateOperationalEligibility(&host); !ok {
+			skipped = append(skipped, fmt.Sprintf("host %d skipped: %s", hostID, reason))
+			continue
+		}
+		allowed = append(allowed, hostID)
+	}
+	return allowed, skipped, nil
+}
+
+func parseHostIDs(v any) []uint64 {
+	switch x := v.(type) {
+	case []uint64:
+		return append([]uint64{}, x...)
+	case []int:
+		out := make([]uint64, 0, len(x))
+		for _, id := range x {
+			if id > 0 {
+				out = append(out, uint64(id))
+			}
+		}
+		return out
+	case []any:
+		out := make([]uint64, 0, len(x))
+		for _, item := range x {
+			switch v := item.(type) {
+			case float64:
+				if v > 0 {
+					out = append(out, uint64(v))
+				}
+			case int:
+				if v > 0 {
+					out = append(out, uint64(v))
+				}
+			case uint64:
+				if v > 0 {
+					out = append(out, v)
+				}
+			case string:
+				n, _ := strconv.ParseUint(strings.TrimSpace(v), 10, 64)
+				if n > 0 {
+					out = append(out, n)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (l *Logic) getRun(ctx context.Context, id string) (*model.AutomationRun, error) {

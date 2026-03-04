@@ -7,32 +7,37 @@ import (
 type NodeID uint
 
 type Node struct {
-	ID           NodeID    `gorm:"primaryKey;column:id" json:"id"`
-	Name         string    `gorm:"column:name;type:varchar(64);not null" json:"name"`
-	Hostname     string    `gorm:"column:hostname;type:varchar(64)" json:"hostname"`
-	Labels       string    `gorm:"column:labels;type:json" json:"labels"`
-	Description  string    `gorm:"column:description;type:varchar(256)" json:"description"`
-	IP           string    `gorm:"column:ip;type:varchar(45);not null" json:"ip"`
-	Port         int       `gorm:"column:port;default:22" json:"port"`
-	SSHUser      string    `gorm:"column:ssh_user;type:varchar(64);not null;default:root" json:"ssh_user"`
-	SSHPassword  string    `gorm:"column:ssh_password;type:varchar(256)" json:"ssh_password"`
-	SSHKeyID     *NodeID   `gorm:"column:ssh_key_id" json:"ssh_key_id"`
-	OS           string    `gorm:"column:os;type:varchar(64)" json:"os"`
-	Arch         string    `gorm:"column:arch;type:varchar(32)" json:"arch"`
-	Kernel       string    `gorm:"column:kernel;type:varchar(64)" json:"kernel"`
-	CpuCores     int       `gorm:"column:cpu_cores" json:"cpu_cores"`
-	MemoryMB     int       `gorm:"column:memory_mb" json:"memory_mb"`
-	DiskGB       int       `gorm:"column:disk_gb" json:"disk_gb"`
-	Status       string    `gorm:"column:status;type:varchar(32);not null" json:"status"`
-	Role         string    `gorm:"column:role;type:varchar(32)" json:"role"`
-	ClusterID    uint      `gorm:"column:cluster_id" json:"cluster_id"`
-	Source       string    `gorm:"column:source;type:varchar(32);default:manual_ssh" json:"source"`
-	Provider     string    `gorm:"column:provider;type:varchar(32)" json:"provider"`
-	ProviderID   string    `gorm:"column:provider_instance_id;type:varchar(128)" json:"provider_instance_id"`
-	ParentHostID *NodeID   `gorm:"column:parent_host_id" json:"parent_host_id"`
-	LastCheckAt  time.Time `gorm:"column:last_check_at" json:"last_check_at"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID                   NodeID     `gorm:"primaryKey;column:id" json:"id"`
+	Name                 string     `gorm:"column:name;type:varchar(64);not null" json:"name"`
+	Hostname             string     `gorm:"column:hostname;type:varchar(64)" json:"hostname"`
+	Labels               string     `gorm:"column:labels;type:json" json:"labels"`
+	Description          string     `gorm:"column:description;type:varchar(256)" json:"description"`
+	IP                   string     `gorm:"column:ip;type:varchar(45);not null" json:"ip"`
+	Port                 int        `gorm:"column:port;default:22" json:"port"`
+	SSHUser              string     `gorm:"column:ssh_user;type:varchar(64);not null;default:root" json:"ssh_user"`
+	SSHPassword          string     `gorm:"column:ssh_password;type:varchar(256)" json:"ssh_password"`
+	SSHKeyID             *NodeID    `gorm:"column:ssh_key_id" json:"ssh_key_id"`
+	OS                   string     `gorm:"column:os;type:varchar(64)" json:"os"`
+	Arch                 string     `gorm:"column:arch;type:varchar(32)" json:"arch"`
+	Kernel               string     `gorm:"column:kernel;type:varchar(64)" json:"kernel"`
+	CpuCores             int        `gorm:"column:cpu_cores" json:"cpu_cores"`
+	MemoryMB             int        `gorm:"column:memory_mb" json:"memory_mb"`
+	DiskGB               int        `gorm:"column:disk_gb" json:"disk_gb"`
+	Status               string     `gorm:"column:status;type:varchar(32);not null" json:"status"`
+	Role                 string     `gorm:"column:role;type:varchar(32)" json:"role"`
+	ClusterID            uint       `gorm:"column:cluster_id" json:"cluster_id"`
+	Source               string     `gorm:"column:source;type:varchar(32);default:manual_ssh" json:"source"`
+	Provider             string     `gorm:"column:provider;type:varchar(32)" json:"provider"`
+	ProviderID           string     `gorm:"column:provider_instance_id;type:varchar(128)" json:"provider_instance_id"`
+	ParentHostID         *NodeID    `gorm:"column:parent_host_id" json:"parent_host_id"`
+	HealthState          string     `gorm:"column:health_state;type:varchar(32);default:unknown" json:"health_state"`
+	MaintenanceReason    string     `gorm:"column:maintenance_reason;type:varchar(512)" json:"maintenance_reason"`
+	MaintenanceBy        uint64     `gorm:"column:maintenance_by;default:0" json:"maintenance_by"`
+	MaintenanceStartedAt *time.Time `gorm:"column:maintenance_started_at" json:"maintenance_started_at"`
+	MaintenanceUntil     *time.Time `gorm:"column:maintenance_until" json:"maintenance_until"`
+	LastCheckAt          time.Time  `gorm:"column:last_check_at" json:"last_check_at"`
+	CreatedAt            time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt            time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (n *Node) TableName() string {

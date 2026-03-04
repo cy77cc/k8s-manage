@@ -6,6 +6,7 @@ export interface Host {
   name: string;
   ip: string;
   status: string;
+  healthState?: 'healthy' | 'degraded' | 'critical' | 'unknown';
   cpu: number;
   memory: number;
   disk: number;
@@ -23,6 +24,10 @@ export interface Host {
   providerInstanceId?: string;
   parentHostId?: string;
   sshKeyId?: number;
+  maintenanceReason?: string;
+  maintenanceBy?: number;
+  maintenanceStartedAt?: string;
+  maintenanceUntil?: string;
 }
 
 export interface HostListParams {
@@ -77,6 +82,9 @@ export interface HostMetricPoint {
   disk: number;
   network: number;
   createdAt: string;
+  healthState?: 'healthy' | 'degraded' | 'critical' | 'unknown';
+  latencyMs?: number;
+  errorMessage?: string;
 }
 
 export interface HostAuditItem {
@@ -85,6 +93,24 @@ export interface HostAuditItem {
   operator: string;
   detail: string;
   createdAt: string;
+}
+
+export interface HostHealthSnapshot {
+  id: string;
+  hostId: string;
+  state: 'healthy' | 'degraded' | 'critical' | 'unknown';
+  connectivityStatus: string;
+  resourceStatus: string;
+  systemStatus: string;
+  latencyMs: number;
+  cpuLoad: number;
+  memoryUsedMB: number;
+  memoryTotalMB: number;
+  diskUsedPct: number;
+  inodeUsedPct: number;
+  summaryJson?: string;
+  errorMessage?: string;
+  checkedAt: string;
 }
 
 export interface SSHExecResult {
@@ -207,6 +233,7 @@ export const hostApi = {
       name: item.name,
       ip: item.ip,
       status: item.status,
+      healthState: item.health_state || 'unknown',
       cpu: item.cpu_cores ?? item.cpu ?? 0,
       memory: item.memory_mb ?? item.memory ?? 0,
       disk: item.disk_gb ?? item.disk ?? 0,
@@ -217,6 +244,10 @@ export const hostApi = {
       provider: item.provider,
       providerInstanceId: item.provider_instance_id,
       parentHostId: item.parent_host_id ? String(item.parent_host_id) : undefined,
+      maintenanceReason: item.maintenance_reason || '',
+      maintenanceBy: Number(item.maintenance_by || 0),
+      maintenanceStartedAt: item.maintenance_started_at || undefined,
+      maintenanceUntil: item.maintenance_until || undefined,
       createdAt: item.created_at ?? item.createdAt,
       lastActive: item.updated_at ?? item.lastActive,
     }));
@@ -239,6 +270,7 @@ export const hostApi = {
         name: item.name,
         ip: item.ip,
         status: item.status,
+        healthState: item.health_state || 'unknown',
         cpu: item.cpu_cores ?? item.cpu ?? 0,
         memory: item.memory_mb ?? item.memory ?? 0,
         disk: item.disk_gb ?? item.disk ?? 0,
@@ -256,6 +288,10 @@ export const hostApi = {
         providerInstanceId: item.provider_instance_id,
         parentHostId: item.parent_host_id ? String(item.parent_host_id) : undefined,
         sshKeyId: item.ssh_key_id ? Number(item.ssh_key_id) : undefined,
+        maintenanceReason: item.maintenance_reason || '',
+        maintenanceBy: Number(item.maintenance_by || 0),
+        maintenanceStartedAt: item.maintenance_started_at || undefined,
+        maintenanceUntil: item.maintenance_until || undefined,
       },
     };
   },
@@ -364,6 +400,9 @@ export const hostApi = {
         disk: Number(m.disk || 0),
         network: Number(m.network || 0),
         createdAt: m.created_at ?? m.createdAt,
+        healthState: m.health_state || undefined,
+        latencyMs: Number(m.latency_ms || 0),
+        errorMessage: m.error_message || undefined,
       })),
     };
   },
@@ -382,8 +421,33 @@ export const hostApi = {
     };
   },
 
-  async hostAction(id: string, action: string): Promise<ApiResponse<void>> {
-    return apiService.post(`/hosts/${id}/actions`, { action });
+  async hostAction(id: string, action: string, opts?: { reason?: string; until?: string }): Promise<ApiResponse<void>> {
+    return apiService.post(`/hosts/${id}/actions`, { action, reason: opts?.reason || '', until: opts?.until });
+  },
+
+  async runHealthCheck(id: string, deep?: boolean): Promise<ApiResponse<HostHealthSnapshot>> {
+    const response = await apiService.post<any>(`/hosts/${id}/health/check`, { deep: !!deep });
+    const d = response.data || {};
+    return {
+      ...response,
+      data: {
+        id: String(d.id || ''),
+        hostId: String(d.host_id || id),
+        state: (d.state || 'unknown') as HostHealthSnapshot['state'],
+        connectivityStatus: d.connectivity_status || 'unknown',
+        resourceStatus: d.resource_status || 'unknown',
+        systemStatus: d.system_status || 'unknown',
+        latencyMs: Number(d.latency_ms || 0),
+        cpuLoad: Number(d.cpu_load || 0),
+        memoryUsedMB: Number(d.memory_used_mb || 0),
+        memoryTotalMB: Number(d.memory_total_mb || 0),
+        diskUsedPct: Number(d.disk_used_pct || 0),
+        inodeUsedPct: Number(d.inode_used_pct || 0),
+        summaryJson: d.summary_json || '',
+        errorMessage: d.error_message || '',
+        checkedAt: d.checked_at || new Date().toISOString(),
+      },
+    };
   },
 
   async sshCheck(id: string): Promise<ApiResponse<{ reachable: boolean; message?: string }>> {

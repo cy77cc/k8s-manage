@@ -10,6 +10,7 @@ interface NotificationListProps {
   onMarkAsRead?: (id: string) => void;
   onDismiss?: (id: string) => void;
   onConfirm?: (id: string) => void;
+  onReject?: (id: string) => void;
   onClick?: (notification: UserNotification) => void;
 }
 
@@ -23,6 +24,7 @@ const NotificationList: React.FC<NotificationListProps> = ({
   onMarkAsRead,
   onDismiss,
   onConfirm,
+  onReject,
   onClick,
 }) => {
   // 过滤通知 - 使用 useMemo 缓存结果
@@ -45,6 +47,10 @@ const NotificationList: React.FC<NotificationListProps> = ({
   const handleConfirm = useCallback((id: string) => {
     onConfirm?.(id);
   }, [onConfirm]);
+
+  const handleReject = useCallback((id: string) => {
+    onReject?.(id);
+  }, [onReject]);
 
   const handleClick = useCallback((notification: UserNotification) => {
     onClick?.(notification);
@@ -78,6 +84,7 @@ const NotificationList: React.FC<NotificationListProps> = ({
           onMarkAsRead={handleMarkAsRead}
           onDismiss={handleDismiss}
           onConfirm={handleConfirm}
+          onReject={handleReject}
           onClick={handleClick}
         />
       ))}

@@ -66,3 +66,28 @@ type ExecutionRecord struct {
 	FinishedAt *time.Time        `json:"finishedAt,omitempty"`
 	Error      string            `json:"error,omitempty"`
 }
+
+// HostExecutionPlan describes approved host operation execution scope.
+type HostExecutionPlan struct {
+	ExecutionID string   `json:"execution_id"`
+	CommandID   string   `json:"command_id,omitempty"`
+	HostIDs     []uint64 `json:"host_ids"`
+	Mode        string   `json:"mode"` // command|script
+	Command     string   `json:"command,omitempty"`
+	ScriptPath  string   `json:"script_path,omitempty"`
+	Risk        string   `json:"risk"`
+}
+
+// HostExecutionResult is per-host execution output for governed host actions.
+type HostExecutionResult struct {
+	ExecutionID string    `json:"execution_id"`
+	HostID      uint64    `json:"host_id"`
+	HostIP      string    `json:"host_ip"`
+	HostName    string    `json:"host_name"`
+	Status      string    `json:"status"`
+	Stdout      string    `json:"stdout"`
+	Stderr      string    `json:"stderr"`
+	ExitCode    int       `json:"exit_code"`
+	StartedAt   time.Time `json:"started_at"`
+	FinishedAt  time.Time `json:"finished_at"`
+}

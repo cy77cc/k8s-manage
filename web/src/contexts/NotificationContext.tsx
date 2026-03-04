@@ -6,6 +6,7 @@ import type {
   WSMessage,
 } from '../types/notification';
 import { notificationApi } from '../api/modules/notification';
+import { Api } from '../api';
 import { useNotificationWebSocket } from '../hooks/useNotificationWebSocket';
 import { playNotificationSound } from '../hooks/useNotificationSound';
 import { notify as sendBrowserNotification } from '../utils/browserNotification';
@@ -22,6 +23,7 @@ interface NotificationContextValue {
   markAsRead: (id: string) => Promise<void>;
   dismiss: (id: string) => Promise<void>;
   confirm: (id: string) => Promise<void>;
+  reject: (id: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
 }
 
@@ -170,7 +172,13 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
 
   // 确认告警
   const confirm = useCallback(async (id: string) => {
-    await notificationApi.confirm(id);
+    const target = notifications.find((n) => n.id === id);
+    if (!target) return;
+    if (target.notification.type === 'approval' && target.notification.source_id) {
+      await Api.ai.confirmApproval(target.notification.source_id, true);
+    } else {
+      await notificationApi.confirm(id);
+    }
     setNotifications((prev) =>
       prev.map((n) =>
         n.id === id
@@ -182,7 +190,21 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
       ...prev,
       total: Math.max(0, prev.total - 1),
     }));
-  }, []);
+    window.dispatchEvent(new CustomEvent('ai-approval-updated', { detail: { token: target.notification.source_id, status: 'approved' } }));
+  }, [notifications]);
+
+  const reject = useCallback(async (id: string) => {
+    const target = notifications.find((n) => n.id === id);
+    if (!target) return;
+    if (target.notification.type === 'approval' && target.notification.source_id) {
+      await Api.ai.confirmApproval(target.notification.source_id, false);
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      setUnreadCount((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+      window.dispatchEvent(new CustomEvent('ai-approval-updated', { detail: { token: target.notification.source_id, status: 'rejected' } }));
+      return;
+    }
+    await dismiss(id);
+  }, [notifications, dismiss]);
 
   // 全部已读
   const markAllAsRead = useCallback(async () => {
@@ -229,6 +251,16 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
     setWsStatus(wsConnectionStatus);
   }, [wsConnectionStatus]);
 
+  useEffect(() => {
+    const handler = () => {
+      void loadNotifications();
+    };
+    window.addEventListener('ai-approval-updated', handler);
+    return () => {
+      window.removeEventListener('ai-approval-updated', handler);
+    };
+  }, [loadNotifications]);
+
   const value: NotificationContextValue = {
     notifications,
     unreadCount,
@@ -238,6 +270,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
     markAsRead,
     dismiss,
     confirm,
+    reject,
     markAllAsRead,
   };
 

@@ -72,7 +72,34 @@ type UpdateCredentialsReq struct {
 
 // ActionReq is the request body for single-host action operations (POST /hosts/:id/action).
 type ActionReq struct {
-	Action string `json:"action"`
+	Action string     `json:"action"`
+	Reason string     `json:"reason,omitempty"`
+	Until  *time.Time `json:"until,omitempty"`
+}
+
+// HealthCheckReq is the request body for on-demand host health checks
+// (POST /hosts/:id/health/check).
+type HealthCheckReq struct {
+	Deep bool `json:"deep"`
+}
+
+// HealthSnapshot represents host health diagnostics result.
+type HealthSnapshot struct {
+	ID                 uint64    `json:"id"`
+	HostID             uint64    `json:"host_id"`
+	State              string    `json:"state"`
+	ConnectivityStatus string    `json:"connectivity_status"`
+	ResourceStatus     string    `json:"resource_status"`
+	SystemStatus       string    `json:"system_status"`
+	LatencyMS          int64     `json:"latency_ms"`
+	CpuLoad            float64   `json:"cpu_load"`
+	MemoryUsedMB       int       `json:"memory_used_mb"`
+	MemoryTotalMB      int       `json:"memory_total_mb"`
+	DiskUsedPct        float64   `json:"disk_used_pct"`
+	InodeUsedPct       float64   `json:"inode_used_pct"`
+	SummaryJSON        string    `json:"summary_json"`
+	ErrorMessage       string    `json:"error_message"`
+	CheckedAt          time.Time `json:"checked_at"`
 }
 
 // BatchReq is the request body for batch host operations (POST /hosts/batch).

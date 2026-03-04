@@ -17,6 +17,7 @@ interface NotificationItemProps {
   onMarkAsRead?: (id: string) => void;
   onDismiss?: (id: string) => void;
   onConfirm?: (id: string) => void;
+  onReject?: (id: string) => void;
   onClick?: (notification: UserNotification) => void;
 }
 
@@ -31,12 +32,18 @@ const NotificationItem: React.FC<NotificationItemProps> = ({
   onMarkAsRead,
   onDismiss,
   onConfirm,
+  onReject,
   onClick,
 }) => {
   const { notification: n, read_at, confirmed_at } = notification;
   const config = severityConfig[n.severity];
   const isUnread = !read_at;
-  const canConfirm = n.action_type === 'confirm' && n.type === 'alert' && !confirmed_at;
+  const canConfirm = (
+    ((n.action_type === 'confirm' && n.type === 'alert') ||
+      (n.action_type === 'approve' && n.type === 'approval')) &&
+    !confirmed_at
+  );
+  const confirmLabel = n.type === 'approval' ? '批准请求' : '确认告警';
 
   const handleClick = () => {
     onClick?.(notification);
@@ -78,14 +85,25 @@ const NotificationItem: React.FC<NotificationItemProps> = ({
         {(canConfirm || !read_at) && (
           <div className="notification-item-actions">
             {canConfirm && (
-              <Button
-                type="primary"
-                size="small"
-                icon={<CheckOutlined />}
-                onClick={(e) => handleActionClick(e, () => onConfirm?.(notification.id))}
-              >
-                确认告警
-              </Button>
+              <>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<CheckOutlined />}
+                  onClick={(e) => handleActionClick(e, () => onConfirm?.(notification.id))}
+                >
+                  {confirmLabel}
+                </Button>
+                {n.type === 'approval' && (
+                  <Button
+                    size="small"
+                    danger
+                    onClick={(e) => handleActionClick(e, () => onReject?.(notification.id))}
+                  >
+                    驳回请求
+                  </Button>
+                )}
+              </>
             )}
             {!read_at && (
               <>

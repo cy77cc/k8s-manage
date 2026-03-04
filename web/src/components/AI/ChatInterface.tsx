@@ -138,6 +138,37 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    const handleApprovalUpdate = (event: Event) => {
+      const custom = event as CustomEvent<{ token?: string; status?: string }>;
+      const token = (custom.detail?.token || '').toString();
+      const status = (custom.detail?.status || '').toString();
+      if (!token || !status) return;
+      setMessages((prev) => prev.map((item) => {
+        if (item.role !== 'assistant' || !item.traces?.length) return item;
+        return {
+          ...item,
+          traces: item.traces.map((trace) => {
+            if (trace.type !== 'approval_required') return trace;
+            const currentToken = (trace.payload?.approval_token || '').toString();
+            if (currentToken !== token) return trace;
+            return {
+              ...trace,
+              payload: {
+                ...(trace.payload || {}),
+                status,
+              },
+            };
+          }),
+        };
+      }));
+    };
+    window.addEventListener('ai-approval-updated', handleApprovalUpdate);
+    return () => {
+      window.removeEventListener('ai-approval-updated', handleApprovalUpdate);
+    };
+  }, []);
+
   // 记录已加载的 scene，避免重复加载
   const loadedSceneRef = useRef<string | null>(null);
 
@@ -687,6 +718,36 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const handleApprovalDecision = async (approvalToken: string, approve: boolean) => {
+    const token = (approvalToken || '').trim();
+    if (!token) return;
+    try {
+      await Api.ai.confirmApproval(token, approve);
+      const nextStatus = approve ? 'approved' : 'rejected';
+      setMessages((prev) => prev.map((item) => {
+        if (item.role !== 'assistant' || !item.traces?.length) return item;
+        return {
+          ...item,
+          traces: item.traces.map((trace) => {
+            if (trace.type !== 'approval_required') return trace;
+            const currentToken = (trace.payload?.approval_token || '').toString();
+            if (currentToken !== token) return trace;
+            return {
+              ...trace,
+              payload: {
+                ...(trace.payload || {}),
+                status: nextStatus,
+              },
+            };
+          }),
+        };
+      }));
+      window.dispatchEvent(new CustomEvent('ai-approval-updated', { detail: { token, status: nextStatus } }));
+    } catch (error) {
+      console.error('审批操作失败:', error);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -925,6 +986,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                             </Button>
                                           </Space>
                                           <Text type="secondary" className="ai-trace-time">{new Date(trace.timestamp).toLocaleTimeString()}</Text>
+                                          {trace.type === 'approval_required' && trace.payload?.can_review !== false ? (
+                                            <Space style={{ marginTop: 8 }}>
+                                              <Button
+                                                size="small"
+                                                type="primary"
+                                                onClick={() => void handleApprovalDecision((trace.payload?.approval_token || '').toString(), true)}
+                                              >
+                                                批准
+                                              </Button>
+                                              <Button
+                                                size="small"
+                                                danger
+                                                onClick={() => void handleApprovalDecision((trace.payload?.approval_token || '').toString(), false)}
+                                              >
+                                                驳回
+                                              </Button>
+                                              {trace.payload?.status ? <Tag>{trace.payload.status}</Tag> : null}
+                                            </Space>
+                                          ) : null}
                                           {isRawShown ? (
                                             <pre className="ai-trace-json">
                                               {JSON.stringify(trace.payload, null, 2)}

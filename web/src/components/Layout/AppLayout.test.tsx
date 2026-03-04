@@ -27,6 +27,10 @@ vi.mock('../AI/GlobalAIAssistant', () => ({
   default: () => <div data-testid="ai-assistant" />,
 }));
 
+vi.mock('../Notification', () => ({
+  NotificationBell: () => <div data-testid="notification-bell" />,
+}));
+
 describe('AppLayout governance menu', () => {
   beforeEach(() => {
     cleanup();

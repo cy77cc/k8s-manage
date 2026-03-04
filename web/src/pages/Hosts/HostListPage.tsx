@@ -16,6 +16,8 @@ import {
   Badge,
   Checkbox,
   Empty,
+  Alert,
+  Descriptions,
 } from 'antd';
 import {
   PlusOutlined,
@@ -31,7 +33,7 @@ import {
   PlayCircleOutlined,
 } from '@ant-design/icons';
 import { Api } from '../../api';
-import type { Host } from '../../api/modules/hosts';
+import type { Host, HostHealthSnapshot } from '../../api/modules/hosts';
 import { useNavigate } from 'react-router-dom';
 import { StaggerList, StaggerItem } from '../../components/Motion';
 
@@ -131,15 +133,46 @@ const HostListPage: React.FC = () => {
     load();
   };
 
+  const runHealthCheck = async (id: string) => {
+    const res = await Api.hosts.runHealthCheck(id, true);
+    const data: Partial<HostHealthSnapshot> = res.data || {};
+    Modal.info({
+      title: '健康检查结果',
+      width: 680,
+      content: (
+        <Descriptions bordered size="small" column={1}>
+          <Descriptions.Item label="健康状态">{data.state || 'unknown'}</Descriptions.Item>
+          <Descriptions.Item label="连通性">{data.connectivityStatus || '-'}</Descriptions.Item>
+          <Descriptions.Item label="资源">{data.resourceStatus || '-'}</Descriptions.Item>
+          <Descriptions.Item label="系统">{data.systemStatus || '-'}</Descriptions.Item>
+          <Descriptions.Item label="延迟">{data.latencyMs || 0} ms</Descriptions.Item>
+          <Descriptions.Item label="错误">{data.errorMessage || '-'}</Descriptions.Item>
+        </Descriptions>
+      ),
+    });
+  };
+
   const batchExec = async () => {
     if (selected.length === 0) {
       message.warning('请选择主机');
       return;
     }
-    const command = window.prompt('请输入要批量执行的命令', 'hostname');
-    if (!command) return;
-    const res = await Api.hosts.batchExec(selected, command);
-    message.success(`批量执行完成: ${Object.keys(res.data || {}).length} 台`);
+    let command = 'hostname';
+    Modal.confirm({
+      title: '批量命令执行（二次确认）',
+      width: 720,
+      content: (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Alert type="warning" showIcon message="高风险操作" description={`即将在 ${selected.length} 台主机执行命令，请确认影响范围。`} />
+          <Input defaultValue={command} onChange={(e) => { command = e.target.value; }} placeholder="请输入命令" />
+        </Space>
+      ),
+      onOk: async () => {
+        if (!command.trim()) throw new Error('命令不能为空');
+        const res = await Api.hosts.batchExec(selected, command.trim());
+        message.success(`批量执行完成: ${Object.keys(res.data || {}).length} 台`);
+      },
+    });
   };
 
   // 获取状态配置
@@ -192,6 +225,9 @@ const HostListPage: React.FC = () => {
                 <Tag color={statusConfig.color} icon={statusConfig.icon}>
                   {statusConfig.text}
                 </Tag>
+                <Tag color={host.healthState === 'healthy' ? 'green' : host.healthState === 'degraded' ? 'orange' : host.healthState === 'critical' ? 'red' : 'default'}>
+                  健康: {host.healthState || 'unknown'}
+                </Tag>
                 {isAssigned && (
                   <Tag color="blue">已分配</Tag>
                 )}
@@ -219,6 +255,8 @@ const HostListPage: React.FC = () => {
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <div className="text-xs text-gray-500 space-y-1">
                   <div>容量: {host.cpu || 0} 核 CPU / {host.memory || 0} MB 内存 / {host.disk || 0} GB 磁盘</div>
+                  {host.maintenanceReason ? <div>维护原因: {host.maintenanceReason}</div> : null}
+                  {host.maintenanceUntil ? <div>维护截止: {new Date(host.maintenanceUntil).toLocaleString()}</div> : null}
                 </div>
               </div>
             </div>
@@ -234,21 +272,47 @@ const HostListPage: React.FC = () => {
                 { key: 'maintenance', icon: <ToolOutlined />, label: '设为维护' },
               ],
               onClick: async ({ key }) => {
-                if (key === 'check' || key === 'restart') {
+                if (key === 'check') {
+                  await runHealthCheck(host.id);
+                } else if (key === 'restart') {
                   await quickAction(host.id, key);
                 } else if (key === 'ssh') {
-                  const command = window.prompt('请输入命令', 'uptime');
-                  if (!command) return;
-                  const res = await Api.hosts.sshExec(host.id, command);
-                  Modal.info({
-                    title: '执行结果',
-                    content: <pre>{res.data.stdout || res.data.stderr || ''}</pre>,
+                  let command = 'uptime';
+                  Modal.confirm({
+                    title: 'SSH 命令执行（二次确认）',
                     width: 720,
+                    content: (
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        <Alert type="warning" showIcon message="请确认目标主机与命令风险" description={`目标: ${host.name}(${host.ip})`} />
+                        <Input defaultValue={command} onChange={(e) => { command = e.target.value; }} placeholder="请输入命令" />
+                      </Space>
+                    ),
+                    onOk: async () => {
+                      const res = await Api.hosts.sshExec(host.id, command.trim());
+                      Modal.info({
+                        title: '执行结果',
+                        content: <pre>{res.data.stdout || res.data.stderr || ''}</pre>,
+                        width: 720,
+                      });
+                    },
                   });
                 } else if (key === 'terminal') {
                   navigate(`/deployment/infrastructure/hosts/${host.id}/terminal`);
                 } else if (key === 'maintenance') {
-                  await quickAction(host.id, 'maintenance');
+                  let reason = 'scheduled-maintenance';
+                  Modal.confirm({
+                    title: '设为维护',
+                    content: (
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        <Input defaultValue={reason} onChange={(e) => { reason = e.target.value; }} placeholder="维护原因" />
+                      </Space>
+                    ),
+                    onOk: async () => {
+                      await Api.hosts.hostAction(host.id, 'maintenance', { reason: reason.trim() });
+                      message.success('已设置维护');
+                      await load();
+                    },
+                  });
                 }
               },
             }}

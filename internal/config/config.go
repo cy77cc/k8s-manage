@@ -9,20 +9,21 @@ import (
 )
 
 type Config struct {
-	App       App       `mapstructure:"app"`
-	Server    Server    `mapstructure:"server"`
-	Log       Log       `mapstructure:"log"`
-	MySQL     MySQL     `mapstructure:"mysql"`
-	Postgres  Postgres  `mapstructure:"postgres"`
-	SQLite    SQLite    `mapstructure:"sqlite"`
-	Redis     Redis     `mapstructure:"redis"`
-	JWT       JWT       `mapstructure:"jwt"`
-	Cors      Cors      `mapstructure:"cors"`
-	RateLimit RateLimit `mapstructure:"rate_limit"`
-	Pprof     Pprof     `mapstructure:"pprof"`
-	Metrics   Metrics   `mapstructure:"metrics"`
-	Security  Security  `mapstructure:"security"`
-	LLM       LLM       `mapstructure:"llm"`
+	App          App          `mapstructure:"app"`
+	Server       Server       `mapstructure:"server"`
+	Log          Log          `mapstructure:"log"`
+	MySQL        MySQL        `mapstructure:"mysql"`
+	Postgres     Postgres     `mapstructure:"postgres"`
+	SQLite       SQLite       `mapstructure:"sqlite"`
+	Redis        Redis        `mapstructure:"redis"`
+	JWT          JWT          `mapstructure:"jwt"`
+	Cors         Cors         `mapstructure:"cors"`
+	RateLimit    RateLimit    `mapstructure:"rate_limit"`
+	Pprof        Pprof        `mapstructure:"pprof"`
+	Metrics      Metrics      `mapstructure:"metrics"`
+	Security     Security     `mapstructure:"security"`
+	LLM          LLM          `mapstructure:"llm"`
+	FeatureFlags FeatureFlags `mapstructure:"feature_flags"`
 }
 
 type App struct {
@@ -133,6 +134,12 @@ type LLM struct {
 	Temperature float64 `mapstructure:"temperature"`
 }
 
+type FeatureFlags struct {
+	HostHealthDiagnostics   *bool `mapstructure:"host_health_diagnostics"`
+	HostMaintenanceMode     *bool `mapstructure:"host_maintenance_mode"`
+	AIGovernedHostExecution *bool `mapstructure:"ai_governed_host_execution"`
+}
+
 type Postgres struct {
 	Enable          bool          `mapstructure:"enable"`
 	Host            string        `mapstructure:"host"`
@@ -179,4 +186,23 @@ func MustNewConfig() {
 	if err := viper.Unmarshal(&CFG); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
 	}
+}
+
+func boolOrDefault(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+func HostHealthDiagnosticsEnabled() bool {
+	return boolOrDefault(CFG.FeatureFlags.HostHealthDiagnostics, true)
+}
+
+func HostMaintenanceModeEnabled() bool {
+	return boolOrDefault(CFG.FeatureFlags.HostMaintenanceMode, true)
+}
+
+func AIGovernedHostExecutionEnabled() bool {
+	return boolOrDefault(CFG.FeatureFlags.AIGovernedHostExecution, true)
 }

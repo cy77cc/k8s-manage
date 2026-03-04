@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -13,9 +14,13 @@ import (
 	"time"
 
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/service/cicd"
+	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
+	"github.com/cy77cc/k8s-manage/internal/utils"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
@@ -181,6 +186,70 @@ func (h *handler) buildCommandRoutes() map[string]commandAction {
 		NextActions: []string{"deployment.release", "monitor.alerts"},
 		Exec:        executeAggregate,
 	})
+	register(commandAction{
+		Intent:      "host.batch.exec.preview",
+		Domain:      "host",
+		Description: "主机批量命令预览",
+		Required:    []string{"host_ids", "command"},
+		Permission:  "ai:tool:read",
+		Mode:        tools.ToolModeReadonly,
+		Risk:        tools.ToolRiskMedium,
+		Tool:        "host_batch_exec_preview",
+		NextActions: []string{"host.batch.exec.apply"},
+		BuildPreview: func(ctx context.Context, h *handler, uid uint64, cc commandContext) (map[string]any, error) {
+			return h.executeWithSpecificTool(ctx, uid, cc, "", "host_batch_exec_preview")
+		},
+	})
+	register(commandAction{
+		Intent:      "host.batch.exec.apply",
+		Domain:      "host",
+		Description: "主机批量命令执行",
+		Required:    []string{"host_ids", "command"},
+		Permission:  "ai:tool:execute",
+		Mode:        tools.ToolModeMutating,
+		Risk:        tools.ToolRiskHigh,
+		Tool:        "host_batch_exec_apply",
+		NextActions: []string{"ops.aggregate.status"},
+		BuildPreview: func(ctx context.Context, h *handler, uid uint64, cc commandContext) (map[string]any, error) {
+			return h.executeWithSpecificTool(ctx, uid, cc, "", "host_batch_exec_preview")
+		},
+	})
+	register(commandAction{
+		Intent:      "host.batch.status.update",
+		Domain:      "host",
+		Description: "主机批量状态更新",
+		Required:    []string{"host_ids", "action"},
+		Permission:  "ai:tool:execute",
+		Mode:        tools.ToolModeMutating,
+		Risk:        tools.ToolRiskMedium,
+		Tool:        "host_batch_status_update",
+		NextActions: []string{"host.batch.exec.preview"},
+	})
+	register(commandAction{
+		Intent:      "host.script.exec.apply",
+		Domain:      "host",
+		Description: "主机脚本上传并执行",
+		Required:    []string{"host_ids", "script_content"},
+		Permission:  "ai:tool:execute",
+		Mode:        tools.ToolModeMutating,
+		Risk:        tools.ToolRiskHigh,
+		NextActions: []string{"ops.aggregate.status"},
+		Exec:        executeHostScriptApply,
+		BuildPreview: func(ctx context.Context, h *handler, uid uint64, cc commandContext) (map[string]any, error) {
+			ids := hostIDsFromParams(cc.Params)
+			script := resolveScriptContent(cc.Params)
+			hash := sha256.Sum256([]byte(script))
+			return map[string]any{
+				"mode":           "script",
+				"target_count":   len(ids),
+				"host_ids":       ids,
+				"script_hash":    hex.EncodeToString(hash[:]),
+				"script_lines":   len(strings.Split(script, "\n")),
+				"execution_root": fmt.Sprintf("/tmp/opsx/%s", cc.CommandID),
+				"timeout_sec":    scriptTimeoutSec(cc.Params),
+			}, nil
+		},
+	})
 	return routes
 }
 
@@ -197,6 +266,14 @@ func classifyRisk(action commandAction) commandRisk {
 func detectIntent(command string) string {
 	v := strings.ToLower(strings.TrimSpace(command))
 	switch {
+	case strings.Contains(v, "host.script.exec.apply") || strings.Contains(v, "脚本执行") || strings.Contains(v, "上传脚本执行"):
+		return "host.script.exec.apply"
+	case strings.Contains(v, "host.batch.exec.preview") || strings.Contains(v, "批量命令预览"):
+		return "host.batch.exec.preview"
+	case strings.Contains(v, "host.batch.exec.apply") || strings.Contains(v, "批量命令执行") || strings.Contains(v, "批量执行主机命令"):
+		return "host.batch.exec.apply"
+	case strings.Contains(v, "host.batch.status.update") || strings.Contains(v, "批量维护") || strings.Contains(v, "批量状态"):
+		return "host.batch.status.update"
 	case strings.Contains(v, "ops.aggregate.status") || strings.Contains(v, "聚合") || strings.Contains(v, "汇总"):
 		return "ops.aggregate.status"
 	case strings.Contains(v, "deployment.rollback") || strings.Contains(v, "回滚"):
@@ -337,6 +414,10 @@ func (h *handler) previewCommand(c *gin.Context) {
 		httpx.Fail(c, xcode.Forbidden, "permission denied")
 		return
 	}
+	if err := h.enforceHostOperationPolicy(c.Request.Context(), cc); err != nil {
+		httpx.Fail(c, xcode.Forbidden, err.Error())
+		return
+	}
 	if err := h.store.saveCommandRecord(uid, cc, "previewed", nil, nil, ""); err != nil {
 		httpx.Fail(c, xcode.ServerError, err.Error())
 		return
@@ -350,22 +431,34 @@ func (h *handler) previewCommand(c *gin.Context) {
 		Plan:        cc.Plan,
 		Risk:        cc.Risk,
 	}
+	if cc.Action.BuildPreview != nil && len(cc.Missing) == 0 {
+		previewArtifacts, previewErr := cc.Action.BuildPreview(c.Request.Context(), h, uid, cc)
+		if previewErr != nil {
+			result.Artifacts["preview_error"] = previewErr.Error()
+		} else if len(previewArtifacts) > 0 {
+			result.Artifacts["preview"] = previewArtifacts
+		}
+	}
+	if isHostExecutionIntent(cc.Intent) {
+		result.Artifacts["host_execution_plan"] = h.buildHostExecutionPlan(cc)
+	}
 	if len(cc.Missing) > 0 {
 		result.Status = "blocked"
 		result.Summary = "参数未补全，无法执行"
 		result.Missing = cc.Missing
 		result.Prompts = cc.Prompts
 	}
-	if cc.Risk == commandRiskHigh {
+	if cc.Risk == commandRiskHigh || isHostMutatingIntent(cc.Intent) {
 		ticket := h.store.newApproval(uid, approvalTicket{
 			Tool:   cc.Intent,
 			Params: cc.Params,
-			Risk:   tools.ToolRiskHigh,
+			Risk:   cc.Action.Risk,
 			Mode:   tools.ToolModeMutating,
 		})
 		result.Artifacts["approval_required"] = true
 		result.Artifacts["approval_token"] = ticket.ID
 		result.Artifacts["approval_expires_at"] = ticket.ExpiresAt
+		result.Artifacts["can_review"] = h.hasPermission(uid, "ai:approval:review")
 	}
 	result.Artifacts["command_id"] = cc.CommandID
 	result.Artifacts["intent"] = cc.Intent
@@ -401,8 +494,12 @@ func (h *handler) executeCommand(c *gin.Context) {
 		httpx.Fail(c, xcode.ParamError, "missing required params")
 		return
 	}
+	if err := h.enforceHostOperationPolicy(c.Request.Context(), cc); err != nil {
+		httpx.Fail(c, xcode.Forbidden, err.Error())
+		return
+	}
 	approvalContext := map[string]any{}
-	if cc.Risk == commandRiskHigh {
+	if cc.Risk == commandRiskHigh || isHostMutatingIntent(cc.Intent) {
 		token := strings.TrimSpace(req.ApprovalToken)
 		if token == "" {
 			httpx.Fail(c, xcode.Forbidden, "approval token required")
@@ -423,6 +520,7 @@ func (h *handler) executeCommand(c *gin.Context) {
 	} else {
 		artifacts, err = h.executeWithTool(c.Request.Context(), uid, cc, strings.TrimSpace(req.ApprovalToken))
 	}
+	artifacts = redactArtifactsMap(artifacts)
 	result := commandResult{
 		Status:      "succeeded",
 		Summary:     fmt.Sprintf("命令 `%s` 执行成功", cc.Intent),
@@ -438,6 +536,13 @@ func (h *handler) executeCommand(c *gin.Context) {
 			result.Artifacts = map[string]any{}
 		}
 		result.Artifacts["error"] = err.Error()
+	}
+	if isHostExecutionIntent(cc.Intent) {
+		records := h.persistHostExecutionRecords(c.Request.Context(), uid, cc, result.Artifacts)
+		if result.Artifacts == nil {
+			result.Artifacts = map[string]any{}
+		}
+		result.Artifacts["host_execution_records"] = records
 	}
 	_ = h.store.saveCommandRecord(uid, cc, result.Status, result.Artifacts, approvalContext, result.Summary)
 	httpx.OK(c, result)
@@ -500,6 +605,30 @@ func (h *handler) executeWithTool(ctx context.Context, uid uint64, cc commandCon
 	result, err := h.svcCtx.AI.RunTool(runCtx, cc.Action.Tool, cc.Params)
 	artifacts := map[string]any{
 		"tool":       cc.Action.Tool,
+		"ok":         result.OK,
+		"source":     result.Source,
+		"latency_ms": result.LatencyMS,
+		"data":       result.Data,
+	}
+	if err != nil {
+		artifacts["error"] = err.Error()
+		return artifacts, err
+	}
+	if !result.OK {
+		return artifacts, fmt.Errorf("%s", result.Error)
+	}
+	return artifacts, nil
+}
+
+func (h *handler) executeWithSpecificTool(ctx context.Context, uid uint64, cc commandContext, approvalToken, toolName string) (map[string]any, error) {
+	if h.svcCtx.AI == nil {
+		return nil, fmt.Errorf("ai runtime not initialized")
+	}
+	runCtx := tools.WithToolUser(ctx, uid, approvalToken)
+	runCtx = tools.WithToolPolicyChecker(runCtx, h.toolPolicy)
+	result, err := h.svcCtx.AI.RunTool(runCtx, strings.TrimSpace(toolName), cc.Params)
+	artifacts := map[string]any{
+		"tool":       strings.TrimSpace(toolName),
 		"ok":         result.OK,
 		"source":     result.Source,
 		"latency_ms": result.LatencyMS,
@@ -727,12 +856,18 @@ func (h *handler) getCommandHistory(c *gin.Context) {
 	if h.svcCtx.DB != nil {
 		_ = h.svcCtx.DB.WithContext(c.Request.Context()).Where("trace_id = ? OR command_id = ?", rec.TraceID, rec.ID).Order("id DESC").Limit(50).Find(&audits).Error
 	}
-	httpx.OK(c, gin.H{"record": item, "audit_events": audits})
+	hostResults := make([]model.AIHostExecutionRecord, 0)
+	if h.svcCtx.DB != nil {
+		_ = h.svcCtx.DB.WithContext(c.Request.Context()).Where("command_id = ?", rec.ID).Order("id ASC").Find(&hostResults).Error
+	}
+	httpx.OK(c, gin.H{"record": item, "audit_events": audits, "host_execution_records": hostResults})
 }
 
 func (h *handler) commandSuggestions(c *gin.Context) {
 	examples := []map[string]any{
 		{"command": "ops.aggregate.status limit=5", "hint": "一条命令汇总服务/发布/告警/资产关系"},
+		{"command": "host.batch.exec.preview host_ids=[1,2] command='systemctl status kubelet'", "hint": "预览主机批量命令执行"},
+		{"command": "host.script.exec.apply host_ids=[1,2]", "hint": "脚本上传执行（需二次确认与审批）"},
 		{"command": "deployment.release service_id=1 deployment_id=2 env=prod runtime_type=k8s version=v1.2.3", "hint": "触发发布（需要确认）"},
 		{"command": "deployment.rollback release_id=18 target_version=v1.2.2", "hint": "高风险回滚，需审批"},
 		{"command": "monitor.alerts status=firing limit=20", "hint": "查看当前告警"},
@@ -793,4 +928,352 @@ func toBool(v any) bool {
 	default:
 		return false
 	}
+}
+
+func isHostExecutionIntent(intent string) bool {
+	trimmed := strings.TrimSpace(intent)
+	return strings.HasPrefix(trimmed, "host.batch.exec") || trimmed == "host.script.exec.apply"
+}
+
+func isHostMutatingIntent(intent string) bool {
+	trimmed := strings.TrimSpace(intent)
+	return trimmed == "host.batch.exec.apply" || trimmed == "host.batch.status.update" || trimmed == "host.script.exec.apply"
+}
+
+func (h *handler) buildHostExecutionPlan(cc commandContext) map[string]any {
+	hostIDs := hostIDsFromParams(cc.Params)
+	mode := "command"
+	command := strings.TrimSpace(toString(cc.Params["command"]))
+	scriptPath := ""
+	if strings.TrimSpace(cc.Intent) == "host.script.exec.apply" {
+		mode = "script"
+		command = ""
+		scriptPath = fmt.Sprintf("/tmp/opsx/%s/<host_id>/run.sh", cc.CommandID)
+	}
+	return map[string]any{
+		"command_id":   cc.CommandID,
+		"intent":       cc.Intent,
+		"host_ids":     hostIDs,
+		"target_count": len(hostIDs),
+		"mode":         mode,
+		"command":      command,
+		"script_path":  scriptPath,
+		"risk":         cc.Risk,
+		"limits": map[string]any{
+			"timeout_sec":  scriptTimeoutSec(cc.Params),
+			"concurrency":  10,
+			"approval_ttl": "10m",
+		},
+	}
+}
+
+func (h *handler) persistHostExecutionRecords(ctx context.Context, uid uint64, cc commandContext, artifacts map[string]any) []map[string]any {
+	if h.svcCtx.DB == nil || len(artifacts) == 0 {
+		return nil
+	}
+	hostIDs := hostIDsFromParams(cc.Params)
+	if len(hostIDs) == 0 {
+		return nil
+	}
+	execID := fmt.Sprintf("exec-%s", cc.CommandID)
+	commandText := strings.TrimSpace(toString(cc.Params["command"]))
+	now := time.Now()
+
+	nodes := make(map[uint64]model.Node, len(hostIDs))
+	var rows []model.Node
+	if err := h.svcCtx.DB.WithContext(ctx).Where("id IN ?", hostIDs).Find(&rows).Error; err == nil {
+		for i := range rows {
+			nodes[uint64(rows[i].ID)] = rows[i]
+		}
+	}
+	data, _ := artifacts["data"].(map[string]any)
+	resultMap, _ := data["results"].(map[string]any)
+	out := make([]map[string]any, 0, len(hostIDs))
+	for _, hostID := range hostIDs {
+		node := nodes[hostID]
+		status := "succeeded"
+		exitCode := 0
+		stdout := ""
+		stderr := ""
+		if one, ok := resultMap[strconv.FormatUint(hostID, 10)].(map[string]any); ok {
+			stdout = redactSensitiveText(toString(one["stdout"]))
+			stderr = redactSensitiveText(toString(one["stderr"]))
+			exitCode = int(toInt64(one["exit_code"]))
+		}
+		if exitCode != 0 || strings.TrimSpace(stderr) != "" {
+			status = "failed"
+		}
+		record := model.AIHostExecutionRecord{
+			ExecutionID: execID,
+			CommandID:   cc.CommandID,
+			HostID:      hostID,
+			HostIP:      node.IP,
+			HostName:    node.Name,
+			CommandText: commandText,
+			Status:      status,
+			StdoutText:  redactSensitiveText(stdout),
+			StderrText:  redactSensitiveText(stderr),
+			ExitCode:    exitCode,
+			StartedAt:   &now,
+			FinishedAt:  &now,
+			CreatedBy:   uid,
+		}
+		_ = h.svcCtx.DB.WithContext(ctx).Create(&record).Error
+		out = append(out, map[string]any{
+			"host_id":   hostID,
+			"host_name": node.Name,
+			"host_ip":   node.IP,
+			"status":    status,
+			"exit_code": exitCode,
+		})
+	}
+	return out
+}
+
+func hostIDsFromParams(params map[string]any) []uint64 {
+	raw, ok := params["host_ids"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []uint64:
+		return append([]uint64{}, v...)
+	case []int:
+		out := make([]uint64, 0, len(v))
+		for _, id := range v {
+			if id > 0 {
+				out = append(out, uint64(id))
+			}
+		}
+		return out
+	case []any:
+		out := make([]uint64, 0, len(v))
+		for _, it := range v {
+			switch x := it.(type) {
+			case int:
+				if x > 0 {
+					out = append(out, uint64(x))
+				}
+			case int64:
+				if x > 0 {
+					out = append(out, uint64(x))
+				}
+			case uint64:
+				if x > 0 {
+					out = append(out, x)
+				}
+			case float64:
+				if x > 0 {
+					out = append(out, uint64(x))
+				}
+			case string:
+				if n, err := strconv.ParseUint(strings.TrimSpace(x), 10, 64); err == nil && n > 0 {
+					out = append(out, n)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func (h *handler) enforceHostOperationPolicy(ctx context.Context, cc commandContext) error {
+	if !isHostExecutionIntent(cc.Intent) && !isHostMutatingIntent(cc.Intent) {
+		return nil
+	}
+	if !config.AIGovernedHostExecutionEnabled() {
+		return fmt.Errorf("ai governed host execution is disabled")
+	}
+	hostIDs := hostIDsFromParams(cc.Params)
+	if len(hostIDs) == 0 {
+		return fmt.Errorf("host_ids is required")
+	}
+	if len(hostIDs) > 50 {
+		return fmt.Errorf("host scope exceeds policy limit: 50")
+	}
+	if timeout := scriptTimeoutSec(cc.Params); timeout > 600 {
+		return fmt.Errorf("timeout exceeds policy limit: 600s")
+	}
+	for _, hostID := range hostIDs {
+		var host model.Node
+		if err := h.svcCtx.DB.WithContext(ctx).First(&host, hostID).Error; err != nil {
+			return fmt.Errorf("host %d not found", hostID)
+		}
+		if ok, reason := hostlogic.EvaluateOperationalEligibility(&host); !ok {
+			return fmt.Errorf("host %d is not eligible: %s", hostID, reason)
+		}
+	}
+	command := strings.ToLower(strings.TrimSpace(toString(cc.Params["command"])))
+	if command != "" {
+		denylist := []string{"rm -rf /", "shutdown", "reboot", "mkfs", "dd if=", "iptables -f"}
+		for _, keyword := range denylist {
+			if strings.Contains(command, keyword) {
+				return fmt.Errorf("command blocked by policy: %s", keyword)
+			}
+		}
+	}
+	return nil
+}
+
+func redactArtifactsMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		switch x := v.(type) {
+		case string:
+			out[k] = redactSensitiveText(x)
+		case map[string]any:
+			out[k] = redactArtifactsMap(x)
+		case []any:
+			arr := make([]any, 0, len(x))
+			for _, item := range x {
+				if m, ok := item.(map[string]any); ok {
+					arr = append(arr, redactArtifactsMap(m))
+				} else if s, ok := item.(string); ok {
+					arr = append(arr, redactSensitiveText(s))
+				} else {
+					arr = append(arr, item)
+				}
+			}
+			out[k] = arr
+		default:
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func redactSensitiveText(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return s
+	}
+	replacements := map[string]string{
+		"password=":      "password=[REDACTED]",
+		"token=":         "token=[REDACTED]",
+		"authorization:": "authorization: [REDACTED]",
+		"private_key":    "private_key:[REDACTED]",
+	}
+	out := s
+	lower := strings.ToLower(out)
+	for key, replacement := range replacements {
+		idx := strings.Index(lower, key)
+		if idx < 0 {
+			continue
+		}
+		end := strings.Index(out[idx:], "\n")
+		if end < 0 {
+			out = out[:idx] + replacement
+		} else {
+			out = out[:idx] + replacement + out[idx+end:]
+		}
+		lower = strings.ToLower(out)
+	}
+	return out
+}
+
+func resolveScriptContent(params map[string]any) string {
+	content := strings.TrimSpace(toString(params["script_content"]))
+	if content == "" {
+		content = strings.TrimSpace(toString(params["script"]))
+	}
+	return content
+}
+
+func scriptTimeoutSec(params map[string]any) int64 {
+	timeout := toInt64(params["timeout_sec"])
+	if timeout <= 0 {
+		timeout = 60
+	}
+	if timeout > 1800 {
+		timeout = 1800
+	}
+	return timeout
+}
+
+func executeHostScriptApply(ctx context.Context, h *handler, uid uint64, cc commandContext, _ string) (map[string]any, error) {
+	hostIDs := hostIDsFromParams(cc.Params)
+	if len(hostIDs) == 0 {
+		return nil, fmt.Errorf("host_ids is required")
+	}
+	script := resolveScriptContent(cc.Params)
+	if script == "" {
+		return nil, fmt.Errorf("script_content is required")
+	}
+	timeout := scriptTimeoutSec(cc.Params)
+	encoded := base64.StdEncoding.EncodeToString([]byte(script))
+	results := map[string]any{}
+	succeeded := 0
+	failed := 0
+
+	for _, hostID := range hostIDs {
+		key := strconv.FormatUint(hostID, 10)
+		var node model.Node
+		if err := h.svcCtx.DB.WithContext(ctx).First(&node, hostID).Error; err != nil {
+			results[key] = map[string]any{"stdout": "", "stderr": "host not found", "exit_code": 1}
+			failed++
+			continue
+		}
+		privateKey, passphrase, err := h.loadNodePrivateKey(ctx, &node)
+		if err != nil {
+			results[key] = map[string]any{"stdout": "", "stderr": err.Error(), "exit_code": 1}
+			failed++
+			continue
+		}
+		password := strings.TrimSpace(node.SSHPassword)
+		if strings.TrimSpace(privateKey) != "" {
+			password = ""
+		}
+		cli, err := sshclient.NewSSHClient(node.SSHUser, password, node.IP, node.Port, privateKey, passphrase)
+		if err != nil {
+			results[key] = map[string]any{"stdout": "", "stderr": err.Error(), "exit_code": 1}
+			failed++
+			continue
+		}
+		scriptDir := fmt.Sprintf("/tmp/opsx/%s/%d", cc.CommandID, hostID)
+		scriptPath := fmt.Sprintf("%s/run.sh", scriptDir)
+		cmd := fmt.Sprintf("mkdir -p %s && echo '%s' | base64 -d > %s && chmod 700 %s && timeout %d bash %s", scriptDir, encoded, scriptPath, scriptPath, timeout, scriptPath)
+		out, runErr := sshclient.RunCommand(cli, cmd)
+		_ = cli.Close()
+		if runErr != nil {
+			results[key] = map[string]any{"stdout": out, "stderr": runErr.Error(), "exit_code": 1, "script_path": scriptPath}
+			failed++
+			continue
+		}
+		results[key] = map[string]any{"stdout": out, "stderr": "", "exit_code": 0, "script_path": scriptPath}
+		succeeded++
+	}
+	return map[string]any{
+		"mode":         "script",
+		"script_path":  fmt.Sprintf("/tmp/opsx/%s/<host_id>/run.sh", cc.CommandID),
+		"target_count": len(hostIDs),
+		"succeeded":    succeeded,
+		"failed":       failed,
+		"results":      results,
+	}, nil
+}
+
+func (h *handler) loadNodePrivateKey(ctx context.Context, node *model.Node) (string, string, error) {
+	if node == nil || node.SSHKeyID == nil {
+		return "", "", nil
+	}
+	var key model.SSHKey
+	if err := h.svcCtx.DB.WithContext(ctx).
+		Select("id", "private_key", "passphrase", "encrypted").
+		Where("id = ?", uint64(*node.SSHKeyID)).
+		First(&key).Error; err != nil {
+		return "", "", err
+	}
+	passphrase := strings.TrimSpace(key.Passphrase)
+	if !key.Encrypted {
+		return strings.TrimSpace(key.PrivateKey), passphrase, nil
+	}
+	privateKey, err := utils.DecryptText(strings.TrimSpace(key.PrivateKey), config.CFG.Security.EncryptionKey)
+	if err != nil {
+		return "", "", fmt.Errorf("decrypt private key: %w", err)
+	}
+	return privateKey, passphrase, nil
 }

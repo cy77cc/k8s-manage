@@ -14,6 +14,7 @@ import (
 	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
 	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/model"
+	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
 	"github.com/cy77cc/k8s-manage/internal/utils"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -378,8 +379,8 @@ func (l *Logic) loadComposeHosts(ctx context.Context, nodeIDs []uint) ([]model.N
 		if err := l.svcCtx.DB.WithContext(ctx).First(&host, id).Error; err != nil {
 			return nil, fmt.Errorf("host node %d not found", id)
 		}
-		if strings.TrimSpace(host.IP) == "" {
-			return nil, fmt.Errorf("host node %d has empty ip", id)
+		if ok, reason := hostlogic.EvaluateOperationalEligibility(&host); !ok {
+			return nil, fmt.Errorf("host node %d unavailable: %s", id, reason)
 		}
 		hosts = append(hosts, host)
 	}

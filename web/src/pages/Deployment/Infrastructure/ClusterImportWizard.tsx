@@ -234,7 +234,7 @@ const ClusterImportWizard: React.FC = () => {
             onChange={(e) => setAuthMethod(e.target.value)}
             className="w-full"
           >
-            <Space direction="vertical" className="w-full" size="middle">
+            <Space orientation="vertical" className="w-full" size="middle">
               {(Object.keys(authMethodConfig) as AuthMethod[]).map((method) => {
                 const config = authMethodConfig[method];
                 return (
@@ -261,7 +261,7 @@ const ClusterImportWizard: React.FC = () => {
       <Alert
         type="info"
         className="mt-4"
-        message="如何选择？"
+        title="如何选择？"
         description={
           <ul className="list-disc pl-4 space-y-1">
             <li><strong>Kubeconfig</strong>: 从 ~/.kube/config 复制或上传文件</li>
@@ -461,7 +461,7 @@ const ClusterImportWizard: React.FC = () => {
           {validationResult.valid ? (
             <Alert
               type="success"
-              message="连接成功"
+              title="连接成功"
               description={
                 <Descriptions column={1} size="small" className="mt-2">
                   <Descriptions.Item label="API 地址">{validationResult.endpoint}</Descriptions.Item>
@@ -474,7 +474,7 @@ const ClusterImportWizard: React.FC = () => {
           ) : (
             <Alert
               type="error"
-              message="连接失败"
+              title="连接失败"
               description={
                 <div>
                   <p>{validationResult.message}</p>
@@ -501,7 +501,7 @@ const ClusterImportWizard: React.FC = () => {
         <Alert
           type="info"
           className="mt-4"
-          message='点击"测试连接"验证配置是否正确'
+          title='点击"测试连接"验证配置是否正确'
           showIcon
           icon={<InfoCircleOutlined />}
         />
@@ -538,7 +538,7 @@ const ClusterImportWizard: React.FC = () => {
         <Alert
           type="warning"
           className="mt-4"
-          message="注意"
+          title="注意"
           description="导入后，系统将定期同步集群信息。请确保 API Server 可持续访问。"
           showIcon
         />

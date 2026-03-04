@@ -9,6 +9,7 @@ import (
 	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
 	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/model"
+	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
 	"github.com/cy77cc/k8s-manage/internal/utils"
 )
 
@@ -56,6 +57,9 @@ func (l *Logic) pickComposeNode(ctx context.Context, targetID uint) (*model.Node
 	var node model.Node
 	if err := l.svcCtx.DB.WithContext(ctx).First(&node, links[0].HostID).Error; err != nil {
 		return nil, err
+	}
+	if ok, reason := hostlogic.EvaluateOperationalEligibility(&node); !ok {
+		return nil, fmt.Errorf("compose target node unavailable: %s", reason)
 	}
 	return &node, nil
 }

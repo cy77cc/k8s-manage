@@ -293,7 +293,7 @@ const ServiceProvisionPage: React.FC = () => {
 
                 <Card size="small" style={{ marginTop: 10, background: '#111827', border: '1px solid #243041' }} title={<Text style={{ color: '#cfd8e3' }}>模板变量</Text>}>
                   {detectedVars.length === 0 ? <Text type="secondary">未检测到模板变量（{'{{var}}'}）</Text> : null}
-                  <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space orientation="vertical" style={{ width: '100%' }}>
                     {detectedVars.map((item) => (
                       <Input
                         key={item.name}
@@ -345,7 +345,7 @@ const ServiceProvisionPage: React.FC = () => {
                 </div>
                 {(diagnosticsByTarget[activeTarget] || []).length > 0 ? (
                   <Card size="small" style={{ marginTop: 10, background: '#111827', border: '1px solid #243041' }} title={<Text style={{ color: '#cfd8e3' }}>诊断信息</Text>}>
-                    <Space direction="vertical" size={4}>
+                    <Space orientation="vertical" size={4}>
                       {(diagnosticsByTarget[activeTarget] || []).map((d, idx) => (
                         <Text key={`${d.code}-${idx}`} type={d.level === 'error' ? 'danger' : 'secondary'}>
                           [{d.level}] {d.code}: {d.message}

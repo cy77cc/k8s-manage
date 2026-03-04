@@ -21,6 +21,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({
     markAsRead,
     dismiss,
     confirm,
+    reject,
     markAllAsRead,
   } = useNotificationContext();
 
@@ -44,19 +45,23 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({
   const tabItems = [
     {
       key: 'all',
-      label: `全部 ${unreadCount.total > 0 ? `(${unreadCount.total})` : ''}`,
+      label: '全部',
     },
     {
       key: 'alert',
-      label: `告警 ${unreadCount.by_type.alert > 0 ? `(${unreadCount.by_type.alert})` : ''}`,
+      label: '告警',
     },
     {
       key: 'task',
-      label: `任务 ${unreadCount.by_type.task > 0 ? `(${unreadCount.by_type.task})` : ''}`,
+      label: '任务',
     },
     {
       key: 'system',
-      label: `系统 ${unreadCount.by_type.system > 0 ? `(${unreadCount.by_type.system})` : ''}`,
+      label: '系统',
+    },
+    {
+      key: 'approval',
+      label: '审批',
     },
   ];
 
@@ -100,6 +105,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({
           onMarkAsRead={markAsRead}
           onDismiss={dismiss}
           onConfirm={confirm}
+          onReject={reject}
           onClick={handleClick}
         />
       </div>

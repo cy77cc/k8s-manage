@@ -122,3 +122,8 @@ llm:
   model: "qwen3.5-plus"
   temperature: 0.7
   api_key: ${LLM_API_KEY}
+
+feature_flags:
+  host_health_diagnostics: true
+  host_maintenance_mode: true
+  ai_governed_host_execution: true
