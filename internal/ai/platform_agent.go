@@ -184,7 +184,8 @@ func (p *PlatformAgent) buildExecuteRequest(ctx context.Context, messages []*sch
 		RuntimeContext: map[string]any{
 			"scene": scene,
 		},
-		History: messages,
+		History:      messages,
+		EventEmitter: experts.ProgressEmitterFromContext(ctx),
 	}
 }
 

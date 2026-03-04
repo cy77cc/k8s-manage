@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Api } from '../../api';
-import type { AIMessage, AISession, EmbeddedRecommendation, ToolTrace } from '../../api';
+import type { AIMessage, AISession, EmbeddedRecommendation, SSEExpertProgressEvent, ToolTrace } from '../../api';
 
 const { Text, Paragraph } = Typography;
 
@@ -23,6 +23,7 @@ type StreamState = 'idle' | 'running' | 'timeout' | 'done' | 'error';
 type MessagePhase = 'awaiting_first_token' | 'streaming' | 'done' | 'error';
 type LocalMessage = AIMessage & { turnId?: string; phase?: MessagePhase };
 type ResultViewType = 'table' | 'chart' | 'topology' | 'raw';
+type ExpertProgressItem = { expert: string; status: 'running' | 'done'; task?: string; durationMs?: number };
 
 const extractResultData = (tracePayload: Record<string, any>) => {
   if (!tracePayload || typeof tracePayload !== 'object') return undefined;
@@ -197,6 +198,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [activeAnchorId, setActiveAnchorId] = useState('');
   const [pendingNewSessionId, setPendingNewSessionId] = useState('');
   const [branchingMessageId, setBranchingMessageId] = useState('');
+  const [expertProgress, setExpertProgress] = useState<ExpertProgressItem[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -422,6 +424,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setStreamNotice('');
     setLastPrompt(messageText);
     setActiveAssistantMessageId(assistantMessageID);
+    setExpertProgress([]);
 
     let latestSession: AISession | undefined;
     let activeTurnID = '';
@@ -509,6 +512,28 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               type: 'tool_missing',
               payload: payload as Record<string, any>,
               timestamp: new Date().toISOString(),
+            });
+          },
+          onExpertProgress: (progress: SSEExpertProgressEvent) => {
+            if (!progress?.expert) return;
+            setExpertProgress((prev) => {
+              const existing = prev.find((item) => item.expert === progress.expert);
+              if (!existing) {
+                return [...prev, {
+                  expert: progress.expert,
+                  status: progress.status,
+                  task: progress.task,
+                  durationMs: progress.duration_ms,
+                }];
+              }
+              return prev.map((item) => item.expert === progress.expert
+                ? {
+                  ...item,
+                  status: progress.status,
+                  task: progress.task || item.task,
+                  durationMs: progress.duration_ms ?? item.durationMs,
+                }
+                : item);
             });
           },
           onDone: (done) => {
@@ -1074,6 +1099,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                 ),
                               }]}
                             />
+                          </div>
+                        ) : null}
+
+                        {isAssistant && expertProgress.length > 0 ? (
+                          <div className="ai-expert-progress-list">
+                            {expertProgress.map((item) => (
+                              <div key={item.expert} className={`ai-expert-progress-item ${item.status}`}>
+                                <span className="ai-expert-progress-icon" aria-hidden />
+                                <span className="ai-expert-progress-text">
+                                  {item.expert}
+                                  {item.task ? ` · ${item.task}` : ''}
+                                  {item.status === 'done' && item.durationMs ? ` (${item.durationMs}ms)` : ''}
+                                </span>
+                              </div>
+                            ))}
                           </div>
                         ) : null}
 

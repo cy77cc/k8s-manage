@@ -3,8 +3,8 @@ version: "1.0"
 mappings:
   deployment:clusters:
     primary_expert: k8s_expert
-    helper_experts: [monitor_expert]
-    strategy: sequential
+    optional_helpers: [monitor_expert]
+    strategy: primary_led
     context_hints: [cluster_id]
     description: "集群管理场景"
     keywords: ["cluster", "k8s", "集群"]
@@ -12,8 +12,8 @@ mappings:
 
   deployment:credentials:
     primary_expert: security_expert
-    helper_experts: [audit_expert]
-    strategy: sequential
+    optional_helpers: [audit_expert]
+    strategy: primary_led
     context_hints: [credential_id]
     description: "凭证管理场景"
     keywords: ["credential", "凭证"]
@@ -21,8 +21,8 @@ mappings:
 
   deployment:hosts:
     primary_expert: host_expert
-    helper_experts: [os_expert]
-    strategy: sequential
+    optional_helpers: [os_expert]
+    strategy: primary_led
     context_hints: [host_id]
     description: "主机管理场景"
     keywords: ["host", "ssh", "主机"]
@@ -30,8 +30,8 @@ mappings:
 
   deployment:targets:
     primary_expert: deploy_expert
-    helper_experts: [k8s_expert]
-    strategy: sequential
+    optional_helpers: [k8s_expert]
+    strategy: primary_led
     context_hints: [target_id, env]
     description: "部署目标场景"
     keywords: ["target", "部署目标"]
@@ -39,8 +39,8 @@ mappings:
 
   deployment:releases:
     primary_expert: deploy_expert
-    helper_experts: [cicd_expert]
-    strategy: sequential
+    optional_helpers: [cicd_expert]
+    strategy: primary_led
     context_hints: [service_id, cluster_id, env]
     description: "发布管理场景"
     keywords: ["release", "发布"]
@@ -48,8 +48,8 @@ mappings:
 
   deployment:approvals:
     primary_expert: audit_expert
-    helper_experts: [security_expert]
-    strategy: sequential
+    optional_helpers: [security_expert]
+    strategy: primary_led
     context_hints: [release_id]
     description: "审批场景"
     keywords: ["approval", "审批"]
@@ -57,7 +57,7 @@ mappings:
 
   deployment:topology:
     primary_expert: topology_expert
-    helper_experts: [service_expert]
+    optional_helpers: [service_expert]
     strategy: single
     context_hints: [service_id]
     description: "拓扑场景"
@@ -66,8 +66,8 @@ mappings:
 
   deployment:metrics:
     primary_expert: monitor_expert
-    helper_experts: [k8s_expert]
-    strategy: sequential
+    optional_helpers: [k8s_expert]
+    strategy: primary_led
     context_hints: [service_id]
     description: "指标场景"
     keywords: ["metric", "指标"]
@@ -75,7 +75,7 @@ mappings:
 
   deployment:audit:
     primary_expert: audit_expert
-    helper_experts: [security_expert]
+    optional_helpers: [security_expert]
     strategy: single
     context_hints: [user_id]
     description: "审计场景"
@@ -84,8 +84,8 @@ mappings:
 
   deployment:aiops:
     primary_expert: monitor_expert
-    helper_experts: [k8s_expert, service_expert]
-    strategy: sequential
+    optional_helpers: [k8s_expert, service_expert]
+    strategy: primary_led
     context_hints: [cluster_id, service_id]
     description: "智能运维场景"
     keywords: ["aiops", "智能运维"]
@@ -93,7 +93,7 @@ mappings:
 
   services:list:
     primary_expert: service_expert
-    helper_experts: [topology_expert]
+    optional_helpers: [topology_expert]
     strategy: single
     context_hints: [service_id]
     description: "服务列表场景"
@@ -102,8 +102,8 @@ mappings:
 
   services:detail:
     primary_expert: service_expert
-    helper_experts: [k8s_workload_expert, topology_expert]
-    strategy: sequential
+    optional_helpers: [k8s_workload_expert, topology_expert]
+    strategy: primary_led
     context_hints: [service_id]
     description: "服务详情场景"
     keywords: ["service", "详情"]
@@ -111,8 +111,8 @@ mappings:
 
   services:provision:
     primary_expert: service_expert
-    helper_experts: [deploy_expert]
-    strategy: sequential
+    optional_helpers: [deploy_expert]
+    strategy: primary_led
     context_hints: [project_id]
     description: "服务创建场景"
     keywords: ["provision", "创建服务"]
@@ -120,8 +120,8 @@ mappings:
 
   services:deploy:
     primary_expert: deploy_expert
-    helper_experts: [k8s_expert, cicd_expert]
-    strategy: sequential
+    optional_helpers: [k8s_expert, cicd_expert]
+    strategy: primary_led
     context_hints: [service_id, target_id]
     description: "服务部署场景"
     keywords: ["deploy", "部署"]
@@ -129,7 +129,7 @@ mappings:
 
   services:catalog:
     primary_expert: service_expert
-    helper_experts: [topology_expert]
+    optional_helpers: [topology_expert]
     strategy: single
     context_hints: [category_id]
     description: "服务目录场景"
@@ -138,8 +138,8 @@ mappings:
 
   governance:users:
     primary_expert: security_expert
-    helper_experts: [audit_expert]
-    strategy: sequential
+    optional_helpers: [audit_expert]
+    strategy: primary_led
     context_hints: [user_id]
     description: "用户治理场景"
     keywords: ["user", "用户"]
@@ -147,8 +147,8 @@ mappings:
 
   governance:roles:
     primary_expert: security_expert
-    helper_experts: [audit_expert]
-    strategy: sequential
+    optional_helpers: [audit_expert]
+    strategy: primary_led
     context_hints: [role_id]
     description: "角色治理场景"
     keywords: ["role", "角色"]
@@ -156,8 +156,8 @@ mappings:
 
   governance:permissions:
     primary_expert: security_expert
-    helper_experts: [audit_expert]
-    strategy: sequential
+    optional_helpers: [audit_expert]
+    strategy: primary_led
     context_hints: [user_id, resource, action]
     description: "权限治理场景"
     keywords: ["permission", "权限"]

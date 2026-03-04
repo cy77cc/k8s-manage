@@ -62,6 +62,13 @@ func LoadSceneMappings(path string) (*SceneMappingsFile, error) {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, err
 	}
+	for key, item := range cfg.Mappings {
+		// Backward compatibility: old helper_experts automatically maps to optional_helpers.
+		if len(item.OptionalHelpers) == 0 && len(item.HelperExperts) > 0 {
+			item.OptionalHelpers = append([]string{}, item.HelperExperts...)
+		}
+		cfg.Mappings[key] = item
+	}
 	if len(cfg.Mappings) == 0 {
 		return nil, fmt.Errorf("scene mappings config has no mappings")
 	}

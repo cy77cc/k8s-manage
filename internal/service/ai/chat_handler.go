@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/cy77cc/k8s-manage/internal/ai/experts"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
@@ -483,6 +484,9 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 				"param_resolution": pm["param_resolution"],
 			})
 		}
+	})
+	ctx = experts.WithProgressEmitter(ctx, func(event string, payload any) {
+		_ = emit(event, toPayloadMap(payload))
 	})
 	return ctx
 }

@@ -17,10 +17,10 @@ func TestOrchestratorExecuteSequential(t *testing.T) {
 	out, err := orch.Execute(context.Background(), &ExecuteRequest{
 		Message: "service unavailable",
 		Decision: &RouteDecision{
-			PrimaryExpert: "service_expert",
-			HelperExperts: []string{"k8s_expert"},
-			Strategy:      StrategySequential,
-			Source:        "scene",
+			PrimaryExpert:   "service_expert",
+			OptionalHelpers: []string{"k8s_expert"},
+			Strategy:        StrategySequential,
+			Source:          "scene",
 		},
 	})
 	if err != nil {
@@ -45,10 +45,10 @@ func TestOrchestratorExecuteParallel(t *testing.T) {
 	out, err := orch.Execute(context.Background(), &ExecuteRequest{
 		Message: "host issue",
 		Decision: &RouteDecision{
-			PrimaryExpert: "host_expert",
-			HelperExperts: []string{"monitor_expert"},
-			Strategy:      StrategyParallel,
-			Source:        "keyword",
+			PrimaryExpert:   "host_expert",
+			OptionalHelpers: []string{"monitor_expert"},
+			Strategy:        StrategyParallel,
+			Source:          "keyword",
 		},
 		RuntimeContext: map[string]any{"timeout_ms": 5000},
 	})

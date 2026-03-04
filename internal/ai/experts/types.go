@@ -66,29 +66,31 @@ type RouteRequest struct {
 }
 
 type RouteDecision struct {
-	PrimaryExpert string
-	HelperExperts []string
-	Strategy      ExecutionStrategy
-	Confidence    float64
-	Source        string
+	PrimaryExpert   string
+	OptionalHelpers []string
+	Strategy        ExecutionStrategy
+	Confidence      float64
+	Source          string
 }
 
 type ExecutionStrategy string
 
 const (
 	StrategySingle     ExecutionStrategy = "single"
+	StrategyPrimaryLed ExecutionStrategy = "primary_led"
 	StrategySequential ExecutionStrategy = "sequential"
 	StrategyParallel   ExecutionStrategy = "parallel"
 )
 
 type SceneMapping struct {
-	PrimaryExpert string            `yaml:"primary_expert"`
-	HelperExperts []string          `yaml:"helper_experts"`
-	Strategy      ExecutionStrategy `yaml:"strategy"`
-	ContextHints  []string          `yaml:"context_hints"`
-	Description   string            `yaml:"description"`
-	Keywords      []string          `yaml:"keywords"`
-	Tools         []string          `yaml:"tools"`
+	PrimaryExpert   string            `yaml:"primary_expert"`
+	OptionalHelpers []string          `yaml:"optional_helpers"`
+	HelperExperts   []string          `yaml:"helper_experts,omitempty"` // legacy field compatibility
+	Strategy        ExecutionStrategy `yaml:"strategy"`
+	ContextHints    []string          `yaml:"context_hints"`
+	Description     string            `yaml:"description"`
+	Keywords        []string          `yaml:"keywords"`
+	Tools           []string          `yaml:"tools"`
 }
 
 type SceneMappingsFile struct {
@@ -101,10 +103,12 @@ type ExecuteRequest struct {
 	Decision       *RouteDecision
 	RuntimeContext map[string]any
 	History        []*schema.Message
+	EventEmitter   ProgressEmitter
 }
 
 type ExpertTrace struct {
 	ExpertName string
+	Role       string
 	Input      string
 	Output     string
 	Duration   time.Duration
@@ -135,13 +139,32 @@ type ExpertResult struct {
 	Duration   time.Duration
 }
 
+type ExpertProgressEvent struct {
+	Expert     string `json:"expert"`
+	Status     string `json:"status"`
+	Task       string `json:"task,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+}
+
+type ProgressEmitter func(event string, payload any)
+
+type HelperRequest struct {
+	ExpertName string `json:"expert_name"`
+	Task       string `json:"task"`
+}
+
+type PrimaryDecision struct {
+	NeedHelpers    bool            `json:"need_helpers"`
+	HelperRequests []HelperRequest `json:"helper_requests,omitempty"`
+	DirectAnswer   string          `json:"direct_answer,omitempty"`
+}
+
 type AggregationMode string
 
 const (
 	AggregationTemplate AggregationMode = "template"
 	AggregationLLM      AggregationMode = "llm"
 )
-
 
 type AggregatorLLM interface {
 	Generate(ctx context.Context, messages []*schema.Message, opts ...model.Option) (*schema.Message, error)

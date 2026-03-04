@@ -200,6 +200,14 @@ interface SSEThinkingEvent {
   turn_id?: string;
 }
 
+export interface SSEExpertProgressEvent {
+  expert: string;
+  status: 'running' | 'done';
+  task?: string;
+  duration_ms?: number;
+  turn_id?: string;
+}
+
 export interface AIChatStreamHandlers {
   onMeta?: (payload: SSEMetaEvent) => void;
   onDelta?: (payload: SSEDeltaEvent) => void;
@@ -211,6 +219,7 @@ export interface AIChatStreamHandlers {
   onApprovalRequired?: (payload: ApprovalTicket & { turn_id?: string; approval_required?: boolean; previewDiff?: string }) => void;
   onToolIntentUnresolved?: (payload: { turn_id?: string; tool?: string; message?: string }) => void;
   onHeartbeat?: (payload: { turn_id?: string; status?: string }) => void;
+  onExpertProgress?: (payload: SSEExpertProgressEvent) => void;
 }
 
 export type RiskLevel = 'low' | 'medium' | 'high';
@@ -450,6 +459,8 @@ export const aiApi = {
       } else if (eventType === 'heartbeat') {
         handlers.onHeartbeat?.(payload as { turn_id?: string; status?: string });
         touchActivity();
+      } else if (eventType === 'expert_progress') {
+        handlers.onExpertProgress?.(payload as SSEExpertProgressEvent);
       }
     };
 

@@ -59,14 +59,14 @@ func (r *HybridRouter) routeByScene(scene string) *RouteDecision {
 	}
 	strategy := item.Strategy
 	if strategy == "" {
-		strategy = StrategySequential
+		strategy = StrategyPrimaryLed
 	}
 	return &RouteDecision{
-		PrimaryExpert: item.PrimaryExpert,
-		HelperExperts: append([]string{}, item.HelperExperts...),
-		Strategy:      strategy,
-		Confidence:    1.0,
-		Source:        "scene",
+		PrimaryExpert:   item.PrimaryExpert,
+		OptionalHelpers: append([]string{}, item.OptionalHelpers...),
+		Strategy:        strategy,
+		Confidence:      1.0,
+		Source:          "scene",
 	}
 }
 
@@ -86,11 +86,11 @@ func (r *HybridRouter) routeByKeywords(content string) *RouteDecision {
 		helpers = append(helpers, matches[i].Expert.Name)
 	}
 	return &RouteDecision{
-		PrimaryExpert: matches[0].Expert.Name,
-		HelperExperts: helpers,
-		Strategy:      StrategySingle,
-		Confidence:    clampScore(matches[0].Score / 5.0),
-		Source:        "keyword",
+		PrimaryExpert:   matches[0].Expert.Name,
+		OptionalHelpers: helpers,
+		Strategy:        StrategySingle,
+		Confidence:      clampScore(matches[0].Score / 5.0),
+		Source:          "keyword",
 	}
 }
 

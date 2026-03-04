@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatInterface from './ChatInterface';
 
@@ -47,6 +47,28 @@ describe('ChatInterface', () => {
 
     await waitFor(() => expect(mockApi.ai.getCurrentSession).toHaveBeenCalledWith('scene:services'));
     await waitFor(() => expect(mockApi.ai.getSessions).toHaveBeenCalledWith('scene:services'));
+  });
+
+  it('shows expert progress while streaming helpers', async () => {
+    mockApi.ai.chatStream.mockImplementationOnce(async (_params: any, handlers: any) => {
+      handlers.onMeta?.({ sessionId: 's1', createdAt: new Date().toISOString(), turn_id: 't1' });
+      handlers.onExpertProgress?.({ expert: 'k8s_expert', status: 'running', task: '检查Pod状态', turn_id: 't1' });
+      handlers.onExpertProgress?.({ expert: 'k8s_expert', status: 'done', duration_ms: 120, turn_id: 't1' });
+      handlers.onDone?.({
+        session: { id: 's1', title: 'AI Session', messages: [], createdAt: '', updatedAt: '' },
+        stream_state: 'ok',
+        turn_id: 't1',
+      });
+    });
+
+    render(<ChatInterface scene="scene:services" />);
+    const inputs = screen.getAllByPlaceholderText('请输入您的问题...');
+    const input = inputs[inputs.length - 1];
+    fireEvent.change(input, { target: { value: '分析服务状态' } });
+    const sendButtons = screen.getAllByRole('button', { name: /发送/ });
+    fireEvent.click(sendButtons[sendButtons.length - 1]);
+
+    await waitFor(() => expect(screen.getByText(/k8s_expert/)).toBeInTheDocument());
   });
 
 });

@@ -19,7 +19,7 @@ func TestExpertExecutorStreamStepFallback(t *testing.T) {
 	stream, err := exec.StreamStep(context.Background(), &ExecutionStep{
 		ExpertName: "service_expert",
 		Task:       "analyze service",
-	}, nil, "服务不可用")
+	}, &ExecuteRequest{Message: "服务不可用"})
 	if err != nil {
 		t.Fatalf("stream step: %v", err)
 	}
@@ -49,10 +49,10 @@ func TestOrchestratorStreamExecuteSequential(t *testing.T) {
 	stream, err := orch.StreamExecute(context.Background(), &ExecuteRequest{
 		Message: "服务发布失败",
 		Decision: &RouteDecision{
-			PrimaryExpert: "service_expert",
-			HelperExperts: []string{"k8s_expert"},
-			Strategy:      StrategySequential,
-			Source:        "scene",
+			PrimaryExpert:   "service_expert",
+			OptionalHelpers: []string{"k8s_expert"},
+			Strategy:        StrategySequential,
+			Source:          "scene",
 		},
 		History: []*schema.Message{},
 	})

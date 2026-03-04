@@ -70,6 +70,9 @@ mappings:
 	if sceneDecision.Source != "scene" || sceneDecision.PrimaryExpert != "service_expert" {
 		t.Fatalf("unexpected scene decision: %#v", sceneDecision)
 	}
+	if len(sceneDecision.OptionalHelpers) != 1 || sceneDecision.OptionalHelpers[0] != "k8s_expert" {
+		t.Fatalf("legacy helper_experts should map to optional_helpers: %#v", sceneDecision)
+	}
 
 	keywordDecision := router.Route(context.Background(), &RouteRequest{Message: "service issue"})
 	if keywordDecision.Source != "keyword" || keywordDecision.PrimaryExpert != "service_expert" {
