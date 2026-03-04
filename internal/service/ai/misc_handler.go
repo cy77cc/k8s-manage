@@ -53,6 +53,35 @@ func (h *handler) getSession(c *gin.Context) {
 	httpx.OK(c, session)
 }
 
+func (h *handler) branchSession(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		MessageID string `json:"messageId"`
+		Title     string `json:"title"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BindErr(c, err)
+		return
+	}
+	session, err := h.store.branchSession(uid, c.Param("id"), req.MessageID, req.Title)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Fail(c, xcode.NotFound, "session not found")
+		case strings.Contains(err.Error(), "anchor message not found"):
+			httpx.Fail(c, xcode.ParamError, "anchor message not found")
+		default:
+			httpx.Fail(c, xcode.ServerError, err.Error())
+		}
+		return
+	}
+	httpx.OK(c, session)
+}
+
 func (h *handler) deleteSession(c *gin.Context) {
 	uid, ok := uidFromContext(c)
 	if !ok {

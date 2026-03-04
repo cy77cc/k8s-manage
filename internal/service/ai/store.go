@@ -82,6 +82,94 @@ func (s *memoryStore) appendMessage(userID uint64, scene, sessionID string, mess
 	return loaded, nil
 }
 
+func (s *memoryStore) branchSession(userID uint64, sourceSessionID, anchorMessageID, title string) (*aiSession, error) {
+	if !s.dbEnabled() {
+		return nil, errors.New("db unavailable")
+	}
+	sourceID := strings.TrimSpace(sourceSessionID)
+	if sourceID == "" {
+		return nil, errors.New("source session id is required")
+	}
+	source, ok := s.getSession(userID, sourceID)
+	if !ok || source == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	cutoff := len(source.Messages) - 1
+	anchorID := strings.TrimSpace(anchorMessageID)
+	if anchorID != "" {
+		found := -1
+		for i := range source.Messages {
+			if strings.TrimSpace(toString(source.Messages[i]["id"])) == anchorID {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			return nil, errors.New("anchor message not found")
+		}
+		cutoff = found
+	}
+	if cutoff < 0 {
+		return nil, errors.New("source session has no messages")
+	}
+
+	newID := fmt.Sprintf("sess-%d", time.Now().UnixNano())
+	newTitle := normalizeSessionTitle(title)
+	if newTitle == "" {
+		base := normalizeSessionTitle(source.Title)
+		if base == "" {
+			base = defaultAISessionTitle
+		}
+		newTitle = normalizeSessionTitle("分支: " + base)
+		if newTitle == "" {
+			newTitle = "Branch Session"
+		}
+	}
+	now := time.Now()
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		sessionModel := model.AIChatSession{
+			ID:        newID,
+			UserID:    userID,
+			Scene:     source.Scene,
+			Title:     newTitle,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if err := tx.Create(&sessionModel).Error; err != nil {
+			return err
+		}
+		for i := 0; i <= cutoff; i++ {
+			msg := source.Messages[i]
+			msgTime := now
+			if t, ok := msg["timestamp"].(time.Time); ok && !t.IsZero() {
+				msgTime = t
+			}
+			msgModel := model.AIChatMessage{
+				ID:        fmt.Sprintf("msg-%d-%d", time.Now().UnixNano(), i+1),
+				SessionID: newID,
+				Role:      strings.TrimSpace(toString(msg["role"])),
+				Content:   toString(msg["content"]),
+				Thinking:  toString(msg["thinking"]),
+				CreatedAt: msgTime,
+			}
+			if err := tx.Create(&msgModel).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	branched := s.mustLoadSession(userID, newID)
+	if branched == nil {
+		return nil, errors.New("branch session created but failed to load")
+	}
+	return branched, nil
+}
+
 func (s *memoryStore) getOrCreateCurrentSessionID(userID uint64, scene string) string {
 	if !s.dbEnabled() {
 		return ""
@@ -250,12 +338,134 @@ func toolParamKey(userID uint64, scene, tool string) string {
 	return fmt.Sprintf("%d:%s:%s", userID, normalizeScene(scene), strings.TrimSpace(tool))
 }
 
+func aliasKey(userID uint64, scene string) string {
+	return fmt.Sprintf("%d:%s", userID, normalizeScene(scene))
+}
+
+func templateKey(userID uint64, scene string) string {
+	return fmt.Sprintf("%d:%s", userID, normalizeScene(scene))
+}
+
+func referencedContextKey(userID uint64, scene string) string {
+	return fmt.Sprintf("%d:%s", userID, normalizeScene(scene))
+}
+
 func normalizeScene(scene string) string {
 	v := strings.TrimSpace(scene)
 	if v == "" {
 		return "global"
 	}
 	return v
+}
+
+func (s *memoryStore) listAliases(userID uint64, scene string) map[string]string {
+	if s == nil {
+		return map[string]string{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	raw := s.commandAliases[aliasKey(userID, scene)]
+	out := map[string]string{}
+	for k, v := range raw {
+		out[k] = v
+	}
+	return out
+}
+
+func (s *memoryStore) saveAlias(userID uint64, scene, alias, command string) {
+	if s == nil || strings.TrimSpace(alias) == "" || strings.TrimSpace(command) == "" {
+		return
+	}
+	key := aliasKey(userID, scene)
+	s.mu.Lock()
+	if s.commandAliases[key] == nil {
+		s.commandAliases[key] = map[string]string{}
+	}
+	s.commandAliases[key][strings.TrimSpace(alias)] = strings.TrimSpace(command)
+	s.mu.Unlock()
+}
+
+func (s *memoryStore) deleteAlias(userID uint64, scene, alias string) {
+	if s == nil || strings.TrimSpace(alias) == "" {
+		return
+	}
+	key := aliasKey(userID, scene)
+	s.mu.Lock()
+	if s.commandAliases[key] != nil {
+		delete(s.commandAliases[key], strings.TrimSpace(alias))
+	}
+	s.mu.Unlock()
+}
+
+func (s *memoryStore) listTemplates(userID uint64, scene string) map[string]map[string]any {
+	if s == nil {
+		return map[string]map[string]any{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	raw := s.commandTemplates[templateKey(userID, scene)]
+	out := map[string]map[string]any{}
+	for name, params := range raw {
+		cp := map[string]any{}
+		for k, v := range params {
+			cp[k] = v
+		}
+		out[name] = cp
+	}
+	return out
+}
+
+func (s *memoryStore) saveTemplate(userID uint64, scene, name string, params map[string]any) {
+	if s == nil || strings.TrimSpace(name) == "" || len(params) == 0 {
+		return
+	}
+	key := templateKey(userID, scene)
+	cp := map[string]any{}
+	for k, v := range params {
+		cp[k] = v
+	}
+	s.mu.Lock()
+	if s.commandTemplates[key] == nil {
+		s.commandTemplates[key] = map[string]map[string]any{}
+	}
+	s.commandTemplates[key][strings.TrimSpace(name)] = cp
+	s.mu.Unlock()
+}
+
+func (s *memoryStore) rememberContext(userID uint64, scene string, ctx map[string]any) {
+	if s == nil || len(ctx) == 0 {
+		return
+	}
+	key := referencedContextKey(userID, scene)
+	s.mu.Lock()
+	if s.referencedContext[key] == nil {
+		s.referencedContext[key] = map[string]any{}
+	}
+	for k, v := range ctx {
+		if strings.TrimSpace(k) == "" || v == nil {
+			continue
+		}
+		if strings.TrimSpace(toString(v)) == "" {
+			continue
+		}
+		s.referencedContext[key][k] = v
+	}
+	s.mu.Unlock()
+}
+
+func (s *memoryStore) getRememberedContext(userID uint64, scene string) map[string]any {
+	if s == nil {
+		return map[string]any{}
+	}
+	key := referencedContextKey(userID, scene)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	raw := s.referencedContext[key]
+	out := map[string]any{}
+	for k, v := range raw {
+		out[k] = v
+	}
+	return out
 }
 
 type toolMemoryAccessor struct {

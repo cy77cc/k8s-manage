@@ -237,3 +237,23 @@ func (h *handler) findMeta(name string) (tools.ToolMeta, bool) {
 func strconvFormatInt(v int64) string {
 	return fmt.Sprintf("%d", v)
 }
+
+func (h *handler) toolParamHints(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	name := strings.TrimSpace(c.Param("name"))
+	meta, ok := h.findMeta(name)
+	if !ok {
+		httpx.Fail(c, xcode.NotFound, "tool not found")
+		return
+	}
+	if !h.hasPermission(uid, meta.Permission) {
+		httpx.Fail(c, xcode.Forbidden, "permission denied")
+		return
+	}
+	resp := tools.ResolveToolParamHints(c.Request.Context(), tools.PlatformDeps{DB: h.svcCtx.DB}, meta)
+	httpx.OK(c, resp)
+}

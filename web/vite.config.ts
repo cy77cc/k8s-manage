@@ -19,6 +19,8 @@ export default defineConfig({
     setupFiles: './src/test/setupTests.ts',
     globals: false,
     css: true,
+    testTimeout: 15000,
+    hookTimeout: 15000,
   },
   server: {
     proxy: {

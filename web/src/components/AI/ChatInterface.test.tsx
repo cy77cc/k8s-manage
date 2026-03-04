@@ -7,6 +7,7 @@ const mockApi = vi.hoisted(() => ({
     getSessionDetail: vi.fn(),
     getCurrentSession: vi.fn(),
     getSessions: vi.fn(),
+    branchSession: vi.fn(),
     deleteSession: vi.fn(),
     updateSessionTitle: vi.fn(),
     chatStream: vi.fn(),
@@ -26,6 +27,7 @@ describe('ChatInterface', () => {
     mockApi.ai.getCurrentSession.mockResolvedValue({ data: null });
     mockApi.ai.getSessions.mockResolvedValue({ data: [] });
     mockApi.ai.getSessionDetail.mockResolvedValue({ data: { id: 's1', title: 'AI Session', messages: [], createdAt: '', updatedAt: '' } });
+    mockApi.ai.branchSession.mockResolvedValue({ data: { id: 's2', title: '分支会话', messages: [], createdAt: '', updatedAt: '' } });
     mockApi.ai.deleteSession.mockResolvedValue({ data: true });
     mockApi.ai.updateSessionTitle.mockResolvedValue({ data: { id: 's1', title: 'AI Session', updatedAt: '' } });
     mockApi.ai.chatStream.mockResolvedValue(undefined);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Card, Input, Modal, Space, Tag, Typography, message } from 'antd';
+import { Alert, AutoComplete, Button, Card, Input, Modal, Space, Tag, Typography, message } from 'antd';
 import { Api } from '../../api';
-import type { AICommandHistoryItem, AICommandResult } from '../../api';
+import type { AICapability, AICommandHistoryItem, AICommandResult, AICommandSuggestion } from '../../api';
 
 const { Paragraph, Text } = Typography;
 
@@ -11,7 +11,8 @@ interface CommandPanelProps {
 
 const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
   const [command, setCommand] = useState('');
-  const [suggestions, setSuggestions] = useState<Array<{ command: string; hint?: string }>>([]);
+  const [suggestions, setSuggestions] = useState<AICommandSuggestion[]>([]);
+  const [sceneTools, setSceneTools] = useState<AICapability[]>([]);
   const [preview, setPreview] = useState<AICommandResult | null>(null);
   const [history, setHistory] = useState<AICommandHistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -20,10 +21,39 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
   const [detail, setDetail] = useState<{ record: AICommandHistoryItem; audit_events: any[] } | null>(null);
   const [lastPreviewParams, setLastPreviewParams] = useState<Record<string, any> | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [aliasName, setAliasName] = useState('');
+  const [customAliases, setCustomAliases] = useState<Record<string, string>>({});
+  const [templateName, setTemplateName] = useState('');
+  const [templates, setTemplates] = useState<Record<string, Record<string, any>>>({});
+
+  const sceneKey = scene.replace(/^scene:/, '');
 
   const loadSuggestions = async () => {
-    const res = await Api.ai.getCommandSuggestions();
+    const res = await Api.ai.getCommandSuggestions({ scene: sceneKey });
     setSuggestions(res.data || []);
+  };
+
+  const loadSceneTools = async () => {
+    try {
+      const res = await Api.ai.getSceneTools(sceneKey);
+      setSceneTools(res.data?.tools || []);
+    } catch {
+      setSceneTools([]);
+    }
+  };
+
+  const loadAliasesAndTemplates = async () => {
+    try {
+      const [aliasRes, templateRes] = await Promise.all([
+        Api.ai.getCommandAliases(sceneKey),
+        Api.ai.getCommandTemplates(sceneKey),
+      ]);
+      setCustomAliases(aliasRes.data?.aliases || {});
+      setTemplates(templateRes.data?.templates || {});
+    } catch {
+      setCustomAliases({});
+      setTemplates({});
+    }
   };
 
   const loadHistory = async () => {
@@ -34,7 +64,9 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
   useEffect(() => {
     void loadSuggestions();
     void loadHistory();
-  }, []);
+    void loadSceneTools();
+    void loadAliasesAndTemplates();
+  }, [scene]);
 
   const pickParams = (p: AICommandResult | null): Record<string, any> => {
     if (!p) return {};
@@ -70,12 +102,38 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
     setLoading(true);
     try {
       const prev = pickParams(preview);
-      const res = await Api.ai.previewCommand({ command: command.trim(), scene });
+      const res = await Api.ai.previewCommand({ command: command.trim(), scene, params: templateName ? { template: templateName } : undefined });
       setLastPreviewParams(prev);
       setPreview(res.data);
     } finally {
       setLoading(false);
     }
+  };
+
+  const saveAlias = async () => {
+    if (!aliasName.trim() || !command.trim()) {
+      message.warning('请填写别名与命令');
+      return;
+    }
+    await Api.ai.saveCommandAlias({ scene: sceneKey, alias: aliasName.trim(), command: command.trim() });
+    setAliasName('');
+    await loadAliasesAndTemplates();
+    await loadSuggestions();
+  };
+
+  const saveTemplate = async () => {
+    if (!templateName.trim()) {
+      message.warning('请填写模板名');
+      return;
+    }
+    const params = pickParams(preview);
+    if (Object.keys(params).length === 0) {
+      message.warning('当前没有可保存的参数');
+      return;
+    }
+    await Api.ai.saveCommandTemplate({ scene: sceneKey, name: templateName.trim(), params });
+    await loadAliasesAndTemplates();
+    message.success('参数模板已保存');
   };
 
   const handleExecute = async () => {
@@ -116,17 +174,45 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
 
   const currentParams = pickParams(preview);
   const paramDiff = buildParamDiff(lastPreviewParams || {}, currentParams);
+  const autoCompleteOptions = suggestions
+    .filter((item) => !command.trim() || item.command.toLowerCase().includes(command.trim().toLowerCase()))
+    .slice(0, 8)
+    .map((item) => ({
+      value: item.command,
+      label: (
+        <Space direction="vertical" size={0}>
+          <Text code>{item.command}</Text>
+          <Text type="secondary">{item.hint || ''}</Text>
+        </Space>
+      ),
+    }));
+
+  const groupedTools = sceneTools.reduce<Record<string, AICapability[]>>((acc, tool) => {
+    const name = tool.name || '';
+    const prefix = name.includes('_') ? name.split('_')[0] : 'misc';
+    if (!acc[prefix]) {
+      acc[prefix] = [];
+    }
+    acc[prefix].push(tool);
+    return acc;
+  }, {});
 
   return (
     <Space className="ai-command-panel-root" orientation="vertical" style={{ width: '100%' }} size={12}>
       <Card size="small" title="命令输入">
         <Space.Compact style={{ width: '100%' }}>
-          <Input
+          <AutoComplete
             value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            placeholder="例如: ops.aggregate.status limit=5"
-            onPressEnter={() => void handlePreview()}
-          />
+            options={autoCompleteOptions}
+            style={{ width: '100%' }}
+            onChange={(value) => setCommand(value)}
+            onSelect={(value) => setCommand(value)}
+          >
+            <Input
+              placeholder="例如: ops.aggregate.status limit=5"
+              onPressEnter={() => void handlePreview()}
+            />
+          </AutoComplete>
           <Button type="primary" loading={loading} onClick={() => void handlePreview()}>预览</Button>
         </Space.Compact>
         <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
@@ -143,11 +229,60 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ scene }) => {
             </div>
           ))}
         </div>
+        <Space.Compact style={{ width: '100%', marginTop: 12 }}>
+          <Input value={aliasName} onChange={(e) => setAliasName(e.target.value)} placeholder="保存当前命令为别名，如: rel" />
+          <Button onClick={() => void saveAlias()}>保存别名</Button>
+        </Space.Compact>
+        {Object.keys(customAliases).length > 0 ? (
+          <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {Object.entries(customAliases).map(([alias, target]) => (
+              <Tag key={alias} onClick={() => setCommand(alias)} style={{ cursor: 'pointer' }}>{alias} → {target}</Tag>
+            ))}
+          </div>
+        ) : null}
+      </Card>
+
+      <Card size="small" title="工具分类浏览">
+        {Object.keys(groupedTools).length === 0 ? <Text type="secondary">当前场景暂无推荐工具。</Text> : (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            {Object.entries(groupedTools)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([group, tools]) => (
+                <Card key={group} size="small" title={`${group} (${tools.length})`}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    {tools
+                      .slice()
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((tool) => (
+                        <div key={tool.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                          <Space direction="vertical" size={0}>
+                            <Text code>{tool.name}</Text>
+                            <Text type="secondary">{tool.description}</Text>
+                          </Space>
+                          <Button size="small" onClick={() => setCommand(tool.name)}>填入命令</Button>
+                        </div>
+                      ))}
+                  </Space>
+                </Card>
+              ))}
+          </Space>
+        )}
       </Card>
 
       <Card size="small" title="执行计划预览">
         {!preview ? <Text type="secondary">先预览命令以查看计划。</Text> : (
           <Space orientation="vertical" style={{ width: '100%' }}>
+            <Space.Compact style={{ width: '100%' }}>
+              <AutoComplete
+                value={templateName}
+                options={Object.keys(templates).map((name) => ({ value: name }))}
+                style={{ width: '100%' }}
+                onChange={(value) => setTemplateName(value)}
+              >
+                <Input placeholder="参数模板名（可选，预览时自动注入）" />
+              </AutoComplete>
+              <Button onClick={() => void saveTemplate()}>保存模板</Button>
+            </Space.Compact>
             <Space>
               <Tag color={preview.status === 'blocked' ? 'orange' : preview.status === 'failed' ? 'red' : 'blue'}>{preview.status}</Tag>
               <Tag color={preview.risk === 'high' ? 'red' : preview.risk === 'low' ? 'gold' : 'blue'}>{preview.risk}</Tag>

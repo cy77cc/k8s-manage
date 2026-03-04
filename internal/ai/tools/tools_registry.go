@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -23,6 +25,7 @@ type RegisteredTool struct {
 }
 
 func addLocalTool[I any](tools *[]RegisteredTool, meta ToolMeta, fn func(ctx context.Context, input I) (ToolResult, error)) error {
+	meta = normalizeToolMeta(meta)
 	// 从函数参数中推断 ToolInfo
 	info, err := utils.GoStruct2ToolInfo[I](meta.Name, meta.Description)
 	if err != nil {
@@ -33,12 +36,95 @@ func addLocalTool[I any](tools *[]RegisteredTool, meta ToolMeta, fn func(ctx con
 	if len(meta.Required) == 0 {
 		meta.Required = required
 	}
+	meta = normalizeToolMeta(meta)
 	t := utils.NewTool(info, fn)
 	if t == nil {
 		return fmt.Errorf("create tool %s failed", meta.Name)
 	}
 	*tools = append(*tools, RegisteredTool{Meta: meta, Tool: t})
 	return nil
+}
+
+var defaultEnumSourceByField = map[string]string{
+	"host_id":       "host_list_inventory",
+	"cluster_id":    "cluster_list_inventory",
+	"service_id":    "service_list_inventory",
+	"target_id":     "deployment_target_list",
+	"credential_id": "credential_list",
+	"pipeline_id":   "cicd_pipeline_list",
+	"job_id":        "job_list",
+	"user_id":       "user_list",
+	"app_id":        "config_app_list",
+}
+
+func normalizeToolMeta(meta ToolMeta) ToolMeta {
+	if meta.EnumSources == nil {
+		meta.EnumSources = map[string]string{}
+	}
+	if meta.ParamHints == nil {
+		meta.ParamHints = map[string]string{}
+	}
+	for _, field := range meta.Required {
+		source, exists := meta.EnumSources[field]
+		if exists && strings.TrimSpace(source) != "" {
+			continue
+		}
+		if mapped := strings.TrimSpace(defaultEnumSourceByField[field]); mapped != "" {
+			meta.EnumSources[field] = mapped
+		}
+	}
+	meta.Description = normalizeToolDescription(meta)
+	return meta
+}
+
+func normalizeToolDescription(meta ToolMeta) string {
+	base := strings.TrimSpace(meta.Description)
+	if base == "" {
+		base = "执行平台工具操作。"
+	}
+	if !strings.Contains(base, "。") {
+		base += "。"
+	}
+	parts := []string{base}
+	if len(meta.Required) > 0 {
+		req := append([]string{}, meta.Required...)
+		sort.Strings(req)
+		parts = append(parts, fmt.Sprintf("必填参数: %s。", strings.Join(req, ", ")))
+	}
+	if len(meta.DefaultHint) > 0 {
+		keys := make([]string, 0, len(meta.DefaultHint))
+		for k := range meta.DefaultHint {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		defaultItems := make([]string, 0, len(keys))
+		for _, k := range keys {
+			defaultItems = append(defaultItems, fmt.Sprintf("%s=%v", k, meta.DefaultHint[k]))
+		}
+		parts = append(parts, fmt.Sprintf("默认值: %s。", strings.Join(defaultItems, ", ")))
+	}
+	if len(meta.EnumSources) > 0 {
+		keys := make([]string, 0, len(meta.EnumSources))
+		for k := range meta.EnumSources {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		sourceItems := make([]string, 0, len(keys))
+		for _, k := range keys {
+			source := strings.TrimSpace(meta.EnumSources[k])
+			if source == "" {
+				continue
+			}
+			sourceItems = append(sourceItems, fmt.Sprintf("%s 可从 %s 获取", k, source))
+		}
+		if len(sourceItems) > 0 {
+			parts = append(parts, fmt.Sprintf("参数来源: %s。", strings.Join(sourceItems, "；")))
+		}
+	}
+	if len(meta.Examples) > 0 {
+		parts = append(parts, fmt.Sprintf("示例: %s。", strings.TrimSpace(meta.Examples[0])))
+	}
+	return strings.Join(parts, " ")
 }
 
 func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
@@ -229,6 +315,393 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 		},
 		func(ctx context.Context, input ServiceDeployApplyInput) (ToolResult, error) {
 			return serviceDeployApply(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "service_catalog_list",
+			Description: "查询服务目录，支持 category_id/keyword 过滤。示例: {\"category_id\":2,\"keyword\":\"payment\"}。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input ServiceCatalogListInput) (ToolResult, error) {
+			return serviceCatalogList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "service_category_tree",
+			Description: "查询服务分类树。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, _ struct{}) (ToolResult, error) {
+			return serviceCategoryTree(ctx, deps)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "service_visibility_check",
+			Description: "查询服务可见性配置，service_id 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"service_id"},
+		},
+		func(ctx context.Context, input ServiceVisibilityCheckInput) (ToolResult, error) {
+			return serviceVisibilityCheck(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "deployment_target_list",
+			Description: "查询部署目标列表，支持 env/status/keyword 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input DeploymentTargetListInput) (ToolResult, error) {
+			return deploymentTargetList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "deployment_target_detail",
+			Description: "查询部署目标详情，target_id 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"target_id"},
+		},
+		func(ctx context.Context, input DeploymentTargetDetailInput) (ToolResult, error) {
+			return deploymentTargetDetail(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "deployment_bootstrap_status",
+			Description: "查询部署目标引导状态，target_id 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"target_id"},
+		},
+		func(ctx context.Context, input DeploymentBootstrapStatusInput) (ToolResult, error) {
+			return deploymentBootstrapStatus(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "credential_list",
+			Description: "查询凭证列表，支持 type/keyword 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input CredentialListInput) (ToolResult, error) {
+			return credentialList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "credential_test",
+			Description: "查询凭证连通性测试结果，credential_id 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"credential_id"},
+		},
+		func(ctx context.Context, input CredentialTestInput) (ToolResult, error) {
+			return credentialTest(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "cicd_pipeline_list",
+			Description: "查询流水线列表，支持 status/keyword 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input CICDPipelineListInput) (ToolResult, error) {
+			return cicdPipelineList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "cicd_pipeline_status",
+			Description: "查询流水线状态，pipeline_id 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"pipeline_id"},
+		},
+		func(ctx context.Context, input CICDPipelineStatusInput) (ToolResult, error) {
+			return cicdPipelineStatus(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "cicd_pipeline_trigger",
+			Description: "触发流水线构建，pipeline_id/branch 必填。",
+			Mode:        ToolModeMutating,
+			Risk:        ToolRiskHigh,
+			Provider:    "local",
+			Permission:  "ai:tool:execute",
+			Required:    []string{"pipeline_id", "branch"},
+		},
+		func(ctx context.Context, input CICDPipelineTriggerInput) (ToolResult, error) {
+			return cicdPipelineTrigger(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "job_list",
+			Description: "查询任务列表，支持 status/keyword 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input JobListInput) (ToolResult, error) {
+			return jobList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "job_execution_status",
+			Description: "查询任务执行状态，job_id 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"job_id"},
+		},
+		func(ctx context.Context, input JobExecutionStatusInput) (ToolResult, error) {
+			return jobExecutionStatus(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "job_run",
+			Description: "手动触发任务，job_id 必填。",
+			Mode:        ToolModeMutating,
+			Risk:        ToolRiskMedium,
+			Provider:    "local",
+			Permission:  "ai:tool:execute",
+			Required:    []string{"job_id"},
+		},
+		func(ctx context.Context, input JobRunInput) (ToolResult, error) {
+			return jobRun(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "config_app_list",
+			Description: "查询配置应用列表，支持 keyword/env 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input ConfigAppListInput) (ToolResult, error) {
+			return configAppList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "config_item_get",
+			Description: "查询配置项，app_id/key 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"app_id", "key"},
+		},
+		func(ctx context.Context, input ConfigItemGetInput) (ToolResult, error) {
+			return configItemGet(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "config_diff",
+			Description: "对比配置差异，app_id/env_a/env_b 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"app_id", "env_a", "env_b"},
+		},
+		func(ctx context.Context, input ConfigDiffInput) (ToolResult, error) {
+			return configDiff(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "monitor_alert_rule_list",
+			Description: "查询告警规则列表，支持 status/keyword 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input MonitorAlertRuleListInput) (ToolResult, error) {
+			return monitorAlertRuleList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "monitor_alert_active",
+			Description: "查询活跃告警，支持 severity/service_id 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input MonitorAlertActiveInput) (ToolResult, error) {
+			return monitorAlertActive(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "monitor_metric_query",
+			Description: "查询指标数据，query 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"query"},
+		},
+		func(ctx context.Context, input MonitorMetricQueryInput) (ToolResult, error) {
+			return monitorMetricQuery(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "topology_get",
+			Description: "查询服务拓扑，支持 service_id/depth。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input TopologyGetInput) (ToolResult, error) {
+			return topologyGet(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "audit_log_search",
+			Description: "查询审计日志，支持 time_range/resource_type/action/user_id。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input AuditLogSearchInput) (ToolResult, error) {
+			return auditLogSearch(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "user_list",
+			Description: "查询用户列表，支持 keyword/status 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input UserListInput) (ToolResult, error) {
+			return userList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "role_list",
+			Description: "查询角色列表，支持 keyword 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+		},
+		func(ctx context.Context, input RoleListInput) (ToolResult, error) {
+			return roleList(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "permission_check",
+			Description: "检查权限，user_id/resource/action 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"user_id", "resource", "action"},
+		},
+		func(ctx context.Context, input PermissionCheckInput) (ToolResult, error) {
+			return permissionCheck(ctx, deps, input)
 		}); err != nil {
 		return nil, err
 	}

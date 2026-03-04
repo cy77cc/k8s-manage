@@ -5,6 +5,11 @@ import CommandPanel from './CommandPanel';
 const mockApi = vi.hoisted(() => ({
   ai: {
     getCommandSuggestions: vi.fn(),
+    getSceneTools: vi.fn(),
+    getCommandAliases: vi.fn(),
+    getCommandTemplates: vi.fn(),
+    saveCommandAlias: vi.fn(),
+    saveCommandTemplate: vi.fn(),
     getCommandHistory: vi.fn(),
     previewCommand: vi.fn(),
     executeCommand: vi.fn(),
@@ -18,6 +23,11 @@ describe('CommandPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.ai.getCommandSuggestions.mockResolvedValue({ data: [{ command: 'ops.aggregate.status limit=5', hint: '聚合' }] });
+    mockApi.ai.getSceneTools.mockResolvedValue({ data: { scene: 'test', description: '', keywords: [], context_hints: [], tools: [] } });
+    mockApi.ai.getCommandAliases.mockResolvedValue({ data: { scene: 'scene:test', aliases: {}, builtin: {} } });
+    mockApi.ai.getCommandTemplates.mockResolvedValue({ data: { scene: 'scene:test', templates: {} } });
+    mockApi.ai.saveCommandAlias.mockResolvedValue({ data: { scene: 'scene:test', aliases: {} } });
+    mockApi.ai.saveCommandTemplate.mockResolvedValue({ data: { scene: 'scene:test', templates: {} } });
     mockApi.ai.getCommandHistory.mockResolvedValue({ data: { list: [], total: 0 } });
     mockApi.ai.previewCommand.mockResolvedValue({
       data: {

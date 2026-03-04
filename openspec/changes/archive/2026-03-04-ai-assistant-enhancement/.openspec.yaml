@@ -1,0 +1,10 @@
+name: ai-assistant-enhancement
+title: AI助手模块优化增强
+status: proposed
+created_at: 2026-03-04
+priority: high
+scope:
+  - ai-tools
+  - ai-param-intelligence
+  - ai-scene-classification
+  - ai-assistant-experience

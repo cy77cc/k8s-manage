@@ -39,19 +39,87 @@ const sceneFromPath = (pathname: string): string => {
   // 首页
   if (segments.length === 0) return 'scene:home';
 
-  // 部署管理子场景细分
-  if (segments[0] === 'deployment' && segments.length >= 2) {
-    const subScene = segments[1];
-    // infrastructure -> 基础设施, targets -> 部署目标, observability -> 可观测性
-    // 其他路径（如 /deployment, /deployment/create 等）归为 releases（发布管理）
-    if (subScene === 'infrastructure' || subScene === 'targets' || subScene === 'observability') {
-      return `scene:deployment:${subScene}`;
+  // 部署管理二级场景
+  if (segments[0] === 'deployment') {
+    if (segments[1] === 'infrastructure') {
+      if (segments[2] === 'clusters') return 'scene:deployment:clusters';
+      if (segments[2] === 'credentials') return 'scene:deployment:credentials';
+      if (segments[2] === 'hosts') return 'scene:deployment:hosts';
+    }
+    if (segments[1] === 'targets') return 'scene:deployment:targets';
+    if (segments[1] === 'approvals') return 'scene:deployment:approvals';
+    if (segments[1] === 'observability') {
+      if (segments[2] === 'topology') return 'scene:deployment:topology';
+      if (segments[2] === 'metrics') return 'scene:deployment:metrics';
+      if (segments[2] === 'audit-logs') return 'scene:deployment:audit';
+      if (segments[2] === 'aiops') return 'scene:deployment:aiops';
     }
     return 'scene:deployment:releases';
   }
 
+  // 服务管理二级场景
+  if (segments[0] === 'services') {
+    if (segments[1] === 'provision') return 'scene:services:provision';
+    if (segments[1] === 'catalog') return 'scene:services:catalog';
+    if (segments[2] === 'deploy') return 'scene:services:deploy';
+    if (segments[1]) return 'scene:services:detail';
+    return 'scene:services:list';
+  }
+
+  // 治理管理二级场景
+  if (segments[0] === 'governance') {
+    if (segments[1] === 'users') return 'scene:governance:users';
+    if (segments[1] === 'roles') return 'scene:governance:roles';
+    if (segments[1] === 'permissions') return 'scene:governance:permissions';
+    return 'scene:governance';
+  }
+
+  // 一级场景扩展
+  if (['configcenter', 'jobs', 'cicd', 'cmdb', 'automation'].includes(segments[0])) {
+    return `scene:${segments[0]}`;
+  }
+
   // 其他一级路由
   return `scene:${segments[0]}`;
+};
+
+const parseNumericFromPath = (pathname: string, pattern: RegExp): number | undefined => {
+  const matched = pathname.match(pattern);
+  if (!matched || !matched[1]) {
+    return undefined;
+  }
+  const value = Number(matched[1]);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+};
+
+const buildRuntimeContext = (pathname: string, search: string, scene: string): Record<string, any> => {
+  const params = new URLSearchParams(search);
+  const pageData: Record<string, any> = { scene };
+
+  const pickNumber = (key: string): number | undefined => {
+    const raw = params.get(key);
+    if (!raw) return undefined;
+    const v = Number(raw);
+    return Number.isFinite(v) && v > 0 ? v : undefined;
+  };
+
+  pageData.cluster_id = pickNumber('cluster_id') ?? parseNumericFromPath(pathname, /\/clusters\/(\d+)/);
+  pageData.service_id = pickNumber('service_id') ?? parseNumericFromPath(pathname, /\/services\/(\d+)/);
+  pageData.host_id = pickNumber('host_id') ?? parseNumericFromPath(pathname, /\/hosts\/(\d+)/);
+  pageData.target_id = pickNumber('target_id') ?? parseNumericFromPath(pathname, /\/targets\/(\d+)/);
+  pageData.namespace = params.get('namespace') || undefined;
+  pageData.env = params.get('env') || undefined;
+
+  const selectedItems = (window as any).__AI_SELECTED_ITEMS__;
+
+  const runtime: Record<string, any> = {
+    scene,
+    pageData,
+    selectedItems: selectedItems && typeof selectedItems === 'object' ? selectedItems : undefined,
+  };
+  // 兼容后端当前平铺读取逻辑
+  Object.assign(runtime, pageData);
+  return runtime;
 };
 
 const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = false }) => {
@@ -71,6 +139,10 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = f
   const isMobile = viewportWidth < MOBILE_BREAKPOINT;
   const pageScene = React.useMemo(() => sceneFromPath(location.pathname), [location.pathname]);
   const currentScene = scope === 'global' ? 'global' : pageScene;
+  const runtimeContext = React.useMemo(
+    () => buildRuntimeContext(location.pathname, location.search, currentScene),
+    [location.pathname, location.search, currentScene],
+  );
   const resizingRef = React.useRef<{ startX: number; startWidth: number } | null>(null);
   const closeRafRef = React.useRef<number | null>(null);
 
@@ -148,7 +220,7 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ inlineTrigger = f
       label: '对话',
       children: (
         <div className="ai-assistant-tabpane-wrap">
-          <MemoChatInterface className="ai-chat-interface" scene={activeScene} />
+          <MemoChatInterface className="ai-chat-interface" scene={activeScene} runtimeContext={runtimeContext} />
         </div>
       ),
     },

@@ -133,6 +133,32 @@ export interface AICommandHistoryItem {
   result?: Record<string, any>;
 }
 
+export interface AICommandSuggestion {
+  command: string;
+  hint?: string;
+  category?: string;
+  source?: string;
+}
+
+export interface AISceneToolsPayload {
+  scene: string;
+  description: string;
+  keywords: string[];
+  context_hints: string[];
+  tools: AICapability[];
+}
+
+export interface AICommandAliasPayload {
+  scene: string;
+  aliases: Record<string, string>;
+  builtin?: Record<string, string>;
+}
+
+export interface AICommandTemplatePayload {
+  scene: string;
+  templates: Record<string, Record<string, any>>;
+}
+
 interface SSEMetaEvent {
   sessionId: string;
   createdAt: string;
@@ -197,6 +223,30 @@ export interface AICapability {
   provider: 'local' | 'mcp';
   schema?: Record<string, any>;
   permission?: string;
+  required?: string[];
+  enum_sources?: Record<string, string>;
+  param_hints?: Record<string, string>;
+  related_tools?: string[];
+  scene_scope?: string[];
+}
+
+export interface AIToolParamHintValue {
+  value: any;
+  label: string;
+}
+
+export interface AIToolParamHintItem {
+  type?: string;
+  required: boolean;
+  default?: any;
+  hint?: string;
+  enum_source?: string;
+  values?: AIToolParamHintValue[];
+}
+
+export interface AIToolParamHints {
+  tool: string;
+  params: Record<string, AIToolParamHintItem>;
 }
 
 export interface ToolCallTrace {
@@ -256,6 +306,11 @@ export interface AIHostExecutionResult {
   exit_code: number;
   started_at?: string;
   finished_at?: string;
+}
+
+export interface AISessionBranchParams {
+  messageId?: string;
+  title?: string;
 }
 
 // AI功能API
@@ -438,6 +493,11 @@ export const aiApi = {
     return apiService.get(`/ai/sessions/${id}`);
   },
 
+  // 从指定消息创建会话分支
+  async branchSession(id: string, params?: AISessionBranchParams): Promise<ApiResponse<AISession>> {
+    return apiService.post(`/ai/sessions/${id}/branch`, params || {});
+  },
+
   // 删除对话会话
   async deleteSession(id: string): Promise<ApiResponse<void>> {
     return apiService.delete(`/ai/sessions/${id}`);
@@ -506,6 +566,10 @@ export const aiApi = {
     return apiService.get('/ai/capabilities');
   },
 
+  async getToolParamHints(name: string): Promise<ApiResponse<AIToolParamHints>> {
+    return apiService.get(`/ai/tools/${name}/params/hints`);
+  },
+
   async previewTool(params: { tool: string; params?: Record<string, any> }): Promise<ApiResponse<Record<string, any>>> {
     return apiService.post('/ai/tools/preview', params);
   },
@@ -526,8 +590,32 @@ export const aiApi = {
     return apiService.post(`/ai/approvals/${id}/confirm`, { approve });
   },
 
-  async getCommandSuggestions(): Promise<ApiResponse<Array<{ command: string; hint?: string }>>> {
-    return apiService.get('/ai/commands/suggestions');
+  async getSceneTools(scene: string): Promise<ApiResponse<AISceneToolsPayload>> {
+    return apiService.get(`/ai/scene/${scene}/tools`);
+  },
+
+  async getCommandSuggestions(params?: { scene?: string; q?: string }): Promise<ApiResponse<AICommandSuggestion[]>> {
+    return apiService.get('/ai/commands/suggestions', { params });
+  },
+
+  async getCommandAliases(scene?: string): Promise<ApiResponse<AICommandAliasPayload>> {
+    return apiService.get('/ai/commands/aliases', { params: { scene } });
+  },
+
+  async saveCommandAlias(params: { scene?: string; alias: string; command: string }): Promise<ApiResponse<AICommandAliasPayload>> {
+    return apiService.post('/ai/commands/aliases', params);
+  },
+
+  async deleteCommandAlias(alias: string, scene?: string): Promise<ApiResponse<AICommandAliasPayload>> {
+    return apiService.delete(`/ai/commands/aliases/${alias}`, { params: { scene } });
+  },
+
+  async getCommandTemplates(scene?: string): Promise<ApiResponse<AICommandTemplatePayload>> {
+    return apiService.get('/ai/commands/templates', { params: { scene } });
+  },
+
+  async saveCommandTemplate(params: { scene?: string; name: string; params: Record<string, any> }): Promise<ApiResponse<AICommandTemplatePayload>> {
+    return apiService.post('/ai/commands/templates', params);
   },
 
   async previewCommand(params: AICommandPreviewParams): Promise<ApiResponse<AICommandResult>> {

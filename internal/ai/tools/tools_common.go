@@ -37,6 +37,25 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 	// 解析工具参数
 	resolvedParams, resolution := resolveToolParams(ctx, meta, originalParams, "")
 
+	// 在执行前先做通用参数校验，提前返回更友好的提示
+	if err := validateResolvedParams(meta, resolvedParams); err != nil {
+		res := ToolResult{
+			OK:        false,
+			ErrorCode: "invalid_param",
+			Error:     err.Error(),
+			Source:    meta.Provider,
+			LatencyMS: time.Since(start).Milliseconds(),
+		}
+		EmitToolEvent(ctx, "tool_result", map[string]any{
+			"tool":             meta.Name,
+			"call_id":          nextToolCallID(),
+			"result":           res,
+			"param_resolution": resolution,
+			"retry":            false,
+		})
+		return res, nil
+	}
+
 	// 将解析后的参数转换回输入类型
 	runtimeInput, convErr := mapToInput[T](resolvedParams)
 
@@ -185,6 +204,21 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 		}
 	}
 
+	// 对可恢复错误执行一次智能重试
+	if err != nil && shouldRetryTool(meta, err) {
+		retried = true
+		callID = nextToolCallID()
+		EmitToolEvent(ctx, "tool_call", map[string]any{
+			"tool":             meta.Name,
+			"call_id":          callID,
+			"params":           resolvedParams,
+			"param_resolution": resolution,
+			"retry":            true,
+		})
+		time.Sleep(120 * time.Millisecond)
+		data, source, err = runToolAttempt(ctx, meta, runtimeInput, do)
+	}
+
 	// 如果没有指定源，则使用工具提供者作为源
 	if source == "" {
 		source = meta.Provider
@@ -197,6 +231,7 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 		if ie, ok := AsToolInputError(err); ok {
 			errCode = ie.Code
 		}
+		execErr := buildToolExecutionError(meta, errCode, err.Error())
 
 		// 构建错误结果
 		res := ToolResult{OK: false, ErrorCode: errCode, Error: err.Error(), Source: source, LatencyMS: time.Since(start).Milliseconds()}
@@ -206,6 +241,7 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 			"tool":             meta.Name,
 			"call_id":          callID,
 			"result":           res,
+			"execution_error":  execErr,
 			"param_resolution": resolution,
 			"retry":            retried,
 		})
@@ -232,6 +268,60 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 	}
 
 	return res, nil
+}
+
+func shouldRetryTool(meta ToolMeta, err error) bool {
+	if err == nil {
+		return false
+	}
+	ie, ok := AsToolInputError(err)
+	if !ok {
+		return false
+	}
+	// 仅对只读工具的临时性错误重试
+	if meta.Mode != ToolModeReadonly {
+		return false
+	}
+	return ie.Code == "tool_timeout" || ie.Code == "tool_error" || ie.Code == "tool_canceled"
+}
+
+func buildToolExecutionError(meta ToolMeta, code, message string) ToolExecutionError {
+	out := ToolExecutionError{
+		Code:        strings.TrimSpace(code),
+		Message:     strings.TrimSpace(message),
+		Recoverable: false,
+	}
+	switch out.Code {
+	case "missing_param":
+		out.Recoverable = true
+		out.HintAction = "补充参数后重试"
+		out.Suggestions = []string{
+			"确认必填参数是否已提供",
+			"优先调用对应 inventory/list 工具查询可用 ID",
+		}
+	case "invalid_param":
+		out.Recoverable = true
+		out.HintAction = "修正参数格式后重试"
+		out.Suggestions = []string{
+			"检查参数类型与枚举范围",
+			"使用参数提示接口查看可选值",
+		}
+	case "policy_denied":
+		out.HintAction = "申请权限或切换只读操作"
+		out.Suggestions = []string{"当前工具受策略限制，请使用低风险替代工具"}
+	case "tool_timeout", "tool_canceled":
+		out.Recoverable = true
+		out.HintAction = "缩小查询范围后重试"
+		out.Suggestions = []string{"减少 limit 或时间范围", "确认目标系统连接状态"}
+	default:
+		out.Recoverable = true
+		out.HintAction = "稍后重试或切换替代工具"
+		out.Suggestions = []string{"可先执行只读诊断工具确认资源状态"}
+	}
+	if meta.Mode == ToolModeMutating {
+		out.Suggestions = append(out.Suggestions, "变更类工具请确认审批令牌有效")
+	}
+	return out
 }
 
 // runToolAttempt 执行工具操作的尝试，包含超时控制和异常捕获

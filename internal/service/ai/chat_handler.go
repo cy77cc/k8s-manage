@@ -195,7 +195,8 @@ func (h *handler) chat(c *gin.Context) {
 
 	approvalToken := strings.TrimSpace(toString(req.Context["approval_token"]))
 	tracker := newToolEventTracker()
-	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, req.Context, emit, tracker)
+	h.store.rememberContext(uid, scene, extractResourceContext(req.Context, msg))
+	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, msg, req.Context, emit, tracker)
 	prompt := msg
 	directive := composePromptDirectives(
 		buildToolExecutionDirective(msg, scene),
@@ -441,9 +442,20 @@ func composePromptDirectives(directives ...string) string {
 	return strings.Join(out, "\n\n")
 }
 
-func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene string, runtime map[string]any, emit func(event string, payload gin.H) bool, tracker *toolEventTracker) context.Context {
+func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene, userMessage string, runtime map[string]any, emit func(event string, payload gin.H) bool, tracker *toolEventTracker) context.Context {
 	ctx = tools.WithToolUser(ctx, uid, approvalToken)
-	ctx = tools.WithToolRuntimeContext(ctx, runtime)
+	normalized := normalizeRuntimeContext(runtime)
+	for k, v := range h.store.getRememberedContext(uid, scene) {
+		if strings.TrimSpace(toString(normalized[k])) == "" {
+			normalized[k] = v
+		}
+	}
+	for k, v := range resolveReferencePronouns(userMessage, h.store.getRememberedContext(uid, scene)) {
+		if strings.TrimSpace(toString(normalized[k])) == "" {
+			normalized[k] = v
+		}
+	}
+	ctx = tools.WithToolRuntimeContext(ctx, normalized)
 	ctx = tools.WithToolMemoryAccessor(ctx, &toolMemoryAccessor{
 		store: h.store,
 		uid:   uid,
@@ -473,6 +485,87 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 		}
 	})
 	return ctx
+}
+
+func normalizeRuntimeContext(runtime map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range runtime {
+		out[k] = v
+	}
+	pageData, _ := runtime["pageData"].(map[string]any)
+	for _, key := range []string{"host_id", "cluster_id", "service_id", "target_id", "namespace", "env", "runtime_type"} {
+		if _, exists := out[key]; exists && strings.TrimSpace(toString(out[key])) != "" {
+			continue
+		}
+		if pageData != nil {
+			if v, ok := pageData[key]; ok {
+				out[key] = v
+			}
+		}
+	}
+	return out
+}
+
+func extractResourceContext(runtime map[string]any, message string) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{"host_id", "cluster_id", "service_id", "target_id", "namespace", "env"} {
+		if v := strings.TrimSpace(toString(runtime[key])); v != "" {
+			out[key] = runtime[key]
+		}
+	}
+	pageData, _ := runtime["pageData"].(map[string]any)
+	for _, key := range []string{"host_id", "cluster_id", "service_id", "target_id", "namespace", "env"} {
+		if strings.TrimSpace(toString(out[key])) != "" {
+			continue
+		}
+		if pageData != nil && strings.TrimSpace(toString(pageData[key])) != "" {
+			out[key] = pageData[key]
+		}
+	}
+	for _, pair := range []struct {
+		key     string
+		pattern *regexp.Regexp
+	}{
+		{"cluster_id", regexp.MustCompile(`cluster_id\s*=\s*(\d+)`)},
+		{"service_id", regexp.MustCompile(`service_id\s*=\s*(\d+)`)},
+		{"host_id", regexp.MustCompile(`host_id\s*=\s*(\d+)`)},
+		{"target_id", regexp.MustCompile(`target_id\s*=\s*(\d+)`)},
+	} {
+		matched := pair.pattern.FindStringSubmatch(strings.ToLower(message))
+		if len(matched) > 1 && strings.TrimSpace(matched[1]) != "" {
+			out[pair.key] = matched[1]
+		}
+	}
+	return out
+}
+
+func resolveReferencePronouns(message string, remembered map[string]any) map[string]any {
+	out := map[string]any{}
+	msg := strings.ToLower(strings.TrimSpace(message))
+	if msg == "" {
+		return out
+	}
+	if strings.Contains(msg, "刚才那个集群") || strings.Contains(msg, "那个集群") {
+		if v := remembered["cluster_id"]; strings.TrimSpace(toString(v)) != "" {
+			out["cluster_id"] = v
+		}
+	}
+	if strings.Contains(msg, "刚才那个服务") || strings.Contains(msg, "那个服务") {
+		if v := remembered["service_id"]; strings.TrimSpace(toString(v)) != "" {
+			out["service_id"] = v
+		}
+	}
+	if strings.Contains(msg, "刚才那台主机") || strings.Contains(msg, "那台主机") {
+		if v := remembered["host_id"]; strings.TrimSpace(toString(v)) != "" {
+			out["host_id"] = v
+		}
+	}
+	if strings.Contains(msg, "刚才那个目标") || strings.Contains(msg, "那个目标") {
+		if v := remembered["target_id"]; strings.TrimSpace(toString(v)) != "" {
+			out["target_id"] = v
+		}
+	}
+	return out
 }
 
 func toPayloadMap(v any) map[string]any {

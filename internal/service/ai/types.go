@@ -74,23 +74,29 @@ type handler struct {
 }
 
 type memoryStore struct {
-	mu              sync.RWMutex
-	db              *gorm.DB
-	approvals       map[string]*approvalTicket
-	executions      map[string]*executionRecord
-	recommendations map[string][]recommendationRecord
-	toolParams      map[string]map[string]any
+	mu                sync.RWMutex
+	db                *gorm.DB
+	approvals         map[string]*approvalTicket
+	executions        map[string]*executionRecord
+	recommendations   map[string][]recommendationRecord
+	toolParams        map[string]map[string]any
+	commandAliases    map[string]map[string]string
+	commandTemplates  map[string]map[string]map[string]any
+	referencedContext map[string]map[string]any
 }
 
 func newHandler(svcCtx *svc.ServiceContext) *handler {
 	return &handler{
 		svcCtx: svcCtx,
 		store: &memoryStore{
-			db:              svcCtx.DB,
-			approvals:       map[string]*approvalTicket{},
-			executions:      map[string]*executionRecord{},
-			recommendations: map[string][]recommendationRecord{},
-			toolParams:      map[string]map[string]any{},
+			db:                svcCtx.DB,
+			approvals:         map[string]*approvalTicket{},
+			executions:        map[string]*executionRecord{},
+			recommendations:   map[string][]recommendationRecord{},
+			toolParams:        map[string]map[string]any{},
+			commandAliases:    map[string]map[string]string{},
+			commandTemplates:  map[string]map[string]map[string]any{},
+			referencedContext: map[string]map[string]any{},
 		},
 	}
 }

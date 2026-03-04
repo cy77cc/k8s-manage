@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Input, Button, Avatar, Space, Typography, Card, Tag, Collapse, Alert, Tooltip } from 'antd';
+import { Input, Button, Avatar, Space, Typography, Card, Tag, Collapse, Alert, Tooltip, Table } from 'antd';
 import { SendOutlined, MessageOutlined, ToolOutlined, BulbOutlined, WarningOutlined, ArrowDownOutlined, PlusOutlined, HistoryOutlined, PushpinOutlined, DeleteOutlined, DownloadOutlined, CopyOutlined, FileMarkdownOutlined, CodeOutlined, EditOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,6 +13,7 @@ const { Text, Paragraph } = Typography;
 interface ChatInterfaceProps {
   sessionId?: string;
   scene?: string;
+  runtimeContext?: Record<string, any>;
   onSessionCreate?: (session: AISession) => void;
   onSessionUpdate?: (session: AISession) => void;
   className?: string;
@@ -21,6 +22,97 @@ interface ChatInterfaceProps {
 type StreamState = 'idle' | 'running' | 'timeout' | 'done' | 'error';
 type MessagePhase = 'awaiting_first_token' | 'streaming' | 'done' | 'error';
 type LocalMessage = AIMessage & { turnId?: string; phase?: MessagePhase };
+type ResultViewType = 'table' | 'chart' | 'topology' | 'raw';
+
+const extractResultData = (tracePayload: Record<string, any>) => {
+  if (!tracePayload || typeof tracePayload !== 'object') return undefined;
+  if (tracePayload.result && typeof tracePayload.result === 'object') {
+    return tracePayload.result.data;
+  }
+  if (tracePayload.payload?.result && typeof tracePayload.payload.result === 'object') {
+    return tracePayload.payload.result.data;
+  }
+  if (tracePayload.data !== undefined) return tracePayload.data;
+  return undefined;
+};
+
+const detectResultViewType = (data: any): ResultViewType => {
+  if (data && Array.isArray(data.nodes) && Array.isArray(data.edges)) return 'topology';
+  if (data && (Array.isArray(data.points) || Array.isArray(data.series))) return 'chart';
+  if (data && (Array.isArray(data.list) || Array.isArray(data.rows) || Array.isArray(data.items))) return 'table';
+  if (Array.isArray(data)) return 'table';
+  return 'raw';
+};
+
+const renderResultView = (data: any) => {
+  const viewType = detectResultViewType(data);
+  if (viewType === 'table') {
+    const rows: Array<Record<string, any>> = Array.isArray(data)
+      ? data
+      : (Array.isArray(data?.list) ? data.list : (Array.isArray(data?.rows) ? data.rows : (Array.isArray(data?.items) ? data.items : [])));
+    const keys: string[] = Array.from(new Set<string>(rows.slice(0, 30).flatMap((row) => Object.keys(row || {})))).slice(0, 10);
+    const columns = keys.map((key) => {
+      const filterValues = Array.from(new Set(rows.map((row: any) => `${row?.[key] ?? ''}`).filter((v: string) => v !== ''))).slice(0, 8);
+      return {
+      title: key,
+      dataIndex: key,
+      key,
+      sorter: (a: any, b: any) => {
+        const av = a?.[key];
+        const bv = b?.[key];
+        if (typeof av === 'number' && typeof bv === 'number') return av - bv;
+        return `${av ?? ''}`.localeCompare(`${bv ?? ''}`);
+      },
+      filters: filterValues.map((value) => ({ text: value, value })),
+      onFilter: (value: string | number | boolean, row: any) => `${row?.[key] ?? ''}` === `${value}`,
+      ellipsis: true,
+    };
+    });
+    const dataSource = rows.map((row: any, idx: number) => ({ ...row, key: row?.id ?? idx }));
+    if (columns.length === 0) return <Text type="secondary">无可展示数据</Text>;
+    return <Table size="small" pagination={{ pageSize: 5, showSizeChanger: false }} columns={columns} dataSource={dataSource} scroll={{ x: true }} />;
+  }
+  if (viewType === 'chart') {
+    const points = Array.isArray(data?.points)
+      ? data.points
+      : (Array.isArray(data?.series) ? data.series : []);
+    const values = points.map((item: any) => Number(item?.value ?? item?.y ?? 0)).filter((v: number) => Number.isFinite(v));
+    if (values.length === 0) return <Text type="secondary">无可绘制指标</Text>;
+    const width = 420;
+    const height = 100;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const denom = Math.max(max - min, 1);
+    const path = values.map((value: number, idx: number) => {
+      const x = (idx / Math.max(values.length - 1, 1)) * (width - 20) + 10;
+      const y = height - ((value - min) / denom) * (height - 20) - 10;
+      return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
+    }).join(' ');
+    return (
+      <div style={{ overflowX: 'auto' }}>
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+          <path d={path} fill="none" stroke="#1677ff" strokeWidth={2} />
+        </svg>
+        <Text type="secondary">min: {min.toFixed(2)} / max: {max.toFixed(2)} / points: {values.length}</Text>
+      </div>
+    );
+  }
+  if (viewType === 'topology') {
+    const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+    const edges = Array.isArray(data?.edges) ? data.edges : [];
+    return (
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Text>nodes: {nodes.length}, edges: {edges.length}</Text>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {nodes.slice(0, 12).map((node: any, idx: number) => (
+            <Tag key={`${node?.id ?? idx}`}>{node?.label || node?.id || `node-${idx}`}</Tag>
+          ))}
+        </div>
+      </Space>
+    );
+  }
+  return <pre className="ai-trace-json">{JSON.stringify(data, null, 2)}</pre>;
+};
 
 const renderMarkdown = (content: string) => (
   <div className="ai-markdown-content">
@@ -80,6 +172,7 @@ const renderMarkdown = (content: string) => (
 const ChatInterface: React.FC<ChatInterfaceProps> = ({
   sessionId,
   scene = 'global',
+  runtimeContext,
   onSessionCreate,
   onSessionUpdate,
   className,
@@ -103,6 +196,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>([]);
   const [activeAnchorId, setActiveAnchorId] = useState('');
   const [pendingNewSessionId, setPendingNewSessionId] = useState('');
+  const [branchingMessageId, setBranchingMessageId] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -339,7 +433,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {
           sessionId: requestSessionID,
           message: messageText,
-          context: { scene },
+          context: { scene, ...(runtimeContext || {}) },
         },
         {
           onMeta: (meta) => {
@@ -748,6 +842,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const handleBranchFromMessage = async (messageId: string) => {
+    if (!currentSession?.id || !messageId || loading) return;
+    setBranchingMessageId(messageId);
+    try {
+      const res = await Api.ai.branchSession(currentSession.id, { messageId });
+      const branched = res.data;
+      setCurrentSession(branched);
+      setMessages((branched.messages || []) as LocalMessage[]);
+      setPendingNewSessionId('');
+      setStreamState('idle');
+      setStreamError('');
+      setStreamNotice('');
+      await loadSessions();
+    } catch (error) {
+      console.error('创建对话分支失败:', error);
+    } finally {
+      setBranchingMessageId('');
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -915,8 +1029,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     <Avatar icon={<MessageOutlined />} className="ai-chat-avatar ai-chat-avatar-assistant" />
                     <div className="ai-chat-message-main">
                       <div className="ai-chat-message-meta">
-                        <Text className="ai-chat-message-author">AI 助手</Text>
-                        <Text type="secondary" className="ai-chat-message-time">{new Date(message.timestamp).toLocaleTimeString()}</Text>
+                        <Space size={8}>
+                          <Text className="ai-chat-message-author">AI 助手</Text>
+                          <Text type="secondary" className="ai-chat-message-time">{new Date(message.timestamp).toLocaleTimeString()}</Text>
+                        </Space>
+                        <Button
+                          size="small"
+                          type="link"
+                          icon={<PlusOutlined />}
+                          loading={branchingMessageId === message.id}
+                          disabled={!currentSession?.id || loading}
+                          onClick={() => void handleBranchFromMessage(message.id)}
+                        >
+                          从此分支
+                        </Button>
                       </div>
                       <div className="ai-chat-assistant-content">
                         {showAwaiting ? (
@@ -972,6 +1098,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                       const traceStatus = trace.type === 'tool_result'
                                         ? ((trace.payload?.result?.ok || trace.payload?.payload?.result?.ok) ? 'success' : 'error')
                                         : (trace.type === 'approval_required' || trace.type === 'tool_missing' ? 'warning' : 'processing');
+                                      const executionError = (trace.payload?.execution_error || trace.payload?.payload?.execution_error) as {
+                                        code?: string;
+                                        message?: string;
+                                        recoverable?: boolean;
+                                        suggestions?: string[];
+                                        hint_action?: string;
+                                      } | undefined;
+                                      const resultData = extractResultData(trace.payload || {});
+                                      const isSuccessResult = !!(trace.payload?.result?.ok || trace.payload?.payload?.result?.ok);
                                       return (
                                         <Card key={trace.id} size="small" className="ai-trace-card">
                                           <Space className="ai-trace-card-head">
@@ -1004,6 +1139,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                               </Button>
                                               {trace.payload?.status ? <Tag>{trace.payload.status}</Tag> : null}
                                             </Space>
+                                          ) : null}
+                                          {trace.type === 'tool_result' && executionError && !(trace.payload?.result?.ok || trace.payload?.payload?.result?.ok) ? (
+                                            <Alert
+                                              style={{ marginTop: 8 }}
+                                              type={executionError.recoverable ? 'warning' : 'error'}
+                                              showIcon
+                                              message={executionError.hint_action || executionError.message || '工具执行失败'}
+                                              description={executionError.suggestions && executionError.suggestions.length > 0
+                                                ? executionError.suggestions.join('；')
+                                                : executionError.message}
+                                            />
+                                          ) : null}
+                                          {trace.type === 'tool_result' && isSuccessResult && resultData !== undefined ? (
+                                            <div style={{ marginTop: 8 }}>
+                                              {renderResultView(resultData)}
+                                            </div>
                                           ) : null}
                                           {isRawShown ? (
                                             <pre className="ai-trace-json">
@@ -1053,6 +1204,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
                 {isUser ? (
                   <div className="ai-chat-user-bubble-wrap">
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+                      <Button
+                        size="small"
+                        type="link"
+                        icon={<PlusOutlined />}
+                        loading={branchingMessageId === message.id}
+                        disabled={!currentSession?.id || loading}
+                        onClick={() => void handleBranchFromMessage(message.id)}
+                      >
+                        从此分支
+                      </Button>
+                    </div>
                     <div className="ai-chat-user-bubble">
                       <Paragraph className="ai-chat-user-paragraph">{message.content}</Paragraph>
                     </div>

@@ -104,6 +104,17 @@ type commandHistoryItem struct {
 	Result           map[string]any `json:"result,omitempty"`
 }
 
+var builtInAliases = map[string]string{
+	"hst":   "host_list_inventory",
+	"svc":   "service_list_inventory",
+	"cls":   "cluster_list_inventory",
+	"pl":    "cicd_pipeline_list",
+	"job":   "job_list",
+	"cfg":   "config_app_list",
+	"alert": "monitor_alert_active",
+	"topo":  "topology_get",
+}
+
 func (h *handler) buildCommandRoutes() map[string]commandAction {
 	routes := map[string]commandAction{}
 	register := func(a commandAction) {
@@ -360,6 +371,7 @@ func paramPrompts(fields []string) map[string]string {
 }
 
 func (h *handler) buildCommandContext(command, scene string, params map[string]any) (commandContext, error) {
+	command = h.expandCommandAlias(0, scene, command)
 	routes := h.buildCommandRoutes()
 	intent := detectIntent(command)
 	action, ok := routes[intent]
@@ -368,6 +380,7 @@ func (h *handler) buildCommandContext(command, scene string, params map[string]a
 	}
 	parsed := parseCommandParams(command)
 	merged := mergeParams(parsed, params)
+	merged = h.applyCommandTemplate(0, scene, merged)
 	miss := missingParams(action.Required, merged)
 	traceID := fmt.Sprintf("trace-%d", time.Now().UnixNano())
 	plan := map[string]any{
@@ -394,6 +407,42 @@ func (h *handler) buildCommandContext(command, scene string, params map[string]a
 	}, nil
 }
 
+func (h *handler) expandCommandAlias(uid uint64, scene, command string) string {
+	parts := strings.Fields(strings.TrimSpace(command))
+	if len(parts) == 0 {
+		return strings.TrimSpace(command)
+	}
+	first := strings.TrimSpace(parts[0])
+	if mapped := strings.TrimSpace(builtInAliases[first]); mapped != "" {
+		parts[0] = mapped
+		return strings.Join(parts, " ")
+	}
+	if h != nil && h.store != nil {
+		custom := h.store.listAliases(uid, scene)
+		if mapped := strings.TrimSpace(custom[first]); mapped != "" {
+			parts[0] = mapped
+			return strings.Join(parts, " ")
+		}
+	}
+	return strings.TrimSpace(command)
+}
+
+func (h *handler) applyCommandTemplate(uid uint64, scene string, params map[string]any) map[string]any {
+	if h == nil || h.store == nil {
+		return params
+	}
+	templateName := strings.TrimSpace(toString(params["template"]))
+	if templateName == "" {
+		return params
+	}
+	all := h.store.listTemplates(uid, scene)
+	templateParams := all[templateName]
+	if len(templateParams) == 0 {
+		return params
+	}
+	return mergeParams(templateParams, params)
+}
+
 func (h *handler) previewCommand(c *gin.Context) {
 	uid, ok := uidFromContext(c)
 	if !ok {
@@ -405,7 +454,7 @@ func (h *handler) previewCommand(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	cc, err := h.buildCommandContext(req.Command, req.Scene, req.Params)
+	cc, err := h.buildCommandContext(h.expandCommandAlias(uid, req.Scene, req.Command), req.Scene, req.Params)
 	if err != nil {
 		httpx.Fail(c, xcode.ParamError, err.Error())
 		return
@@ -559,7 +608,7 @@ func (h *handler) loadOrBuildCommandContext(uid uint64, req commandExecuteReques
 	if strings.TrimSpace(req.Command) == "" {
 		return commandContext{}, fmt.Errorf("command is required")
 	}
-	return h.buildCommandContext(req.Command, req.Scene, req.Params)
+	return h.buildCommandContext(h.expandCommandAlias(uid, req.Scene, req.Command), req.Scene, req.Params)
 }
 
 func (h *handler) commandContextFromRecord(rec *model.AICommandExecution) (commandContext, error) {
@@ -864,15 +913,158 @@ func (h *handler) getCommandHistory(c *gin.Context) {
 }
 
 func (h *handler) commandSuggestions(c *gin.Context) {
-	examples := []map[string]any{
-		{"command": "ops.aggregate.status limit=5", "hint": "一条命令汇总服务/发布/告警/资产关系"},
-		{"command": "host.batch.exec.preview host_ids=[1,2] command='systemctl status kubelet'", "hint": "预览主机批量命令执行"},
-		{"command": "host.script.exec.apply host_ids=[1,2]", "hint": "脚本上传执行（需二次确认与审批）"},
-		{"command": "deployment.release service_id=1 deployment_id=2 env=prod runtime_type=k8s version=v1.2.3", "hint": "触发发布（需要确认）"},
-		{"command": "deployment.rollback release_id=18 target_version=v1.2.2", "hint": "高风险回滚，需审批"},
-		{"command": "monitor.alerts status=firing limit=20", "hint": "查看当前告警"},
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
 	}
-	httpx.OK(c, examples)
+	scene := normalizeScene(c.Query("scene"))
+	keyword := strings.ToLower(strings.TrimSpace(c.Query("q")))
+	type suggestion struct {
+		Command  string `json:"command"`
+		Hint     string `json:"hint,omitempty"`
+		Category string `json:"category,omitempty"`
+		Source   string `json:"source,omitempty"`
+	}
+	examples := []map[string]any{
+		{"command": "ops.aggregate.status limit=5", "hint": "一条命令汇总服务/发布/告警/资产关系", "category": "aggregate", "source": "builtin"},
+		{"command": "host.batch.exec.preview host_ids=[1,2] command='systemctl status kubelet'", "hint": "预览主机批量命令执行", "category": "host", "source": "builtin"},
+		{"command": "host.script.exec.apply host_ids=[1,2]", "hint": "脚本上传执行（需二次确认与审批）", "category": "host", "source": "builtin"},
+		{"command": "deployment.release service_id=1 deployment_id=2 env=prod runtime_type=k8s version=v1.2.3", "hint": "触发发布（需要确认）", "category": "deployment", "source": "builtin"},
+		{"command": "deployment.rollback release_id=18 target_version=v1.2.2", "hint": "高风险回滚，需审批", "category": "deployment", "source": "builtin"},
+		{"command": "monitor.alerts status=firing limit=20", "hint": "查看当前告警", "category": "monitor", "source": "builtin"},
+	}
+	items := make([]suggestion, 0, len(examples)+8)
+	for _, item := range examples {
+		items = append(items, suggestion{
+			Command:  strings.TrimSpace(toString(item["command"])),
+			Hint:     strings.TrimSpace(toString(item["hint"])),
+			Category: strings.TrimSpace(toString(item["category"])),
+			Source:   strings.TrimSpace(toString(item["source"])),
+		})
+	}
+	if meta, ok := sceneMetaByKey(scene); ok {
+		for _, toolName := range meta.Tools {
+			items = append(items, suggestion{
+				Command:  toolName,
+				Hint:     fmt.Sprintf("场景推荐工具: %s", meta.Description),
+				Category: "scene",
+				Source:   "scene",
+			})
+		}
+	}
+	for alias, command := range builtInAliases {
+		items = append(items, suggestion{
+			Command:  alias,
+			Hint:     fmt.Sprintf("内置别名 -> %s", command),
+			Category: "alias",
+			Source:   "builtin_alias",
+		})
+	}
+	for alias, command := range h.store.listAliases(uid, scene) {
+		items = append(items, suggestion{
+			Command:  alias,
+			Hint:     fmt.Sprintf("自定义别名 -> %s", command),
+			Category: "alias",
+			Source:   "custom_alias",
+		})
+	}
+	filtered := make([]suggestion, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		if item.Command == "" {
+			continue
+		}
+		if _, exists := seen[item.Command]; exists {
+			continue
+		}
+		if keyword != "" {
+			payload := strings.ToLower(item.Command + " " + item.Hint + " " + item.Category)
+			if !strings.Contains(payload, keyword) {
+				continue
+			}
+		}
+		seen[item.Command] = struct{}{}
+		filtered = append(filtered, item)
+	}
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Command < filtered[j].Command })
+	httpx.OK(c, filtered)
+}
+
+func (h *handler) listCommandAliases(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	scene := normalizeScene(c.Query("scene"))
+	httpx.OK(c, gin.H{"scene": scene, "aliases": h.store.listAliases(uid, scene), "builtin": builtInAliases})
+}
+
+func (h *handler) saveCommandAlias(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Scene   string `json:"scene"`
+		Alias   string `json:"alias" binding:"required"`
+		Command string `json:"command" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BindErr(c, err)
+		return
+	}
+	scene := normalizeScene(req.Scene)
+	h.store.saveAlias(uid, scene, req.Alias, req.Command)
+	httpx.OK(c, gin.H{"scene": scene, "aliases": h.store.listAliases(uid, scene)})
+}
+
+func (h *handler) deleteCommandAlias(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	scene := normalizeScene(c.Query("scene"))
+	alias := strings.TrimSpace(c.Param("alias"))
+	if alias == "" {
+		httpx.Fail(c, xcode.ParamError, "alias is required")
+		return
+	}
+	h.store.deleteAlias(uid, scene, alias)
+	httpx.OK(c, gin.H{"scene": scene, "aliases": h.store.listAliases(uid, scene)})
+}
+
+func (h *handler) listCommandTemplates(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	scene := normalizeScene(c.Query("scene"))
+	httpx.OK(c, gin.H{"scene": scene, "templates": h.store.listTemplates(uid, scene)})
+}
+
+func (h *handler) saveCommandTemplate(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Scene  string         `json:"scene"`
+		Name   string         `json:"name" binding:"required"`
+		Params map[string]any `json:"params" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BindErr(c, err)
+		return
+	}
+	scene := normalizeScene(req.Scene)
+	h.store.saveTemplate(uid, scene, req.Name, req.Params)
+	httpx.OK(c, gin.H{"scene": scene, "templates": h.store.listTemplates(uid, scene)})
 }
 
 func toCommandHistoryItem(rec *model.AICommandExecution) commandHistoryItem {

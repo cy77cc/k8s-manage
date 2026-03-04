@@ -10,6 +10,7 @@ const ServiceVisibilityPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [form] = Form.useForm();
+  const [messageApi, contextHolder] = message.useMessage();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -35,10 +36,10 @@ const ServiceVisibilityPage: React.FC = () => {
         .map((x) => Number(x))
         .filter((x) => Number.isFinite(x) && x > 0);
       await Api.services.updateGrantedTeams(id, teams);
-      message.success('可见性设置已更新');
+      messageApi.success('可见性设置已更新');
       navigate(`/services/${id}`);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '保存失败');
+      messageApi.error(err instanceof Error ? err.message : '保存失败');
     } finally {
       setSaving(false);
     }
@@ -46,6 +47,7 @@ const ServiceVisibilityPage: React.FC = () => {
 
   return (
     <div className="p-6 space-y-4">
+      {contextHolder}
       <Title level={3}>服务可见性设置</Title>
       <Paragraph className="text-gray-500">支持 private、team、team-granted、public 四级可见性。</Paragraph>
 

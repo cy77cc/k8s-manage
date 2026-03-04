@@ -32,17 +32,29 @@ type ToolResult struct {
 	LatencyMS int64  `json:"latency_ms"`
 }
 
+type ToolExecutionError struct {
+	Code        string   `json:"code"`
+	Message     string   `json:"message"`
+	Recoverable bool     `json:"recoverable"`
+	Suggestions []string `json:"suggestions,omitempty"`
+	HintAction  string   `json:"hint_action,omitempty"`
+}
+
 type ToolMeta struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Mode        ToolMode       `json:"mode"`
-	Risk        ToolRisk       `json:"risk"`
-	Provider    string         `json:"provider"`
-	Permission  string         `json:"permission"`
-	Schema      map[string]any `json:"schema,omitempty"`
-	Required    []string       `json:"required,omitempty"`
-	DefaultHint map[string]any `json:"default_hint,omitempty"`
-	Examples    []string       `json:"examples,omitempty"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description"`
+	Mode         ToolMode          `json:"mode"`
+	Risk         ToolRisk          `json:"risk"`
+	Provider     string            `json:"provider"`
+	Permission   string            `json:"permission"`
+	Schema       map[string]any    `json:"schema,omitempty"`
+	Required     []string          `json:"required,omitempty"`
+	DefaultHint  map[string]any    `json:"default_hint,omitempty"`
+	Examples     []string          `json:"examples,omitempty"`
+	EnumSources  map[string]string `json:"enum_sources,omitempty"`
+	ParamHints   map[string]string `json:"param_hints,omitempty"`
+	RelatedTools []string          `json:"related_tools,omitempty"`
+	SceneScope   []string          `json:"scene_scope,omitempty"`
 }
 
 type ApprovalRequiredError struct {
