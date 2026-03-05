@@ -83,6 +83,8 @@ Notes:
 - Keep middleware cross-cutting concerns in `internal/middleware`.
 - Prefer small, focused handlers that delegate business logic to logic/service layers.
 - Follow idiomatic Go formatting (`gofmt`) and table-driven tests where practical.
+- When implementing or modifying code that depends on a third-party framework/library, contributors MUST query Context7 for the latest official documentation before coding.
+- The implementation/design decision MUST be based on the retrieved official docs (not memory-only assumptions), and new/changed usage patterns SHOULD be reflected in related OpenSpec change artifacts.
 
 ### API Conventions
 
