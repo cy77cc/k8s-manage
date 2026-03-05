@@ -2,8 +2,12 @@ package monitoring
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
+	prominfra "github.com/cy77cc/k8s-manage/internal/infra/prometheus"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 	"gorm.io/driver/sqlite"
@@ -12,7 +16,8 @@ import (
 
 func newMonitoringTestLogic(t *testing.T) *Logic {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:monitoringtest?mode=memory&cache=shared"), &gorm.Config{})
+	dbPath := filepath.Join(t.TempDir(), "monitoring.db")
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -25,7 +30,6 @@ func newMonitoringTestLogic(t *testing.T) *Logic {
 		&model.AlertRule{},
 		&model.AlertEvent{},
 		&model.MetricPoint{},
-		&model.AlertRuleEvaluation{},
 		&model.AlertNotificationChannel{},
 		&model.AlertNotificationDelivery{},
 	); err != nil {
@@ -61,8 +65,8 @@ func TestAlertTriggerAndDeliveryAudit(t *testing.T) {
 		t.Fatalf("create channel: %v", err)
 	}
 
-	if err := logic.collectSnapshot(ctx); err != nil {
-		t.Fatalf("collect snapshot: %v", err)
+	if err := logic.evaluateRules(ctx, map[string]float64{"cpu_usage": 10}); err != nil {
+		t.Fatalf("evaluate rules: %v", err)
 	}
 
 	alerts, total, err := logic.ListAlerts(ctx, "", "firing", 1, 20)
@@ -74,14 +78,6 @@ func TestAlertTriggerAndDeliveryAudit(t *testing.T) {
 	}
 	if alerts[0].ResolvedAt != nil {
 		t.Fatalf("expected resolved_at to be nil for firing alert")
-	}
-
-	evals, evalTotal, err := logic.ListRuleEvaluations(ctx, alerts[0].RuleID, 1, 20)
-	if err != nil {
-		t.Fatalf("list evaluations: %v", err)
-	}
-	if evalTotal < 1 || len(evals) < 1 {
-		t.Fatalf("expected evaluation records")
 	}
 
 	deliveries, deliveryTotal, err := logic.ListDeliveries(ctx, alerts[0].ID, "", "", 1, 50)
@@ -146,9 +142,9 @@ func TestAlertRuleEvaluation(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 
-	// Collect snapshot (no alerts expected)
-	if err := logic.collectSnapshot(ctx); err != nil {
-		t.Fatalf("collect snapshot: %v", err)
+	// Evaluate rules with low values (no alerts expected)
+	if err := logic.evaluateRules(ctx, map[string]float64{"memory_usage": 1}); err != nil {
+		t.Fatalf("evaluate rules: %v", err)
 	}
 
 	// Check no alerts for this high threshold
@@ -192,9 +188,9 @@ func TestAlertAggregation(t *testing.T) {
 		}
 	}
 
-	// Collect snapshot
-	if err := logic.collectSnapshot(ctx); err != nil {
-		t.Fatalf("collect snapshot: %v", err)
+	// Evaluate rules once
+	if err := logic.evaluateRules(ctx, map[string]float64{"cpu_usage": 10}); err != nil {
+		t.Fatalf("evaluate rules: %v", err)
 	}
 
 	// List all alerts
@@ -205,5 +201,171 @@ func TestAlertAggregation(t *testing.T) {
 
 	if total < 1 {
 		t.Fatalf("expected at least 1 alert, got %d", total)
+	}
+}
+
+type fakePromClient struct {
+	queryFn      func(ctx context.Context, query string, ts time.Time) (*prominfra.QueryResult, error)
+	queryRangeFn func(ctx context.Context, query string, start, end time.Time, step time.Duration) (*prominfra.QueryResult, error)
+	metadataFn   func(ctx context.Context, metric string) ([]prominfra.MetadataItem, error)
+}
+
+func (f *fakePromClient) Query(ctx context.Context, query string, ts time.Time) (*prominfra.QueryResult, error) {
+	if f.queryFn == nil {
+		return nil, nil
+	}
+	return f.queryFn(ctx, query, ts)
+}
+
+func (f *fakePromClient) QueryRange(ctx context.Context, query string, start, end time.Time, step time.Duration) (*prominfra.QueryResult, error) {
+	return f.queryRangeFn(ctx, query, start, end, step)
+}
+
+func (f *fakePromClient) Metadata(ctx context.Context, metric string) ([]prominfra.MetadataItem, error) {
+	if f.metadataFn == nil {
+		return nil, nil
+	}
+	return f.metadataFn(ctx, metric)
+}
+
+func TestGetMetricsUsesPrometheusClient(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "monitoringprom.db")
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	logic := NewLogic(&svc.ServiceContext{
+		DB: db,
+		Prometheus: &fakePromClient{
+			queryRangeFn: func(ctx context.Context, query string, start, end time.Time, step time.Duration) (*prominfra.QueryResult, error) {
+				return &prominfra.QueryResult{
+					ResultType: "matrix",
+					Matrix: []prominfra.MatrixPoint{
+						{
+							Metric: map[string]string{"__name__": "cpu_usage", "host_id": "1"},
+							Values: [][]any{{float64(1710000000), "10.5"}, {float64(1710000060), "12.0"}},
+						},
+					},
+				}, nil
+			},
+		},
+	})
+
+	out, err := logic.GetMetrics(context.Background(), MetricQuery{
+		Metric:         "cpu_usage",
+		Start:          time.Unix(1710000000, 0),
+		End:            time.Unix(1710000300, 0),
+		GranularitySec: 60,
+		Source:         "host",
+	})
+	if err != nil {
+		t.Fatalf("get metrics: %v", err)
+	}
+	if len(out.Series) != 2 {
+		t.Fatalf("expected 2 points, got %d", len(out.Series))
+	}
+}
+
+func TestGetMetricsFallbackToDBWhenPrometheusFails(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "monitoringfallback.db")
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.MetricPoint{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	now := time.Now()
+	if err := db.Create(&model.MetricPoint{
+		Metric:    "cpu_usage",
+		Source:    "host",
+		Value:     22.5,
+		Collected: now,
+	}).Error; err != nil {
+		t.Fatalf("seed metric point: %v", err)
+	}
+
+	logic := NewLogic(&svc.ServiceContext{
+		DB: db,
+		Prometheus: &fakePromClient{
+			queryRangeFn: func(ctx context.Context, query string, start, end time.Time, step time.Duration) (*prominfra.QueryResult, error) {
+				return nil, errors.New("prometheus unavailable")
+			},
+		},
+	})
+
+	out, err := logic.GetMetrics(context.Background(), MetricQuery{
+		Metric:         "cpu_usage",
+		Start:          now.Add(-time.Hour),
+		End:            now.Add(time.Hour),
+		GranularitySec: 60,
+		Source:         "host",
+	})
+	if err != nil {
+		t.Fatalf("get metrics fallback: %v", err)
+	}
+	if len(out.Series) != 1 {
+		t.Fatalf("expected 1 fallback point, got %d", len(out.Series))
+	}
+}
+
+func TestGetMetricAggregationUsesPrometheus(t *testing.T) {
+	logic := NewLogic(&svc.ServiceContext{
+		Prometheus: &fakePromClient{
+			queryFn: func(ctx context.Context, query string, ts time.Time) (*prominfra.QueryResult, error) {
+				return &prominfra.QueryResult{
+					ResultType: "vector",
+					Vector: []prominfra.VectorPoint{
+						{Metric: map[string]string{"__name__": "cpu_usage"}, Value: []any{float64(1710000000), "42.5"}},
+					},
+				}, nil
+			},
+			queryRangeFn: func(ctx context.Context, query string, start, end time.Time, step time.Duration) (*prominfra.QueryResult, error) {
+				return nil, nil
+			},
+			metadataFn: func(ctx context.Context, metric string) ([]prominfra.MetadataItem, error) {
+				return nil, nil
+			},
+		},
+	})
+
+	out, err := logic.GetMetricAggregation(context.Background(), AggregationQuery{
+		Metric: "cpu_usage",
+		Func:   "avg",
+		Start:  time.Now().Add(-5 * time.Minute),
+		End:    time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("aggregation query failed: %v", err)
+	}
+	if out.Value != 42.5 {
+		t.Fatalf("expected 42.5, got %v", out.Value)
+	}
+}
+
+func TestGetMetricMetadataUsesPrometheus(t *testing.T) {
+	logic := NewLogic(&svc.ServiceContext{
+		Prometheus: &fakePromClient{
+			queryFn: func(ctx context.Context, query string, ts time.Time) (*prominfra.QueryResult, error) {
+				return nil, nil
+			},
+			queryRangeFn: func(ctx context.Context, query string, start, end time.Time, step time.Duration) (*prominfra.QueryResult, error) {
+				return nil, nil
+			},
+			metadataFn: func(ctx context.Context, metric string) ([]prominfra.MetadataItem, error) {
+				return []prominfra.MetadataItem{{Metric: "up", Type: "gauge", Help: "up status"}}, nil
+			},
+		},
+	})
+
+	items, err := logic.GetMetricMetadata(context.Background(), "up")
+	if err != nil {
+		t.Fatalf("metadata query failed: %v", err)
+	}
+	if items == nil {
+		t.Fatalf("expected non-nil metadata")
+	}
+	if len(items) != 1 || items[0].Metric != "up" {
+		t.Fatalf("unexpected metadata result: %+v", items)
 	}
 }

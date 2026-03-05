@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	prominfra "github.com/cy77cc/k8s-manage/internal/infra/prometheus"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/service/notification"
 	"github.com/cy77cc/k8s-manage/internal/svc"
@@ -26,6 +26,15 @@ type MetricQuery struct {
 	Source         string
 }
 
+type AggregationQuery struct {
+	Metric    string
+	Func      string
+	Start     time.Time
+	End       time.Time
+	Source    string
+	WindowMin int
+}
+
 type MetricQueryResult struct {
 	Window struct {
 		Start          time.Time `json:"start"`
@@ -36,28 +45,20 @@ type MetricQueryResult struct {
 	Series     []map[string]any `json:"series"`
 }
 
-var collectorOnce sync.Once
+type AggregationResult struct {
+	Metric    string    `json:"metric"`
+	Func      string    `json:"func"`
+	Source    string    `json:"source"`
+	Value     float64   `json:"value"`
+	Timestamp time.Time `json:"timestamp"`
+}
 
 func NewLogic(svcCtx *svc.ServiceContext) *Logic {
 	return &Logic{svcCtx: svcCtx}
 }
 
 func (l *Logic) StartCollector() {
-	collectorOnce.Do(func() {
-		go func() {
-			ticker := time.NewTicker(60 * time.Second)
-			defer ticker.Stop()
-			for {
-				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-				_ = l.collectSnapshot(ctx)
-				cancel()
-				<-ticker.C
-			}
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		_ = l.collectSnapshot(ctx)
-		cancel()
-	})
+	// Deprecated collector flow removed after Prometheus migration.
 }
 
 func (l *Logic) ListAlerts(ctx context.Context, severity, status string, page, pageSize int) ([]model.AlertEvent, int64, error) {
@@ -141,20 +142,6 @@ func (l *Logic) SetRuleEnabled(ctx context.Context, id uint, enabled bool) (*mod
 	return l.UpdateRule(ctx, id, payload)
 }
 
-func (l *Logic) ListRuleEvaluations(ctx context.Context, ruleID uint, page, pageSize int) ([]model.AlertRuleEvaluation, int64, error) {
-	q := l.svcCtx.DB.WithContext(ctx).Model(&model.AlertRuleEvaluation{}).Where("rule_id = ?", ruleID)
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	rows := make([]model.AlertRuleEvaluation, 0, pageSize)
-	offset := (page - 1) * pageSize
-	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
-		return nil, 0, err
-	}
-	return rows, total, nil
-}
-
 func (l *Logic) GetMetrics(ctx context.Context, query MetricQuery) (*MetricQueryResult, error) {
 	if query.Metric == "" {
 		return nil, fmt.Errorf("metric is required")
@@ -162,6 +149,15 @@ func (l *Logic) GetMetrics(ctx context.Context, query MetricQuery) (*MetricQuery
 	if query.GranularitySec <= 0 {
 		query.GranularitySec = 60
 	}
+	if l.svcCtx.Prometheus != nil {
+		if out, err := l.queryMetricsFromPrometheus(ctx, query); err == nil {
+			return out, nil
+		}
+	}
+	return l.queryMetricsFromDB(ctx, query)
+}
+
+func (l *Logic) queryMetricsFromDB(ctx context.Context, query MetricQuery) (*MetricQueryResult, error) {
 	q := l.svcCtx.DB.WithContext(ctx).
 		Where("metric = ? AND collected_at >= ? AND collected_at <= ?", query.Metric, query.Start, query.End)
 	if strings.TrimSpace(query.Source) != "" {
@@ -196,6 +192,193 @@ func (l *Logic) GetMetrics(ctx context.Context, query MetricQuery) (*MetricQuery
 		out.Series = append(out.Series, item)
 	}
 	return out, nil
+}
+
+func (l *Logic) queryMetricsFromPrometheus(ctx context.Context, query MetricQuery) (*MetricQueryResult, error) {
+	cacheKey := fmt.Sprintf("monitoring:metrics:%s:%s:%d:%d:%d", query.Metric, strings.TrimSpace(query.Source), query.Start.Unix(), query.End.Unix(), query.GranularitySec)
+	if l.svcCtx.CacheFacade != nil {
+		if cached, ok := l.svcCtx.CacheFacade.Get(cacheKey); ok {
+			var out MetricQueryResult
+			if err := json.Unmarshal([]byte(cached), &out); err == nil {
+				return &out, nil
+			}
+		}
+	}
+
+	qb := prominfra.NewQueryBuilder(query.Metric)
+	if strings.TrimSpace(query.Source) != "" {
+		qb.WithLabel("source", strings.TrimSpace(query.Source))
+	}
+	res, err := l.svcCtx.Prometheus.QueryRange(
+		ctx,
+		qb.Build(),
+		query.Start,
+		query.End,
+		time.Duration(query.GranularitySec)*time.Second,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &MetricQueryResult{
+		Dimensions: map[string]any{
+			"metric": query.Metric,
+			"source": strings.TrimSpace(query.Source),
+		},
+		Series: make([]map[string]any, 0, 1024),
+	}
+	out.Window.Start = query.Start
+	out.Window.End = query.End
+	out.Window.GranularitySec = query.GranularitySec
+
+	appendPoint := func(tsVal any, valueVal any, labels map[string]string) {
+		tsFloat, ok := toFloat64(tsVal)
+		if !ok {
+			return
+		}
+		valueFloat, ok := toFloat64(valueVal)
+		if !ok {
+			return
+		}
+		labelMap := make(map[string]any, len(labels))
+		for k, v := range labels {
+			if k == "__name__" {
+				continue
+			}
+			labelMap[k] = v
+		}
+		item := map[string]any{
+			"timestamp": time.Unix(int64(tsFloat), 0).UTC(),
+			"value":     valueFloat,
+		}
+		if len(labelMap) > 0 {
+			item["labels"] = labelMap
+		}
+		out.Series = append(out.Series, item)
+	}
+
+	for _, series := range res.Matrix {
+		for _, pair := range series.Values {
+			if len(pair) < 2 {
+				continue
+			}
+			appendPoint(pair[0], pair[1], series.Metric)
+		}
+	}
+	for _, point := range res.Vector {
+		if len(point.Value) < 2 {
+			continue
+		}
+		appendPoint(point.Value[0], point.Value[1], point.Metric)
+	}
+	if l.svcCtx.CacheFacade != nil {
+		if b, err := json.Marshal(out); err == nil {
+			l.svcCtx.CacheFacade.Set(ctx, cacheKey, string(b), 30*time.Second)
+		}
+	}
+
+	return out, nil
+}
+
+func (l *Logic) GetMetricAggregation(ctx context.Context, query AggregationQuery) (*AggregationResult, error) {
+	if l.svcCtx.Prometheus == nil {
+		return nil, fmt.Errorf("prometheus client is unavailable")
+	}
+	if strings.TrimSpace(query.Metric) == "" {
+		return nil, fmt.Errorf("metric is required")
+	}
+	if query.End.IsZero() {
+		query.End = time.Now()
+	}
+	if query.Start.IsZero() {
+		query.Start = query.End.Add(-5 * time.Minute)
+	}
+	if strings.TrimSpace(query.Func) == "" {
+		query.Func = "avg"
+	}
+	if query.WindowMin <= 0 {
+		query.WindowMin = 5
+	}
+
+	qb := prominfra.NewQueryBuilder(query.Metric).
+		WithAggregation(query.Func).
+		WithRange(fmt.Sprintf("%dm", query.WindowMin))
+	if strings.TrimSpace(query.Source) != "" {
+		qb.WithLabel("source", strings.TrimSpace(query.Source))
+	}
+	res, err := l.svcCtx.Prometheus.Query(ctx, qb.Build(), query.End)
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Vector) == 0 || len(res.Vector[0].Value) < 2 {
+		return &AggregationResult{
+			Metric:    query.Metric,
+			Func:      strings.TrimSpace(query.Func),
+			Source:    strings.TrimSpace(query.Source),
+			Timestamp: query.End,
+		}, nil
+	}
+	v, ok := toFloat64(res.Vector[0].Value[1])
+	if !ok {
+		return nil, fmt.Errorf("invalid aggregation value")
+	}
+	ts, ok := toFloat64(res.Vector[0].Value[0])
+	if !ok {
+		ts = float64(query.End.Unix())
+	}
+	return &AggregationResult{
+		Metric:    query.Metric,
+		Func:      strings.TrimSpace(query.Func),
+		Source:    strings.TrimSpace(query.Source),
+		Value:     v,
+		Timestamp: time.Unix(int64(ts), 0).UTC(),
+	}, nil
+}
+
+func (l *Logic) GetMetricMetadata(ctx context.Context, metric string) ([]prominfra.MetadataItem, error) {
+	if l.svcCtx.Prometheus == nil {
+		return nil, fmt.Errorf("prometheus client is unavailable")
+	}
+	cacheKey := fmt.Sprintf("monitoring:metadata:%s", strings.TrimSpace(metric))
+	if l.svcCtx.CacheFacade != nil {
+		if cached, ok := l.svcCtx.CacheFacade.Get(cacheKey); ok {
+			items := make([]prominfra.MetadataItem, 0)
+			if err := json.Unmarshal([]byte(cached), &items); err == nil {
+				return items, nil
+			}
+		}
+	}
+	items, err := l.svcCtx.Prometheus.Metadata(ctx, strings.TrimSpace(metric))
+	if err != nil {
+		return nil, err
+	}
+	if l.svcCtx.CacheFacade != nil {
+		if b, err := json.Marshal(items); err == nil {
+			l.svcCtx.CacheFacade.Set(ctx, cacheKey, string(b), 60*time.Second)
+		}
+	}
+	return items, nil
+}
+
+func toFloat64(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case float32:
+		return float64(t), true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case json.Number:
+		f, err := t.Float64()
+		return f, err == nil
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func (l *Logic) ListChannels(ctx context.Context) ([]model.AlertNotificationChannel, error) {
@@ -269,129 +452,6 @@ func (l *Logic) ListDeliveries(ctx context.Context, alertID uint, channelType, s
 	return rows, total, nil
 }
 
-func (l *Logic) collectSnapshot(ctx context.Context) error {
-	if err := l.ensureDefaultRules(ctx); err != nil {
-		return err
-	}
-	if err := l.ensureDefaultChannels(ctx); err != nil {
-		return err
-	}
-	now := time.Now()
-
-	var totalHosts int64
-	var offlineHosts int64
-	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.Node{}).Count(&totalHosts).Error; err != nil {
-		return err
-	}
-	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.Node{}).Where("status <> ?", "online").Count(&offlineHosts).Error; err != nil {
-		return err
-	}
-
-	var totalClusters int64
-	var unhealthyClusters int64
-	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.Cluster{}).Count(&totalClusters).Error; err != nil {
-		return err
-	}
-	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.Cluster{}).Where("status NOT IN ?", []string{"connected", "ready", "active"}).Count(&unhealthyClusters).Error; err != nil {
-		return err
-	}
-
-	var failedDeploy int64
-	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.DeploymentRelease{}).
-		Where("status = ? AND created_at >= ?", "failed", now.Add(-1*time.Hour)).
-		Count(&failedDeploy).Error; err != nil {
-		return err
-	}
-	var failedServiceRelease int64
-	if err := l.svcCtx.DB.WithContext(ctx).Model(&model.ServiceReleaseRecord{}).
-		Where("status = ? AND created_at >= ?", "failed", now.Add(-1*time.Hour)).
-		Count(&failedServiceRelease).Error; err != nil {
-		return err
-	}
-
-	// Collect per-host metrics from HostHealthSnapshot
-	hostMetrics := l.collectPerHostMetrics(ctx, now)
-
-	// If no real data, generate simulated per-host metrics from nodes table
-	if len(hostMetrics) == 0 && totalHosts > 0 {
-		hostMetrics = l.generateSimulatedHostMetrics(ctx, now, int(offlineHosts))
-	}
-
-	// Calculate aggregate values for alert evaluation
-	var aggCPU, aggMem, aggDisk float64
-	if len(hostMetrics) > 0 {
-		for _, m := range hostMetrics {
-			aggCPU += m.CpuLoad
-			aggMem += m.MemUsage
-			aggDisk += m.DiskUsage
-		}
-		aggCPU /= float64(len(hostMetrics))
-		aggMem /= float64(len(hostMetrics))
-		aggDisk /= float64(len(hostMetrics))
-	}
-
-	// Fallback to simulated values if no real data
-	if aggCPU == 0 {
-		aggCPU = math.Min(95, math.Max(5, 18+float64(offlineHosts)*12+float64(failedDeploy)*8))
-	}
-	if aggMem == 0 {
-		aggMem = math.Min(95, math.Max(10, 26+float64(offlineHosts)*10+float64(failedServiceRelease)*8))
-	}
-	if aggDisk == 0 {
-		aggDisk = math.Min(95, math.Max(15, 35+float64(offlineHosts)*7))
-	}
-
-	k8sNotReady := float64(unhealthyClusters)
-	podCrashLoop := float64(failedDeploy + failedServiceRelease)
-	deployFail := float64(failedDeploy + failedServiceRelease)
-
-	// Store per-host metric points
-	for _, hm := range hostMetrics {
-		dimsJSON := fmt.Sprintf(`{"host_id":%d,"host_name":"%s"}`, hm.HostID, hm.HostName)
-		points := []model.MetricPoint{
-			{Metric: "cpu_usage", Source: "host", DimensionsJSON: dimsJSON, Value: hm.CpuLoad, Collected: now},
-			{Metric: "memory_usage", Source: "host", DimensionsJSON: dimsJSON, Value: hm.MemUsage, Collected: now},
-		}
-		for _, p := range points {
-			item := p
-			if err := l.svcCtx.DB.WithContext(ctx).Create(&item).Error; err != nil {
-				return err
-			}
-		}
-	}
-
-	// Store global metrics
-	globalPoints := []model.MetricPoint{
-		{Metric: "disk_usage", Source: "host", DimensionsJSON: `{"scope":"global","kind":"host"}`, Value: aggDisk, Collected: now},
-		{Metric: "k8s_node_not_ready", Source: "k8s", DimensionsJSON: `{"scope":"global","kind":"cluster"}`, Value: k8sNotReady, Collected: now},
-		{Metric: "pod_crashloop_count", Source: "k8s", DimensionsJSON: `{"scope":"global","kind":"workload"}`, Value: podCrashLoop, Collected: now},
-		{Metric: "deploy_failed_count", Source: "deploy", DimensionsJSON: `{"scope":"global","kind":"release"}`, Value: deployFail, Collected: now},
-		{Metric: "hosts_total", Source: "host", DimensionsJSON: `{"scope":"global","kind":"host"}`, Value: float64(totalHosts), Collected: now},
-		{Metric: "hosts_offline", Source: "host", DimensionsJSON: `{"scope":"global","kind":"host"}`, Value: float64(offlineHosts), Collected: now},
-		{Metric: "clusters_total", Source: "k8s", DimensionsJSON: `{"scope":"global","kind":"cluster"}`, Value: float64(totalClusters), Collected: now},
-	}
-	for _, p := range globalPoints {
-		item := p
-		if err := l.svcCtx.DB.WithContext(ctx).Create(&item).Error; err != nil {
-			return err
-		}
-	}
-
-	if err := l.evaluateRules(ctx, map[string]float64{
-		"cpu_usage":           aggCPU,
-		"memory_usage":        aggMem,
-		"disk_usage":          aggDisk,
-		"k8s_node_not_ready":  k8sNotReady,
-		"pod_crashloop_count": podCrashLoop,
-		"deploy_failed_count": deployFail,
-	}); err != nil {
-		return err
-	}
-
-	_ = l.cleanupOldMetrics(ctx, now.Add(-7*24*time.Hour))
-	return nil
-}
-
 func (l *Logic) evaluateRules(ctx context.Context, values map[string]float64) error {
 	rules := make([]model.AlertRule, 0, 32)
 	if err := l.svcCtx.DB.WithContext(ctx).Where("enabled = 1").Find(&rules).Error; err != nil {
@@ -415,25 +475,6 @@ func (l *Logic) evaluateRules(ctx context.Context, values map[string]float64) er
 		if err == nil {
 			prevState = "firing"
 		}
-		nextState := "normal"
-		if triggered {
-			nextState = "firing"
-		}
-		eval := model.AlertRuleEvaluation{
-			RuleID:      rule.ID,
-			Metric:      rule.Metric,
-			Operator:    rule.Operator,
-			Value:       val,
-			Threshold:   rule.Threshold,
-			Triggered:   triggered,
-			PrevState:   prevState,
-			NextState:   nextState,
-			EvaluatedAt: now,
-		}
-		if err := l.svcCtx.DB.WithContext(ctx).Create(&eval).Error; err != nil {
-			return err
-		}
-
 		if triggered && prevState != "firing" {
 			event := model.AlertEvent{
 				RuleID:      rule.ID,
@@ -563,117 +604,6 @@ func (l *Logic) ensureDefaultChannels(ctx context.Context) error {
 		Enabled:  true,
 	}
 	return l.svcCtx.DB.WithContext(ctx).Create(&row).Error
-}
-
-func (l *Logic) cleanupOldMetrics(ctx context.Context, olderThan time.Time) error {
-	return l.svcCtx.DB.WithContext(ctx).Where("collected_at < ?", olderThan).Delete(&model.MetricPoint{}).Error
-}
-
-// hostMetric holds per-host metric values
-type hostMetric struct {
-	HostID   uint64
-	HostName string
-	CpuLoad  float64
-	MemUsage float64
-	DiskUsage float64
-}
-
-// collectPerHostMetrics queries HostHealthSnapshot to get per-host CPU and memory metrics.
-func (l *Logic) collectPerHostMetrics(ctx context.Context, now time.Time) []hostMetric {
-	// Query the latest health snapshot per host (within last 10 minutes)
-	type snapshotRow struct {
-		HostID        uint64
-		CpuLoad       float64
-		MemoryUsedMB  int
-		MemoryTotalMB int
-	}
-
-	var snapshots []snapshotRow
-	subQuery := l.svcCtx.DB.WithContext(ctx).
-		Model(&model.HostHealthSnapshot{}).
-		Select("host_id, MAX(checked_at) as max_checked").
-		Where("checked_at >= ?", now.Add(-10*time.Minute)).
-		Group("host_id")
-
-	if err := l.svcCtx.DB.WithContext(ctx).
-		Table("host_health_snapshots h").
-		Select("h.host_id, h.cpu_load, h.memory_used_mb, h.memory_total_mb").
-		Joins("INNER JOIN (?) latest ON h.host_id = latest.host_id AND h.checked_at = latest.max_checked", subQuery).
-		Scan(&snapshots).Error; err != nil {
-		return nil
-	}
-
-	if len(snapshots) == 0 {
-		return nil
-	}
-
-	// Get host names
-	hostIDs := make([]uint64, 0, len(snapshots))
-	for _, s := range snapshots {
-		hostIDs = append(hostIDs, s.HostID)
-	}
-	var nodes []model.Node
-	l.svcCtx.DB.WithContext(ctx).Select("id, name").Where("id IN ?", hostIDs).Find(&nodes)
-	nameMap := make(map[uint64]string)
-	for _, n := range nodes {
-		nameMap[uint64(n.ID)] = n.Name
-	}
-
-	// Build result
-	result := make([]hostMetric, 0, len(snapshots))
-	for _, s := range snapshots {
-		var memUsage float64
-		if s.MemoryTotalMB > 0 {
-			memUsage = float64(s.MemoryUsedMB) / float64(s.MemoryTotalMB) * 100
-		}
-		result = append(result, hostMetric{
-			HostID:   s.HostID,
-			HostName: nameMap[s.HostID],
-			CpuLoad:  s.CpuLoad,
-			MemUsage: memUsage,
-		})
-	}
-	return result
-}
-
-// generateSimulatedHostMetrics creates simulated metrics from nodes table when no real data available.
-func (l *Logic) generateSimulatedHostMetrics(ctx context.Context, now time.Time, offlineCount int) []hostMetric {
-	var nodes []model.Node
-	if err := l.svcCtx.DB.WithContext(ctx).
-		Select("id, name, status, cpu_cores, memory_mb").
-		Where("ip <> ''").
-		Order("id ASC").
-		Limit(20).
-		Find(&nodes).Error; err != nil {
-		return nil
-	}
-
-	result := make([]hostMetric, 0, len(nodes))
-	for i, node := range nodes {
-		// Generate varied simulated values per host
-		isOffline := strings.ToLower(node.Status) != "online"
-		baseCPU := 15.0 + float64(i%10)*3 // 15-42% base variation
-		baseMem := 30.0 + float64(i%8)*5  // 30-65% base variation
-
-		var cpuLoad, memUsage float64
-		if isOffline {
-			cpuLoad = 0
-			memUsage = 0
-		} else {
-			// Add some random-ish variation based on time
-			variation := float64(now.Minute()%10) * 0.5
-			cpuLoad = math.Min(95, math.Max(5, baseCPU+variation+float64(offlineCount)*2))
-			memUsage = math.Min(95, math.Max(10, baseMem+variation*0.8))
-		}
-
-		result = append(result, hostMetric{
-			HostID:   uint64(node.ID),
-			HostName: node.Name,
-			CpuLoad:  cpuLoad,
-			MemUsage: memUsage,
-		})
-	}
-	return result
 }
 
 func compareValue(value float64, op string, threshold float64) bool {

@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -13,16 +14,45 @@ import (
 )
 
 type Handler struct {
-	logic  *Logic
-	svcCtx *svc.ServiceContext
+	logic     *Logic
+	svcCtx    *svc.ServiceContext
+	ruleSync  *RuleSyncService
+	webhookGW *NotificationGateway
 }
 
 func NewHandler(svcCtx *svc.ServiceContext) *Handler {
-	return &Handler{logic: NewLogic(svcCtx), svcCtx: svcCtx}
+	return &Handler{
+		logic:     NewLogic(svcCtx),
+		svcCtx:    svcCtx,
+		ruleSync:  NewRuleSyncService(svcCtx.DB),
+		webhookGW: NewNotificationGateway(svcCtx),
+	}
 }
 
 func (h *Handler) StartCollector() {
 	h.logic.StartCollector()
+}
+
+func (h *Handler) StartRuleSync() {
+	_, _ = h.ruleSync.SyncRules(context.Background())
+	h.ruleSync.StartPeriodic(context.Background(), 5*time.Minute)
+}
+
+func (h *Handler) ReceiveWebhook(c *gin.Context) {
+	var req AlertmanagerWebhook
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BindErr(c, err)
+		return
+	}
+	processed, err := h.webhookGW.HandleWebhook(c.Request.Context(), req)
+	if err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{
+		"status":    "success",
+		"processed": processed,
+	})
 }
 
 func (h *Handler) ListAlerts(c *gin.Context) {
@@ -91,6 +121,10 @@ func (h *Handler) CreateRule(c *gin.Context) {
 		httpx.ServerErr(c, err)
 		return
 	}
+	if _, err := h.ruleSync.SyncRules(c.Request.Context()); err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
 	httpx.OK(c, rule)
 }
 
@@ -143,6 +177,10 @@ func (h *Handler) UpdateRule(c *gin.Context) {
 		httpx.ServerErr(c, err)
 		return
 	}
+	if _, err := h.ruleSync.SyncRules(c.Request.Context()); err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
 	httpx.OK(c, rule)
 }
 
@@ -164,20 +202,27 @@ func (h *Handler) setRuleEnabled(c *gin.Context, enabled bool) {
 		httpx.ServerErr(c, err)
 		return
 	}
+	if _, err := h.ruleSync.SyncRules(c.Request.Context()); err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
 	httpx.OK(c, rule)
 }
 
-func (h *Handler) ListRuleEvaluations(c *gin.Context) {
-	if !httpx.Authorize(c, h.svcCtx.DB, "monitoring:read") {
+func (h *Handler) SyncRules(c *gin.Context) {
+	if !httpx.Authorize(c, h.svcCtx.DB, "monitoring:write") {
 		return
 	}
-	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	items, total, err := h.logic.ListRuleEvaluations(c.Request.Context(), uint(id), intFromQuery(c, "page", 1), intFromQuery(c, "page_size", 50))
+	n, err := h.ruleSync.SyncRules(c.Request.Context())
 	if err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{"list": items, "total": total})
+	httpx.OK(c, gin.H{
+		"status":       "success",
+		"synced_count": n,
+		"synced_at":    time.Now().UTC(),
+	})
 }
 
 func (h *Handler) GetMetrics(c *gin.Context) {

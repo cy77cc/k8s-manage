@@ -26,6 +26,7 @@ type Config struct {
 	Embedder     Embedder     `mapstructure:"embedder"`
 	FeatureFlags FeatureFlags `mapstructure:"feature_flags"`
 	Milvus       Milvus       `mapstructure:"milvus"`
+	Prometheus   Prometheus   `mapstructure:"prometheus"`
 }
 
 type App struct {
@@ -187,6 +188,16 @@ type Embedder struct {
 	ApiKey     string        `mapstructure:"api_key"`
 	Timeout    time.Duration `mapstructure:"timeout"`
 	MaxRetries int           `mapstructure:"max_retries"`
+}
+
+type Prometheus struct {
+	Enable        bool          `mapstructure:"enable"`
+	Address       string        `mapstructure:"address"`
+	Host          string        `mapstructure:"host"`
+	Port          string        `mapstructure:"port"`
+	Timeout       time.Duration `mapstructure:"timeout"`
+	MaxConcurrent int           `mapstructure:"max_concurrent"`
+	RetryCount    int           `mapstructure:"retry_count"`
 }
 
 var cfgFile string

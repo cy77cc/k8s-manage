@@ -12,6 +12,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/cache"
 	casbinadapter "github.com/cy77cc/k8s-manage/internal/component/casbin"
 	"github.com/cy77cc/k8s-manage/internal/config"
+	prominfra "github.com/cy77cc/k8s-manage/internal/infra/prometheus"
 	"github.com/cy77cc/k8s-manage/internal/logger"
 	"github.com/cy77cc/k8s-manage/storage"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -31,6 +32,7 @@ type ServiceContext struct {
 	CacheFacade    *cache.Facade               // L1-first cache facade
 	AI             *ai.PlatformAgent           // AI Platform Agent
 	CasbinEnforcer *casbin.Enforcer            // Casbin Enforcer
+	Prometheus     prominfra.Client            // Prometheus HTTP API client
 }
 
 // MustNewServiceContext 创建服务上下文，如果失败则 panic
@@ -83,6 +85,7 @@ func MustNewServiceContext() *ServiceContext {
 
 	l1 := expirable.NewLRU[string, any](5_000, nil, 24*time.Hour)
 	rdb := storage.MustNewRdb()
+	promClient := initPrometheusClient()
 
 	return &ServiceContext{
 		Clientset:      clientset,
@@ -92,6 +95,7 @@ func MustNewServiceContext() *ServiceContext {
 		CacheFacade:    cache.NewFacade(expirable.NewLRU[string, string](5_000, nil, 24*time.Hour), cache.NewRedisL2(rdb)),
 		AI:             platformAgent,
 		CasbinEnforcer: enforcer,
+		Prometheus:     promClient,
 	}
 }
 
@@ -101,6 +105,25 @@ func aiBaseURL() string {
 
 func aiModel() string {
 	return config.CFG.LLM.Model
+}
+
+func initPrometheusClient() prominfra.Client {
+	if !config.CFG.Prometheus.Enable {
+		return nil
+	}
+	c, err := prominfra.NewClient(prominfra.Config{
+		Address:       config.CFG.Prometheus.Address,
+		Host:          config.CFG.Prometheus.Host,
+		Port:          config.CFG.Prometheus.Port,
+		Timeout:       config.CFG.Prometheus.Timeout,
+		MaxConcurrent: config.CFG.Prometheus.MaxConcurrent,
+		RetryCount:    config.CFG.Prometheus.RetryCount,
+	})
+	if err != nil {
+		logger.L().Warn("Failed to initialize Prometheus client", logger.Error(err))
+		return nil
+	}
+	return c
 }
 
 func MustNewClientset() *kubernetes.Clientset {

@@ -15,6 +15,7 @@ export interface Alert {
 export interface AlertRule {
   id: string;
   name: string;
+  promqlExpr?: string;
   condition?: string;
   metric?: string;
   operator?: string;
@@ -34,6 +35,7 @@ export interface MetricData {
   timestamp: string;
   value: number;
   source?: string;
+  labels?: Record<string, any>;
   dimensions?: Record<string, any>;
 }
 
@@ -138,6 +140,7 @@ export const monitoringApi = {
     const list = raw.map((item: any) => ({
       id: String(item.id),
       name: item.name,
+      promqlExpr: item.promql_expr || '',
       condition: `${item.metric} ${item.operator} ${item.threshold}`,
       severity: item.severity,
       enabled: item.enabled,
@@ -162,7 +165,7 @@ export const monitoringApi = {
 
   // 获取监控指标
   async getMetrics(params: MetricParams): Promise<ApiResponse<MetricQueryResult>> {
-    return apiService.get('/metrics', {
+    const response = await apiService.get<any>('/metrics', {
       params: {
         metric: params.metric,
         start_time: params.startTime,
@@ -171,6 +174,23 @@ export const monitoringApi = {
         source: params.source,
       },
     });
+    const rawSeries = (response.data?.series || []) as any[];
+    return {
+      ...response,
+      data: {
+        ...(response.data || {}),
+        series: rawSeries.map((item: any) => ({
+          timestamp: item.timestamp,
+          value: Number(item.value || 0),
+          source: item.source,
+          labels: item.labels || undefined,
+          dimensions: item.dimensions || undefined,
+        })),
+      },
+    } as ApiResponse<MetricQueryResult>;
+  },
+  async syncAlertRules(): Promise<ApiResponse<{ status: string; synced_count: number; synced_at: string }>> {
+    return apiService.post('/alerts/rules/sync');
   },
   async createAlertRule(payload: { name: string; metric: string; operator?: string; threshold: number; severity?: string; enabled?: boolean }): Promise<ApiResponse<any>> {
     return apiService.post('/alert-rules', payload);

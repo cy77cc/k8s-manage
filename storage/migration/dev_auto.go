@@ -41,7 +41,7 @@ func RunDevAutoMigrate(db *gorm.DB) error {
 		&model.AlertEvent{},
 		&model.AlertRule{},
 		&model.MetricPoint{},
-		&model.AlertRuleEvaluation{},
+		// &model.AlertRuleEvaluation{},
 		&model.AlertNotificationChannel{},
 		&model.AlertNotificationDelivery{},
 		&model.ClusterBootstrapTask{},

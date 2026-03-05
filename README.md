@@ -116,6 +116,31 @@ make run
 - 服务启动后访问 `/` 会直接加载前端页面。
 - API 统一前缀为 `/api/v1`。
 
+## Monitoring Deployment
+
+Prometheus and Alertmanager compose configs:
+
+- `deploy/compose/prometheus/docker-compose.yml`
+- `deploy/compose/alertmanager/docker-compose.yml`
+
+Quick start:
+
+```bash
+docker compose -f deploy/compose/prometheus/docker-compose.yml up -d
+docker compose -f deploy/compose/alertmanager/docker-compose.yml up -d
+```
+
+Rule sync API:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/alerts/rules/sync
+```
+
+Related docs:
+
+- Monitoring API: `docs/ops/monitoring-alerting-api.md`
+- Alerting config guide: `docs/ops/alerting-configuration-guide.md`
+
 ## 帮助文档与 AI 知识库
 
 - 平台帮助文档（给用户）：`docs/user/help-center-manual.md`

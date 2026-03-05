@@ -152,6 +152,9 @@ milvus:
 
 prometheus:
   enable: true
+  address: ${PROMETHEUS_ADDRESS}
   host: ${PROMETHEUS_HOST}
   port: ${PROMETHEUS_PORT}
   timeout: 10s
+  max_concurrent: 10
+  retry_count: 3

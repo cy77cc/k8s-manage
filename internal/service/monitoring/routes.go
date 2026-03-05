@@ -9,6 +9,11 @@ import (
 func RegisterMonitoringHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	h := NewHandler(svcCtx)
 	h.StartCollector()
+	h.StartRuleSync()
+
+	// Alertmanager webhook endpoint (internal call, no JWT).
+	v1.POST("/alerts/receiver", h.ReceiveWebhook)
+
 	g := v1.Group("", middleware.JWTAuth())
 	{
 		g.GET("/alerts", h.ListAlerts)
@@ -17,7 +22,7 @@ func RegisterMonitoringHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext)
 		g.PUT("/alert-rules/:id", h.UpdateRule)
 		g.POST("/alert-rules/:id/enable", h.EnableRule)
 		g.POST("/alert-rules/:id/disable", h.DisableRule)
-		g.GET("/alert-rules/:id/evaluations", h.ListRuleEvaluations)
+		g.POST("/alerts/rules/sync", h.SyncRules)
 		g.GET("/metrics", h.GetMetrics)
 		g.GET("/alert-channels", h.ListChannels)
 		g.POST("/alert-channels", h.CreateChannel)
