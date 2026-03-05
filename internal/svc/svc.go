@@ -7,6 +7,7 @@ import (
 
 	"github.com/casbin/casbin/v2"
 	"github.com/cloudwego/eino-ext/devops"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cy77cc/k8s-manage/internal/ai"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/cache"
@@ -30,7 +31,8 @@ type ServiceContext struct {
 	Rdb            redis.UniversalClient       // Redis 客户端
 	Cache          *expirable.LRU[string, any] // 本地缓存 (LRU)
 	CacheFacade    *cache.Facade               // L1-first cache facade
-	AI             *ai.PlatformAgent           // AI Platform Agent
+	AI             *ai.PlatformAgent           // AI Platform Agent (react + adk planexecute)
+	AICheckpoints  compose.CheckPointStore     // ADK checkpoint persistence
 	CasbinEnforcer *casbin.Enforcer            // Casbin Enforcer
 	Prometheus     prominfra.Client            // Prometheus HTTP API client
 }
@@ -50,6 +52,16 @@ func MustNewServiceContext() *ServiceContext {
 			logger.String("model", aiModel()),
 			logger.Error(err),
 		)
+	}
+	if err == nil {
+		if healthErr := ai.CheckModelHealth(ctx, chatModel); healthErr != nil {
+			logger.L().Warn("AI chat model health check failed",
+				logger.String("provider", config.CFG.LLM.Provider),
+				logger.String("base_url", aiBaseURL()),
+				logger.String("model", aiModel()),
+				logger.Error(healthErr),
+			)
+		}
 	}
 
 	clientset := MustNewClientset()
@@ -86,6 +98,7 @@ func MustNewServiceContext() *ServiceContext {
 	l1 := expirable.NewLRU[string, any](5_000, nil, 24*time.Hour)
 	rdb := storage.MustNewRdb()
 	promClient := initPrometheusClient()
+	checkpoints := ai.NewDBCheckPointStore(db)
 
 	return &ServiceContext{
 		Clientset:      clientset,
@@ -94,6 +107,7 @@ func MustNewServiceContext() *ServiceContext {
 		Cache:          l1,
 		CacheFacade:    cache.NewFacade(expirable.NewLRU[string, string](5_000, nil, 24*time.Hour), cache.NewRedisL2(rdb)),
 		AI:             platformAgent,
+		AICheckpoints:  checkpoints,
 		CasbinEnforcer: enforcer,
 		Prometheus:     promClient,
 	}

@@ -155,3 +155,20 @@
 - 治理与 AIOPS：
   - `service_governance_policies` 保存流量/韧性/访问/SLO 策略
   - `aiops_inspections` 记录 pre/post/periodic 巡检与建议摘要
+
+## 10. AI ADK Refactor (2026-03-05)
+
+- AI runtime switched to `eino ADK` plan-execute-replan pipeline.
+- `internal/ai/runtime_agent.go` now holds platform agent assembly and tool bridge.
+- Legacy directories removed:
+  - `internal/ai/experts/`
+  - `internal/ai/graph/`
+  - `internal/ai/callbacks/`
+- Checkpoint persistence introduced:
+  - table: `ai_checkpoints`
+  - store: `internal/ai/store.go` (`compose.CheckPointStore`)
+- Tool interrupt wrappers introduced:
+  - `internal/ai/tools/wrapper.go`
+  - high-risk: approval interrupt
+  - medium-risk: review/edit interrupt
+- Service context now initializes shared ADK checkpoint store (`AICheckpoints`).

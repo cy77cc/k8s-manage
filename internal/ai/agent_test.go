@@ -1,0 +1,16 @@
+package ai
+
+import (
+	"context"
+	"testing"
+)
+
+func TestNewADKPlanExecuteAgent_NilModel(t *testing.T) {
+	a, err := newADKPlanExecuteAgent(context.Background(), nil, nil)
+	if err == nil {
+		t.Fatalf("expected error for nil model")
+	}
+	if a != nil {
+		t.Fatalf("expected nil agent when model is nil")
+	}
+}

@@ -2,17 +2,13 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
-	aicallbacks "github.com/cy77cc/k8s-manage/internal/ai/callbacks"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
@@ -132,8 +128,8 @@ func (h *handler) chat(c *gin.Context) {
 		httpx.Fail(c, xcode.ParamError, "message is required")
 		return
 	}
-	if h.svcCtx.AI == nil || h.svcCtx.AI.Runnable == nil {
-		httpx.Fail(c, xcode.ServerError, "ai agent not initialized")
+	if h.svcCtx.AI == nil || h.svcCtx.AI.ADKAgent == nil {
+		httpx.Fail(c, xcode.ServerError, "ai adk agent not initialized")
 		return
 	}
 	uid, ok := uidFromContext(c)
@@ -141,218 +137,7 @@ func (h *handler) chat(c *gin.Context) {
 		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
 		return
 	}
-
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Status(http.StatusOK)
-
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		httpx.Fail(c, xcode.ServerError, "streaming not supported")
-		return
-	}
-	turnID := fmt.Sprintf("turn-%d", time.Now().UnixNano())
-	writer := newSSEWriter(c, flusher, turnID)
-	emit := writer.Emit
-	var finalOnce sync.Once
-	emitFinal := func(event string, payload gin.H) bool {
-		sent := false
-		finalOnce.Do(func() {
-			sent = emit(event, payload)
-		})
-		return sent
-	}
-	defer writer.Close()
-	stopHeartbeat := make(chan struct{})
-	go heartbeatLoop(stopHeartbeat, emit)
-	defer close(stopHeartbeat)
-
-	sid := strings.TrimSpace(req.SessionID)
-	scene := normalizeScene(toString(req.Context["scene"]))
-	if sid == "" {
-		if session, ok := h.store.currentSession(uid, scene); ok {
-			sid = session.ID
-		} else {
-			sid = fmt.Sprintf("sess-%d", time.Now().UnixNano())
-		}
-	}
-
-	userTime := time.Now()
-	session, err := h.store.appendMessage(uid, scene, sid, map[string]any{
-		"id":        fmt.Sprintf("u-%d", userTime.UnixNano()),
-		"role":      "user",
-		"content":   msg,
-		"timestamp": userTime,
-	})
-	if err != nil {
-		emitFinal("error", gin.H{"message": err.Error()})
-		return
-	}
-	if !emit("meta", gin.H{"sessionId": session.ID, "createdAt": session.CreatedAt}) {
-		return
-	}
-
-	approvalToken := strings.TrimSpace(toString(req.Context["approval_token"]))
-	tracker := newToolEventTracker()
-	h.store.rememberContext(uid, scene, extractResourceContext(req.Context, msg))
-	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, msg, req.Context, emit, tracker)
-	prompt := msg
-	directive := composePromptDirectives(
-		buildToolExecutionDirective(msg, scene),
-		buildHelpKnowledgeDirective(msg),
-	)
-	if directive != "" {
-		prompt = directive + "\n\n用户问题:\n" + msg
-	}
-	if len(req.Context) > 0 {
-		prompt = msg + "\n\n上下文:\n" + mustJSON(req.Context)
-		if directive != "" {
-			prompt = directive + "\n\n用户问题:\n" + msg + "\n\n上下文:\n" + mustJSON(req.Context)
-		}
-	}
-	inputMessages := h.buildConversationMessages(session.Messages, msg, prompt)
-	stream, err := h.svcCtx.AI.Stream(streamCtx, inputMessages)
-	if err != nil {
-		emitFinal("error", gin.H{"message": err.Error()})
-		return
-	}
-	defer stream.Close()
-
-	var fatalErr *streamErrorPayload
-	var assistantContent strings.Builder
-	var reasoningContent strings.Builder
-	var streamErr error
-	for {
-		item, recvErr := stream.Recv()
-		if errors.Is(recvErr, io.EOF) {
-			break
-		}
-		if recvErr != nil {
-			if cfErr, ok := tools.IsConfirmationRequired(recvErr); ok {
-				_ = emit("confirmation_required", gin.H{
-					"tool":               cfErr.Tool,
-					"confirmation_token": cfErr.Token,
-					"expiresAt":          cfErr.ExpiresAt,
-					"preview":            cfErr.Preview,
-					"message":            cfErr.Error(),
-				})
-				streamErr = recvErr
-				break
-			}
-			if apErr, ok := tools.IsApprovalRequired(recvErr); ok {
-				_ = emit("approval_required", gin.H{
-					"tool":           apErr.Tool,
-					"approval_token": apErr.Token,
-					"expiresAt":      apErr.ExpiresAt,
-					"message":        apErr.Error(),
-					"can_review":     h.hasPermission(uid, "ai:approval:review"),
-				})
-				streamErr = recvErr
-				break
-			}
-			streamErr = recvErr
-			break
-		}
-		if item == nil {
-			continue
-		}
-		if item.ReasoningContent != "" {
-			reasoningContent.WriteString(item.ReasoningContent)
-			_ = emit("thinking_delta", gin.H{"contentChunk": item.ReasoningContent})
-		}
-		if item.Content != "" {
-			assistantContent.WriteString(item.Content)
-			if !emit("delta", gin.H{"contentChunk": item.Content}) {
-				return
-			}
-		}
-	}
-	if streamErr != nil && !errors.Is(streamErr, io.EOF) {
-		if _, ok := tools.IsApprovalRequired(streamErr); ok {
-			// approval_required event already emitted
-		} else if _, ok := tools.IsConfirmationRequired(streamErr); ok {
-			// confirmation_required event already emitted
-		} else {
-			fatalErr = &streamErrorPayload{
-				Code:        "stream_interrupted",
-				Message:     streamErr.Error(),
-				Recoverable: true,
-			}
-		}
-	}
-
-	summary := tracker.summary()
-	if summary.Calls == 0 {
-		if hint := detectUnresolvedToolIntent(reasoningContent.String(), assistantContent.String()); hint != "" {
-			_ = emit("tool_intent_unresolved", gin.H{
-				"tool":    hint,
-				"message": "检测到工具意图但未触发实际工具调用，可重试本轮或补充更明确参数。",
-			})
-		}
-	}
-	if len(summary.MissingCallIDs) > 0 {
-		toolErr := &streamErrorPayload{
-			Code:        "tool_result_missing",
-			Message:     fmt.Sprintf("tool result missing for %d call(s)", len(summary.MissingCallIDs)),
-			Recoverable: true,
-		}
-		_ = emitFinal("error", gin.H{
-			"code":         toolErr.Code,
-			"message":      toolErr.Message,
-			"recoverable":  toolErr.Recoverable,
-			"tool_summary": summary,
-		})
-	}
-
-	content := strings.TrimSpace(assistantContent.String())
-	if content == "" {
-		switch {
-		case fatalErr != nil:
-			content = fmt.Sprintf("本轮执行未完整结束：%s", fatalErr.Message)
-		case len(summary.MissingCallIDs) > 0:
-			content = "本轮工具调用结果不完整。"
-		default:
-			content = "无输出。"
-		}
-	}
-	assistantTime := time.Now()
-	session, err = h.store.appendMessage(uid, scene, sid, map[string]any{
-		"id":        fmt.Sprintf("a-%d", assistantTime.UnixNano()),
-		"role":      "assistant",
-		"content":   content,
-		"thinking":  strings.TrimSpace(reasoningContent.String()),
-		"timestamp": assistantTime,
-	})
-	if err != nil {
-		emitFinal("error", gin.H{"message": err.Error()})
-		return
-	}
-	if strings.TrimSpace(session.Title) == "" || strings.EqualFold(strings.TrimSpace(session.Title), defaultAISessionTitle) {
-		firstUserContent := firstUserMessageContent(session.Messages)
-		if firstUserContent != "" {
-			if renamed, renameErr := h.store.updateSessionTitle(uid, sid, inferSessionTitle(firstUserContent)); renameErr == nil && renamed != nil {
-				session = renamed
-			}
-		}
-	}
-	turnSuggestions := h.refreshSuggestions(uid, scene, content)
-	streamState := resolveStreamState(fatalErr, summary)
-	if fatalErr != nil {
-		_ = emitFinal("error", gin.H{
-			"code":         fatalErr.Code,
-			"message":      fatalErr.Message,
-			"recoverable":  fatalErr.Recoverable,
-			"tool_summary": summary,
-		})
-	}
-	emitFinal("done", gin.H{
-		"session":              session,
-		"stream_state":         streamState,
-		"tool_summary":         summary,
-		"turn_recommendations": recommendationPayload(turnSuggestions),
-	})
+	h.chatWithADK(c, req, uid, msg)
 }
 
 func firstUserMessageContent(messages []map[string]any) string {
@@ -481,7 +266,7 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 		scene: scene,
 	})
 	ctx = tools.WithToolPolicyChecker(ctx, h.toolPolicy)
-	ctx = aicallbacks.WithEmitter(ctx, aicallbacks.EventEmitterFunc(func(event string, payload any) bool {
+	ctx = tools.WithToolEventEmitter(ctx, func(event string, payload any) {
 		switch event {
 		case "tool_call", "tool_result":
 			pm := toPayloadMap(payload)
@@ -493,7 +278,7 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 			case "tool_result":
 				tracker.noteResult(callID, toolName)
 			}
-			return emit(event, gin.H{
+			_ = emit(event, gin.H{
 				"tool":             toolName,
 				"call_id":          callID,
 				"payload":          pm,
@@ -502,9 +287,9 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 				"param_resolution": pm["param_resolution"],
 			})
 		default:
-			return emit(event, toPayloadMap(payload))
+			_ = emit(event, toPayloadMap(payload))
 		}
-	}))
+	})
 	return ctx
 }
 

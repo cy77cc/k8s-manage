@@ -1,12 +1,13 @@
 package ai
 
 import (
+	"os"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/cy77cc/k8s-manage/internal/ai/experts"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"gopkg.in/yaml.v3"
 )
 
 type sceneMeta struct {
@@ -17,6 +18,17 @@ type sceneMeta struct {
 	ContextHints []string `json:"context_hints"`
 }
 
+type sceneMappingItem struct {
+	Description  string   `yaml:"description"`
+	Keywords     []string `yaml:"keywords"`
+	Tools        []string `yaml:"tools"`
+	ContextHints []string `yaml:"context_hints"`
+}
+
+type sceneMappingConfig struct {
+	Mappings map[string]sceneMappingItem `yaml:"mappings"`
+}
+
 var (
 	sceneRegistryOnce sync.Once
 	sceneRegistry     map[string]sceneMeta
@@ -24,8 +36,24 @@ var (
 
 func loadSceneRegistry() {
 	sceneRegistry = map[string]sceneMeta{}
-	cfg, err := experts.LoadSceneMappings("configs/scene_mappings.yaml")
-	if err != nil || cfg == nil || len(cfg.Mappings) == 0 {
+	var content []byte
+	var err error
+	for _, path := range []string{
+		"configs/scene_mappings.yaml",
+		"../configs/scene_mappings.yaml",
+		"../../configs/scene_mappings.yaml",
+		"../../../configs/scene_mappings.yaml",
+	} {
+		content, err = os.ReadFile(path)
+		if err == nil && len(content) > 0 {
+			break
+		}
+	}
+	if err != nil || len(content) == 0 {
+		return
+	}
+	var cfg sceneMappingConfig
+	if err := yaml.Unmarshal(content, &cfg); err != nil || len(cfg.Mappings) == 0 {
 		return
 	}
 	for scene, item := range cfg.Mappings {

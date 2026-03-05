@@ -119,3 +119,33 @@ Tool failure payload may include `execution_error`:
 
 - `POST /api/v1/ai/approvals`
 - `POST /api/v1/ai/approvals/:id/confirm`
+
+## ADK Resume
+
+- `POST /api/v1/ai/adk/resume`
+- Purpose: resume interrupted ADK execution by checkpoint and interrupt target.
+
+Request example:
+
+```json
+{
+  "checkpoint_id": "sess-1770000000000",
+  "target": "agent/platform/tool/service_deploy_apply",
+  "data": {
+    "approved": true
+  }
+}
+```
+
+Response example:
+
+```json
+{
+  "code": 1000,
+  "msg": "success",
+  "data": {
+    "resumed": true,
+    "content": "..."
+  }
+}
+```

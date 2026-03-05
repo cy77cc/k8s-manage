@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	aicallbacks "github.com/cy77cc/k8s-manage/internal/ai/callbacks"
 )
 
 type ToolMode string
@@ -133,13 +131,7 @@ func WithToolPolicyChecker(ctx context.Context, checker ToolPolicyChecker) conte
 }
 
 func WithToolEventEmitter(ctx context.Context, emitter ToolEventEmitter) context.Context {
-	if emitter == nil {
-		return aicallbacks.WithEmitter(ctx, nil)
-	}
-	return aicallbacks.WithEmitter(ctx, aicallbacks.EventEmitterFunc(func(event string, payload any) bool {
-		emitter(event, payload)
-		return true
-	}))
+	return context.WithValue(ctx, eventEmitterCtxKey, emitter)
 }
 
 func WithToolUser(ctx context.Context, userID uint64, approvalToken string) context.Context {
@@ -191,11 +183,15 @@ func CheckToolPolicy(ctx context.Context, meta ToolMeta, params map[string]any) 
 }
 
 func EmitToolEvent(ctx context.Context, event string, payload any) {
-	emitter := aicallbacks.EmitterFromContext(ctx)
-	if emitter == nil {
+	v := ctx.Value(eventEmitterCtxKey)
+	if v == nil {
 		return
 	}
-	emitter.Emit(event, payload)
+	emitter, ok := v.(ToolEventEmitter)
+	if !ok || emitter == nil {
+		return
+	}
+	emitter(event, payload)
 }
 
 func MarshalToolResult(result ToolResult) (string, error) {

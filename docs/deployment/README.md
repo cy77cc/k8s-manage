@@ -510,3 +510,27 @@ A: 当前版本支持：
 - 技术支持：support@opspilot.com
 - 文档反馈：docs@opspilot.com
 - GitHub Issues：https://github.com/opspilot/issues
+
+---
+
+## AI ADK Deployment Notes
+
+### Database Migration
+
+Apply migration before enabling ADK resume workflows:
+
+- `storage/migrations/20260305_000031_ai_checkpoints.sql`
+
+This migration creates `ai_checkpoints` for interrupt/resume persistence.
+
+### Runtime Behavior
+
+- AI chat execution uses ADK runner pipeline with checkpoint persistence.
+- Approval/review interrupts are resumable through `/api/v1/ai/adk/resume`.
+
+### Rollout Checklist
+
+1. Run DB migration in all environments.
+2. Verify `ai_checkpoints` table exists and writable.
+3. Smoke test AI chat + interrupt + resume flow.
+4. Monitor DB growth of `ai_checkpoints` and set retention policy if needed.
