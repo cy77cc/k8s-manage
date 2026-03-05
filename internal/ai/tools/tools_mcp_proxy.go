@@ -33,8 +33,21 @@ func BuildMCPProxyTools(manager *MCPClientManager) ([]RegisteredTool, error) {
 			EmitToolEvent(ctx, "tool_call", map[string]any{"tool": meta.Name, "call_id": callID, "params": input})
 
 			if err := CheckToolPolicy(ctx, meta, input); err != nil {
-				res := ToolResult{OK: false, ErrorCode: "policy_denied", Error: err.Error(), Source: "mcp", LatencyMS: time.Since(start).Milliseconds()}
+				errCode := "policy_denied"
+				if _, ok := IsApprovalRequired(err); ok {
+					errCode = "approval_required"
+				} else if _, ok := IsConfirmationRequired(err); ok {
+					errCode = "confirmation_required"
+				}
+				emitPolicyRequiredEvent(ctx, meta, err)
+				res := ToolResult{OK: false, ErrorCode: errCode, Error: err.Error(), Source: "mcp", LatencyMS: time.Since(start).Milliseconds()}
 				EmitToolEvent(ctx, "tool_result", map[string]any{"tool": meta.Name, "call_id": callID, "result": res})
+				if _, ok := IsApprovalRequired(err); ok {
+					return res, nil
+				}
+				if _, ok := IsConfirmationRequired(err); ok {
+					return res, nil
+				}
 				return res, err
 			}
 

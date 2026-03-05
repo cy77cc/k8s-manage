@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -218,6 +219,62 @@ func (h *handler) confirmApproval(c *gin.Context) {
 		status = "approved"
 	}
 	out, _ := h.store.setApprovalStatus(id, status, uid)
+	httpx.OK(c, out)
+}
+
+func (h *handler) confirmConfirmation(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Approve bool `json:"approve"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BindErr(c, err)
+		return
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		httpx.Fail(c, xcode.ParamError, "confirmation id is required")
+		return
+	}
+	svc := NewConfirmationService(h.svcCtx.DB)
+	item, err := svc.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, errConfirmationNotFound) {
+			httpx.Fail(c, xcode.NotFound, "confirmation not found")
+			return
+		}
+		httpx.ServerErr(c, err)
+		return
+	}
+	if item.RequestUserID != uid && !h.isAdmin(uid) {
+		httpx.Fail(c, xcode.Forbidden, "permission denied")
+		return
+	}
+	if time.Now().After(item.ExpiresAt) {
+		_, _ = svc.ExpirePending(c.Request.Context(), time.Now())
+		httpx.Fail(c, xcode.ParamError, "confirmation expired")
+		return
+	}
+
+	if req.Approve {
+		out, err := svc.Confirm(c.Request.Context(), id)
+		if err != nil {
+			httpx.Fail(c, xcode.ParamError, err.Error())
+			return
+		}
+		httpx.OK(c, out)
+		return
+	}
+
+	out, err := svc.Cancel(c.Request.Context(), id)
+	if err != nil {
+		httpx.Fail(c, xcode.ParamError, err.Error())
+		return
+	}
 	httpx.OK(c, out)
 }
 

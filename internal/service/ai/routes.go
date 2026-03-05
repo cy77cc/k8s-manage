@@ -19,6 +19,7 @@ func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.GET("/executions/:id", h.getExecution)
 		g.POST("/approvals", h.createApproval)
 		g.POST("/approvals/:id/confirm", h.confirmApproval)
+		g.POST("/confirmations/:id/confirm", h.confirmConfirmation)
 		g.GET("/sessions", h.listSessions)
 		g.GET("/sessions/current", h.currentSession)
 		g.GET("/sessions/:id", h.getSession)
@@ -42,8 +43,5 @@ func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.POST("/commands/execute", h.executeCommand)
 		g.GET("/commands/history", h.listCommandHistory)
 		g.GET("/commands/history/:id", h.getCommandHistory)
-		g.GET("/skills", h.listSkills)
-		g.POST("/skills/:name/execute", h.executeSkill)
-		g.POST("/skills/reload", h.reloadSkills)
 	}
 }

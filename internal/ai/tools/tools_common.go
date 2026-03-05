@@ -96,10 +96,18 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 
 	// 检查工具执行是否符合策略要求
 	if err := CheckToolPolicy(ctx, meta, resolvedParams); err != nil {
+		errCode := "policy_denied"
+		if _, ok := IsApprovalRequired(err); ok {
+			errCode = "approval_required"
+		} else if _, ok := IsConfirmationRequired(err); ok {
+			errCode = "confirmation_required"
+		}
+		emitPolicyRequiredEvent(ctx, meta, err)
+
 		// 构建策略拒绝结果
 		res := ToolResult{
 			OK:        false,
-			ErrorCode: "policy_denied",
+			ErrorCode: errCode,
 			Error:     err.Error(),
 			Source:    meta.Provider,
 			LatencyMS: time.Since(start).Milliseconds(),
@@ -114,6 +122,12 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 			"retry":            false,
 		})
 
+		if _, ok := IsApprovalRequired(err); ok {
+			return res, nil
+		}
+		if _, ok := IsConfirmationRequired(err); ok {
+			return res, nil
+		}
 		return res, err
 	}
 
@@ -173,10 +187,18 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 
 					// 再次检查策略
 					if err := CheckToolPolicy(ctx, meta, resolvedParams); err != nil {
+						errCode := "policy_denied"
+						if _, ok := IsApprovalRequired(err); ok {
+							errCode = "approval_required"
+						} else if _, ok := IsConfirmationRequired(err); ok {
+							errCode = "confirmation_required"
+						}
+						emitPolicyRequiredEvent(ctx, meta, err)
+
 						// 构建策略拒绝结果
 						res := ToolResult{
 							OK:        false,
-							ErrorCode: "policy_denied",
+							ErrorCode: errCode,
 							Error:     err.Error(),
 							Source:    meta.Provider,
 							LatencyMS: time.Since(start).Milliseconds(),
@@ -191,6 +213,12 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 							"retry":            true,
 						})
 
+						if _, ok := IsApprovalRequired(err); ok {
+							return res, nil
+						}
+						if _, ok := IsConfirmationRequired(err); ok {
+							return res, nil
+						}
 						return res, err
 					}
 
@@ -268,6 +296,27 @@ func runWithPolicyAndEvent[T any](ctx context.Context, meta ToolMeta, input T, d
 	}
 
 	return res, nil
+}
+
+func emitPolicyRequiredEvent(ctx context.Context, meta ToolMeta, err error) {
+	if apErr, ok := IsApprovalRequired(err); ok {
+		EmitToolEvent(ctx, "approval_required", map[string]any{
+			"tool":           meta.Name,
+			"approval_token": apErr.Token,
+			"expiresAt":      apErr.ExpiresAt,
+			"message":        apErr.Error(),
+		})
+		return
+	}
+	if cfErr, ok := IsConfirmationRequired(err); ok {
+		EmitToolEvent(ctx, "confirmation_required", map[string]any{
+			"tool":               meta.Name,
+			"confirmation_token": cfErr.Token,
+			"expiresAt":          cfErr.ExpiresAt,
+			"preview":            cfErr.Preview,
+			"message":            cfErr.Error(),
+		})
+	}
 }
 
 func shouldRetryTool(meta ToolMeta, err error) bool {

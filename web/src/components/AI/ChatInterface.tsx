@@ -235,6 +235,37 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   }, []);
 
   useEffect(() => {
+    const handleConfirmationUpdate = (event: Event) => {
+      const custom = event as CustomEvent<{ token?: string; status?: string }>;
+      const token = (custom.detail?.token || '').toString();
+      const status = (custom.detail?.status || '').toString();
+      if (!token || !status) return;
+      setMessages((prev) => prev.map((item) => {
+        if (item.role !== 'assistant' || !item.traces?.length) return item;
+        return {
+          ...item,
+          traces: item.traces.map((trace) => {
+            if (trace.type !== 'confirmation_required') return trace;
+            const currentToken = (trace.payload?.confirmation_token || '').toString();
+            if (currentToken !== token) return trace;
+            return {
+              ...trace,
+              payload: {
+                ...(trace.payload || {}),
+                status,
+              },
+            };
+          }),
+        };
+      }));
+    };
+    window.addEventListener('ai-confirmation-updated', handleConfirmationUpdate);
+    return () => {
+      window.removeEventListener('ai-confirmation-updated', handleConfirmationUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleApprovalUpdate = (event: Event) => {
       const custom = event as CustomEvent<{ token?: string; status?: string }>;
       const token = (custom.detail?.token || '').toString();
@@ -395,7 +426,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }));
   };
 
-  const sendMessage = async (messageText: string) => {
+  const sendMessage = async (messageText: string, extraContext?: Record<string, any>) => {
     if (!messageText.trim() || loading) return;
 
     const previousSessionID = currentSession?.id;
@@ -436,7 +467,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {
           sessionId: requestSessionID,
           message: messageText,
-          context: { scene, ...(runtimeContext || {}) },
+          context: { scene, ...(runtimeContext || {}), ...(extraContext || {}) },
         },
         {
           onMeta: (meta) => {
@@ -501,6 +532,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             attachTraceToAssistant(assistantMessageID, turnID, {
               id: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
               type: 'approval_required',
+              payload: payload as Record<string, any>,
+              timestamp: new Date().toISOString(),
+            });
+          },
+          onConfirmationRequired: (payload) => {
+            const turnID = payload.turn_id || activeTurnID;
+            attachTraceToAssistant(assistantMessageID, turnID, {
+              id: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              type: 'confirmation_required',
               payload: payload as Record<string, any>,
               timestamp: new Date().toISOString(),
             });
@@ -867,6 +907,40 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const handleConfirmationDecision = async (confirmationToken: string, approve: boolean) => {
+    const token = (confirmationToken || '').trim();
+    if (!token) return;
+    try {
+      await Api.ai.confirmConfirmation(token, approve);
+      const nextStatus = approve ? 'confirmed' : 'cancelled';
+      setMessages((prev) => prev.map((item) => {
+        if (item.role !== 'assistant' || !item.traces?.length) return item;
+        return {
+          ...item,
+          traces: item.traces.map((trace) => {
+            if (trace.type !== 'confirmation_required') return trace;
+            const currentToken = (trace.payload?.confirmation_token || '').toString();
+            if (currentToken !== token) return trace;
+            return {
+              ...trace,
+              payload: {
+                ...(trace.payload || {}),
+                status: nextStatus,
+              },
+            };
+          }),
+        };
+      }));
+      window.dispatchEvent(new CustomEvent('ai-confirmation-updated', { detail: { token, status: nextStatus } }));
+      if (approve && lastPrompt && !loading) {
+        setStreamNotice('已确认，正在自动重试上一轮请求…');
+        await sendMessage(lastPrompt, { confirmation_token: token });
+      }
+    } catch (error) {
+      console.error('确认操作失败:', error);
+    }
+  };
+
   const handleBranchFromMessage = async (messageId: string) => {
     if (!currentSession?.id || !messageId || loading) return;
     setBranchingMessageId(messageId);
@@ -1137,7 +1211,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                       const isRawShown = !!traceRawVisible[trace.id];
                                       const traceStatus = trace.type === 'tool_result'
                                         ? ((trace.payload?.result?.ok || trace.payload?.payload?.result?.ok) ? 'success' : 'error')
-                                        : (trace.type === 'approval_required' || trace.type === 'tool_missing' ? 'warning' : 'processing');
+                                        : (trace.type === 'approval_required' || trace.type === 'confirmation_required' || trace.type === 'tool_missing' ? 'warning' : 'processing');
                                       const executionError = (trace.payload?.execution_error || trace.payload?.payload?.execution_error) as {
                                         code?: string;
                                         message?: string;
@@ -1176,6 +1250,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                                 onClick={() => void handleApprovalDecision((trace.payload?.approval_token || '').toString(), false)}
                                               >
                                                 驳回
+                                              </Button>
+                                              {trace.payload?.status ? <Tag>{trace.payload.status}</Tag> : null}
+                                            </Space>
+                                          ) : null}
+                                          {trace.type === 'confirmation_required' ? (
+                                            <Space style={{ marginTop: 8 }}>
+                                              <Button
+                                                size="small"
+                                                type="primary"
+                                                onClick={() => void handleConfirmationDecision((trace.payload?.confirmation_token || '').toString(), true)}
+                                              >
+                                                确认
+                                              </Button>
+                                              <Button
+                                                size="small"
+                                                danger
+                                                onClick={() => void handleConfirmationDecision((trace.payload?.confirmation_token || '').toString(), false)}
+                                              >
+                                                取消
                                               </Button>
                                               {trace.payload?.status ? <Tag>{trace.payload.status}</Tag> : null}
                                             </Space>

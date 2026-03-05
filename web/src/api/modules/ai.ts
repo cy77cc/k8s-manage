@@ -46,7 +46,7 @@ export interface EmbeddedRecommendation {
 
 export interface ToolTrace {
   id: string;
-  type: 'tool_call' | 'tool_result' | 'approval_required' | 'tool_missing';
+  type: 'tool_call' | 'tool_result' | 'approval_required' | 'confirmation_required' | 'tool_missing';
   payload: Record<string, any>;
   timestamp: string;
 }
@@ -217,6 +217,7 @@ export interface AIChatStreamHandlers {
   onToolCall?: (payload: { turn_id?: string; call_id?: string; tool?: string; payload?: Record<string, any>; ts?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }) => void;
   onToolResult?: (payload: { turn_id?: string; call_id?: string; tool?: string; payload?: Record<string, any>; result?: { ok: boolean; data?: any; error?: string; error_code?: string; source?: string; latency_ms?: number }; ts?: string }) => void;
   onApprovalRequired?: (payload: ApprovalTicket & { turn_id?: string; approval_required?: boolean; previewDiff?: string }) => void;
+  onConfirmationRequired?: (payload: { turn_id?: string; tool?: string; confirmation_token?: string; expiresAt?: string; preview?: Record<string, any>; message?: string }) => void;
   onToolIntentUnresolved?: (payload: { turn_id?: string; tool?: string; message?: string }) => void;
   onHeartbeat?: (payload: { turn_id?: string; status?: string }) => void;
   onExpertProgress?: (payload: SSEExpertProgressEvent) => void;
@@ -273,6 +274,18 @@ export interface ApprovalTicket {
   status: 'pending' | 'approved' | 'rejected' | 'expired';
   createdAt: string;
   expiresAt: string;
+}
+
+export interface ConfirmationTicket {
+  id: string;
+  request_user_id: number;
+  tool_name: string;
+  tool_mode: string;
+  risk_level: string;
+  status: 'pending' | 'confirmed' | 'cancelled' | 'expired';
+  expires_at: string;
+  confirmed_at?: string;
+  cancelled_at?: string;
 }
 
 export interface AIToolExecution {
@@ -454,6 +467,10 @@ export const aiApi = {
         handlers.onApprovalRequired?.(payload as ApprovalTicket & { approval_required?: boolean; previewDiff?: string });
         toolPending = false;
         clearToolTimer();
+      } else if (eventType === 'confirmation_required') {
+        handlers.onConfirmationRequired?.(payload as { turn_id?: string; tool?: string; confirmation_token?: string; expiresAt?: string; preview?: Record<string, any>; message?: string });
+        toolPending = false;
+        clearToolTimer();
       } else if (eventType === 'tool_intent_unresolved') {
         handlers.onToolIntentUnresolved?.(payload as { turn_id?: string; tool?: string; message?: string });
       } else if (eventType === 'heartbeat') {
@@ -599,6 +616,10 @@ export const aiApi = {
 
   async confirmApproval(id: string, approve: boolean): Promise<ApiResponse<ApprovalTicket>> {
     return apiService.post(`/ai/approvals/${id}/confirm`, { approve });
+  },
+
+  async confirmConfirmation(id: string, approve: boolean): Promise<ApiResponse<ConfirmationTicket>> {
+    return apiService.post(`/ai/confirmations/${id}/confirm`, { approve });
   },
 
   async getSceneTools(scene: string): Promise<ApiResponse<AISceneToolsPayload>> {

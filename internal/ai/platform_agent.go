@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/cy77cc/k8s-manage/internal/ai/experts"
 	aigraph "github.com/cy77cc/k8s-manage/internal/ai/graph"
-	askills "github.com/cy77cc/k8s-manage/internal/ai/skills"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/rag"
@@ -43,8 +41,6 @@ type PlatformAgent struct {
 	metas         map[string]tools.ToolMeta
 	mcp           *tools.MCPClientManager
 	ragRetriever  ragPromptRetriever
-	skillRegistry *askills.Registry
-	skillExecutor *askills.Executor
 }
 
 var scenePattern = regexp.MustCompile(`scene:([a-z0-9:_-]+)`)
@@ -130,35 +126,10 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 	if deps.DB != nil && config.CFG.Milvus.Enable {
 		milvusClient := rag.NewMilvusClient(config.CFG.Milvus)
 		if err := milvusClient.EnsureCollections(ctx); err != nil {
-			log.Printf("warn: disable rag retriever because ensure milvus collections failed: %v", err)
-		} else {
-			ragRetriever = rag.NewRAGRetriever(milvusClient, rag.NewEmbedder(config.CFG.Embedder))
+			return nil, fmt.Errorf("ensure milvus collections: %w", err)
 		}
+		ragRetriever = rag.NewRAGRetriever(milvusClient, rag.NewEmbedder(config.CFG.Embedder))
 	}
-	var skillRegistry *askills.Registry
-	if reg, err := askills.NewRegistry(askills.DefaultSkillsConfigPath); err == nil {
-		skillRegistry = reg
-	}
-	skillExecutor := askills.NewExecutor(func(ctx context.Context, toolName string, params map[string]any) (tools.ToolResult, error) {
-		normalized := tools.NormalizeToolName(toolName)
-		t, ok := toolMap[normalized]
-		if !ok {
-			return tools.ToolResult{OK: false, Error: "tool not found", Source: "platform"}, fmt.Errorf("tool not found: %s", normalized)
-		}
-		raw, err := json.Marshal(params)
-		if err != nil {
-			return tools.ToolResult{OK: false, Error: err.Error(), Source: "platform"}, err
-		}
-		out, err := t.InvokableRun(ctx, string(raw))
-		if err != nil {
-			return tools.ToolResult{OK: false, Error: err.Error(), Source: "platform"}, err
-		}
-		var result tools.ToolResult
-		if err := json.Unmarshal([]byte(out), &result); err != nil {
-			return tools.ToolResult{OK: true, Data: out, Source: "platform"}, nil
-		}
-		return result, nil
-	}, nil, nil)
 
 	return &PlatformAgent{
 		Runnable:      agent,
@@ -172,8 +143,6 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 		metas:         metaMap,
 		mcp:           mcpManager,
 		ragRetriever:  ragRetriever,
-		skillRegistry: skillRegistry,
-		skillExecutor: skillExecutor,
 	}, nil
 }
 
@@ -193,9 +162,7 @@ func (p *PlatformAgent) Stream(ctx context.Context, messages []*schema.Message) 
 	if p == nil {
 		return nil, fmt.Errorf("agent not initialized")
 	}
-	if stream, handled := p.executeSkillStream(ctx, messages); handled {
-		return stream, nil
-	}
+
 	messages = p.injectRAGIntoMessages(ctx, messages)
 	req := p.buildExecuteRequest(ctx, messages)
 	if req == nil || req.Decision == nil {
@@ -381,32 +348,6 @@ func (p *PlatformAgent) injectRAGIntoMessages(ctx context.Context, messages []*s
 	return copied
 }
 
-func (p *PlatformAgent) executeSkillStream(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[*schema.Message], bool) {
-	if p == nil || p.skillRegistry == nil || p.skillExecutor == nil {
-		return nil, false
-	}
-	content := latestUserMessage(messages)
-	if content == "" {
-		return nil, false
-	}
-	skill, score := p.skillRegistry.MatchSkill(content)
-	if skill == nil || score <= 0 {
-		return nil, false
-	}
-	result, err := p.skillExecutor.ExecuteFromMessage(ctx, *skill, content, nil)
-	if err != nil {
-		msg := fmt.Sprintf("技能 `%s` 执行失败: %v", skill.Name, err)
-		if strings.Contains(strings.ToLower(err.Error()), "missing required parameter") {
-			msg = fmt.Sprintf("技能 `%s` 缺少必填参数，请补充后重试。错误: %v", skill.Name, err)
-		}
-		stream := schema.StreamReaderFromArray([]*schema.Message{schema.AssistantMessage(msg, nil)})
-		return stream, true
-	}
-	output := formatSkillExecutionResult(skill.Name, result)
-	stream := schema.StreamReaderFromArray([]*schema.Message{schema.AssistantMessage(output, nil)})
-	return stream, true
-}
-
 func latestUserMessage(messages []*schema.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
@@ -415,17 +356,6 @@ func latestUserMessage(messages []*schema.Message) string {
 		}
 	}
 	return ""
-}
-
-func formatSkillExecutionResult(skillName string, result *askills.ExecutionResult) string {
-	if result == nil {
-		return fmt.Sprintf("技能 `%s` 执行完成。", skillName)
-	}
-	lines := []string{fmt.Sprintf("技能 `%s` 执行完成。", skillName)}
-	for step, data := range result.StepResults {
-		lines = append(lines, fmt.Sprintf("- 步骤 %s: %v", step, data))
-	}
-	return strings.Join(lines, "\n")
 }
 
 func (p *PlatformAgent) Close() error {
