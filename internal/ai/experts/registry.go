@@ -10,7 +10,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 )
 
@@ -104,7 +104,7 @@ func (r *Registry) loadDefaults() error {
 
 func (r *Registry) instantiateExpert(cfg ExpertConfig) (*Expert, error) {
 	selected := r.filterTools(cfg.ToolPatterns)
-	agent, err := r.buildAgent(cfg.Persona, selected)
+	agent, opts, err := r.buildAgent(cfg.Persona, selected)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +121,7 @@ func (r *Registry) instantiateExpert(cfg ExpertConfig) (*Expert, error) {
 		RiskLevel:    cfg.RiskLevel,
 		Agent:        agent,
 		Tools:        selected,
+		AgentOptions: opts,
 	}, nil
 }
 
@@ -143,18 +144,19 @@ func (r *Registry) attachExpertTools(loaded map[string]*Expert) error {
 			merged[helperName] = helperTool
 		}
 		expert.Tools = merged
-		agent, err := r.buildAgent(expert.Persona, merged)
+		agent, opts, err := r.buildAgent(expert.Persona, merged)
 		if err != nil {
 			return err
 		}
 		expert.Agent = agent
+		expert.AgentOptions = opts
 	}
 	return nil
 }
 
-func (r *Registry) buildAgent(persona string, selected map[string]tool.InvokableTool) (*react.Agent, error) {
+func (r *Registry) buildAgent(persona string, selected map[string]tool.InvokableTool) (*react.Agent, []agent.AgentOption, error) {
 	if r.chatModel == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	baseTools := make([]tool.BaseTool, 0, len(selected))
 	for _, item := range selected {
@@ -164,16 +166,19 @@ func (r *Registry) buildAgent(persona string, selected map[string]tool.Invokable
 		}
 		baseTools = append(baseTools, bt)
 	}
+	agentOpts, err := react.WithTools(r.ctx, baseTools...)
+	if err != nil {
+		return nil, nil, err
+	}
 	agent, err := react.NewAgent(r.ctx, &react.AgentConfig{
 		ToolCallingModel: r.chatModel,
-		ToolsConfig:      compose.ToolsNodeConfig{Tools: baseTools},
 		MaxStep:          20,
 		MessageModifier:  react.NewPersonaModifier(strings.TrimSpace(persona) + "\n" + strings.TrimSpace(defaultPersonaSuffix)),
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return agent, nil
+	return agent, agentOpts, nil
 }
 
 func (r *Registry) filterTools(patterns []string) map[string]tool.InvokableTool {

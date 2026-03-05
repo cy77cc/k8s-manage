@@ -44,7 +44,7 @@ func (e *ExpertExecutor) ExecuteStep(ctx context.Context, step *ExecutionStep, r
 			Duration:   time.Since(start),
 		}, nil
 	}
-	resp, err := exp.Agent.Generate(ctx, messages)
+	resp, err := exp.Agent.Generate(ctx, messages, exp.AgentOptions...)
 	if err != nil {
 		return &ExpertResult{
 			ExpertName: exp.Name,
@@ -86,7 +86,7 @@ func (e *ExpertExecutor) StreamStep(ctx context.Context, step *ExecutionStep, re
 			schema.AssistantMessage("专家模型未初始化，返回静态诊断建议："+e.fallbackMessage(messages), nil),
 		}), nil
 	}
-	return exp.Agent.Stream(ctx, messages)
+	return exp.Agent.Stream(ctx, messages, exp.AgentOptions...)
 }
 
 func (e *ExpertExecutor) buildExpertMessages(history []*schema.Message, step *ExecutionStep, baseMessage string, priorResults []ExpertResult) []*schema.Message {

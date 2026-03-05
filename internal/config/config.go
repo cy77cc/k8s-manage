@@ -23,7 +23,9 @@ type Config struct {
 	Metrics      Metrics      `mapstructure:"metrics"`
 	Security     Security     `mapstructure:"security"`
 	LLM          LLM          `mapstructure:"llm"`
+	Embedder     Embedder     `mapstructure:"embedder"`
 	FeatureFlags FeatureFlags `mapstructure:"feature_flags"`
+	Milvus       Milvus       `mapstructure:"milvus"`
 }
 
 type App struct {
@@ -159,6 +161,32 @@ type SQLite struct {
 	MaxOpenConns    int           `mapstructure:"max_open_conns"`
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
+}
+
+type Milvus struct {
+	Enable              bool          `mapstructure:"enable"`
+	Host                string        `mapstructure:"host"`
+	Port                string        `mapstructure:"port"`
+	Username            string        `mapstructure:"username"`
+	Password            string        `mapstructure:"password"`
+	ApiKey              string        `mapstructure:"api_key"`
+	Database            string        `mapstructure:"database"`
+	Collection          string        `mapstructure:"collection"`
+	UseTLS              bool          `mapstructure:"use_tls"`
+	Timeout             time.Duration `mapstructure:"timeout"`
+	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`
+	Dimension           int           `mapstructure:"dimension"`
+	IndexType           string        `mapstructure:"index_type"`
+}
+
+type Embedder struct {
+	Enable     bool          `mapstructure:"enable"`
+	Provider   string        `mapstructure:"provider"`
+	Model      string        `mapstructure:"model"`
+	BaseURL    string        `mapstructure:"base_url"`
+	ApiKey     string        `mapstructure:"api_key"`
+	Timeout    time.Duration `mapstructure:"timeout"`
+	MaxRetries int           `mapstructure:"max_retries"`
 }
 
 var cfgFile string

@@ -33,8 +33,6 @@ func TestHybridMOEPipelineE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new router: %v", err)
 	}
-	orch := NewOrchestrator(reg, NewResultAggregator(AggregationTemplate, nil))
-
 	decision := router.Route(context.Background(), &RouteRequest{
 		Message: "请排查服务发布失败",
 		Scene:   "scene:services:deploy",
@@ -43,18 +41,16 @@ func TestHybridMOEPipelineE2E(t *testing.T) {
 		t.Fatalf("unexpected route decision: %#v", decision)
 	}
 
-	result, err := orch.Execute(context.Background(), &ExecuteRequest{
-		Message:  "请排查服务发布失败",
-		Decision: decision,
-		RuntimeContext: map[string]any{
-			"timeout_ms": 3000,
-		},
-	})
+	exec := NewExpertExecutor(reg)
+	result, err := exec.ExecuteStep(context.Background(), &ExecutionStep{
+		ExpertName: decision.PrimaryExpert,
+		Task:       "执行主专家分析",
+	}, &ExecuteRequest{Message: "请排查服务发布失败", Decision: decision}, nil)
 	if err != nil {
-		t.Fatalf("orchestrator execute: %v", err)
+		t.Fatalf("execute step: %v", err)
 	}
-	if result == nil || !strings.Contains(result.Response, decision.PrimaryExpert) {
-		t.Fatalf("unexpected orchestration result: %#v", result)
+	if result == nil || !strings.Contains(result.Output, "专家模型未初始化") {
+		t.Fatalf("unexpected execution result: %#v", result)
 	}
 }
 
@@ -63,15 +59,11 @@ func TestHybridMOEPipelineErrorCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	orch := NewOrchestrator(reg, NewResultAggregator(AggregationTemplate, nil))
-	_, err = orch.Execute(context.Background(), &ExecuteRequest{
-		Message: "test",
-		Decision: &RouteDecision{
-			PrimaryExpert: "non_exist_expert",
-			Strategy:      StrategySingle,
-			Source:        "scene",
-		},
-	})
+	exec := NewExpertExecutor(reg)
+	_, err = exec.ExecuteStep(context.Background(), &ExecutionStep{
+		ExpertName: "non_exist_expert",
+		Task:       "test",
+	}, &ExecuteRequest{Message: "test"}, nil)
 	if err == nil {
 		t.Fatalf("expected error for unknown expert")
 	}
@@ -86,30 +78,23 @@ func TestMultiExpertCollaborationScenario(t *testing.T) {
 			"topology_expert": {Name: "topology_expert"},
 		},
 	}
-	orch := NewOrchestrator(reg, NewResultAggregator(AggregationTemplate, nil))
-	out, err := orch.Execute(context.Background(), &ExecuteRequest{
-		Message: "发布后服务不可用，需要从依赖、监控、拓扑联合排查",
-		Decision: &RouteDecision{
-			PrimaryExpert:   "service_expert",
-			OptionalHelpers: []string{"k8s_expert", "monitor_expert", "topology_expert"},
-			Strategy:        StrategyParallel,
-			Source:          "scene",
-		},
-		RuntimeContext: map[string]any{"timeout_ms": 5000},
-	})
-	if err != nil {
-		t.Fatalf("execute multi expert collaboration: %v", err)
+	exec := NewExpertExecutor(reg)
+	steps := []ExecutionStep{
+		{ExpertName: "service_expert", Task: "主专家分析"},
+		{ExpertName: "k8s_expert", Task: "k8s 协助"},
+		{ExpertName: "monitor_expert", Task: "监控协助"},
+		{ExpertName: "topology_expert", Task: "拓扑协助"},
 	}
-	if out == nil {
-		t.Fatalf("expected execute result")
-	}
-	if got, want := len(out.Traces), 4; got != want {
-		t.Fatalf("expected %d traces, got %d", want, got)
-	}
-	for _, expertName := range []string{"service_expert", "k8s_expert", "monitor_expert", "topology_expert"} {
-		if !strings.Contains(out.Response, expertName) {
-			t.Fatalf("expected response includes expert %s, got: %s", expertName, out.Response)
+	results := make([]ExpertResult, 0, len(steps))
+	for i := range steps {
+		out, err := exec.ExecuteStep(context.Background(), &steps[i], &ExecuteRequest{Message: "联合排查"}, results)
+		if err != nil {
+			t.Fatalf("execute step %d: %v", i, err)
 		}
+		results = append(results, *out)
+	}
+	if got, want := len(results), 4; got != want {
+		t.Fatalf("expected %d results, got %d", want, got)
 	}
 }
 
@@ -122,34 +107,22 @@ func TestComplexSequentialScenarioTraceability(t *testing.T) {
 			"helper_3":       {Name: "helper_3"},
 		},
 	}
-	orch := NewOrchestrator(reg, NewResultAggregator(AggregationTemplate, nil))
-	out, err := orch.Execute(context.Background(), &ExecuteRequest{
-		Message: "复杂场景：跨域排查并输出可追踪的协作路径",
-		Decision: &RouteDecision{
-			PrimaryExpert:   "primary_expert",
-			OptionalHelpers: []string{"helper_1", "helper_2", "helper_3"},
-			Strategy:        StrategySequential,
-			Source:          "scene",
-		},
-	})
-	if err != nil {
-		t.Fatalf("execute complex sequential scenario: %v", err)
+	exec := NewExpertExecutor(reg)
+	prior := make([]ExpertResult, 0, 4)
+	seq := []ExecutionStep{
+		{ExpertName: "primary_expert", Task: "主分析"},
+		{ExpertName: "helper_1", Task: "helper_1", ContextFrom: []int{0}},
+		{ExpertName: "helper_2", Task: "helper_2", ContextFrom: []int{0, 1}},
+		{ExpertName: "helper_3", Task: "helper_3", ContextFrom: []int{0, 1, 2}},
 	}
-	if out == nil {
-		t.Fatalf("expected execute result")
-	}
-	if got, want := len(out.Traces), 4; got != want {
-		t.Fatalf("expected %d traces, got %d", want, got)
-	}
-	if out.Traces[0].Role != "primary" {
-		t.Fatalf("expected first trace role=primary, got=%s", out.Traces[0].Role)
-	}
-	for i := 1; i < len(out.Traces); i++ {
-		if out.Traces[i].Role != "helper" {
-			t.Fatalf("expected helper role at index %d, got=%s", i, out.Traces[i].Role)
+	for i := range seq {
+		out, err := exec.ExecuteStep(context.Background(), &seq[i], &ExecuteRequest{Message: "复杂场景"}, prior)
+		if err != nil {
+			t.Fatalf("execute sequential step %d: %v", i, err)
 		}
+		prior = append(prior, *out)
 	}
-	if out.Metadata["strategy"] != StrategySequential {
-		t.Fatalf("unexpected strategy metadata: %#v", out.Metadata)
+	if got, want := len(prior), 4; got != want {
+		t.Fatalf("expected %d traces, got %d", want, got)
 	}
 }

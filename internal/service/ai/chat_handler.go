@@ -230,6 +230,17 @@ func (h *handler) chat(c *gin.Context) {
 			break
 		}
 		if recvErr != nil {
+			if cfErr, ok := tools.IsConfirmationRequired(recvErr); ok {
+				_ = emit("confirmation_required", gin.H{
+					"tool":               cfErr.Tool,
+					"confirmation_token": cfErr.Token,
+					"expiresAt":          cfErr.ExpiresAt,
+					"preview":            cfErr.Preview,
+					"message":            cfErr.Error(),
+				})
+				streamErr = recvErr
+				break
+			}
 			if apErr, ok := tools.IsApprovalRequired(recvErr); ok {
 				_ = emit("approval_required", gin.H{
 					"tool":           apErr.Tool,
@@ -259,7 +270,11 @@ func (h *handler) chat(c *gin.Context) {
 		}
 	}
 	if streamErr != nil && !errors.Is(streamErr, io.EOF) {
-		if _, ok := tools.IsApprovalRequired(streamErr); !ok {
+		if _, ok := tools.IsApprovalRequired(streamErr); ok {
+			// approval_required event already emitted
+		} else if _, ok := tools.IsConfirmationRequired(streamErr); ok {
+			// confirmation_required event already emitted
+		} else {
 			fatalErr = &streamErrorPayload{
 				Code:        "stream_interrupted",
 				Message:     streamErr.Error(),
@@ -446,6 +461,9 @@ func composePromptDirectives(directives ...string) string {
 func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToken, scene, userMessage string, runtime map[string]any, emit func(event string, payload gin.H) bool, tracker *toolEventTracker) context.Context {
 	ctx = tools.WithToolUser(ctx, uid, approvalToken)
 	normalized := normalizeRuntimeContext(runtime)
+	if _, ok := normalized["require_confirmation"]; !ok {
+		normalized["require_confirmation"] = true
+	}
 	for k, v := range h.store.getRememberedContext(uid, scene) {
 		if strings.TrimSpace(toString(normalized[k])) == "" {
 			normalized[k] = v

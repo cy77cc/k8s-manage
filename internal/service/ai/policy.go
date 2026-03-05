@@ -22,6 +22,65 @@ func (h *handler) toolPolicy(ctx context.Context, meta tools.ToolMeta, params ma
 	if meta.Mode == tools.ToolModeReadonly {
 		return nil
 	}
+	runtime := tools.ToolRuntimeContextFromContext(ctx)
+	requireConfirmation := toBool(runtime["require_confirmation"])
+	if requireConfirmation {
+		confirmationToken := strings.TrimSpace(toString(runtime["confirmation_token"]))
+		confirmationSvc := NewConfirmationService(h.svcCtx.DB)
+		if confirmationToken == "" {
+			metas := []tools.ToolMeta{}
+			if h.svcCtx != nil && h.svcCtx.AI != nil {
+				metas = h.svcCtx.AI.ToolMetas()
+			}
+			previewBuilder := NewPreviewBuilder(h.svcCtx.DB, metas)
+			preview := previewBuilder.BuildPreview(meta.Name, params)
+			req, err := confirmationSvc.RequestConfirmation(ctx, ConfirmationRequestInput{
+				RequestUserID: uid,
+				TraceID:       strings.TrimSpace(toString(runtime["trace_id"])),
+				ToolName:      meta.Name,
+				ToolMode:      string(meta.Mode),
+				RiskLevel:     string(meta.Risk),
+				ParamsJSON:    mustJSON(params),
+				PreviewJSON:   mustJSON(preview),
+				Timeout:       preview.Timeout,
+			})
+			if err != nil {
+				return err
+			}
+			return &tools.ConfirmationRequiredError{
+				Token:     req.ID,
+				Tool:      meta.Name,
+				ExpiresAt: req.ExpiresAt,
+				Preview: map[string]any{
+					"tool":             preview.ToolName,
+					"tool_description": preview.ToolDescription,
+					"risk_level":       preview.RiskLevel,
+					"mode":             preview.Mode,
+					"target_resources": preview.TargetResources,
+					"impact_scope":     preview.ImpactScope,
+					"preview_diff":     preview.PreviewDiff,
+				},
+				Message: "confirmation required",
+			}
+		}
+		cf, err := confirmationSvc.Get(ctx, confirmationToken)
+		if err != nil {
+			return errors.New("confirmation not found")
+		}
+		if cf.ToolName != meta.Name {
+			return errors.New("confirmation tool mismatch")
+		}
+		if cf.RequestUserID != uid && !h.isAdmin(uid) {
+			return errors.New("confirmation owner mismatch")
+		}
+		if time.Now().After(cf.ExpiresAt) {
+			_, _ = confirmationSvc.ExpirePending(ctx, time.Now())
+			return errors.New("confirmation expired")
+		}
+		if cf.Status != confirmationStatusConfirmed {
+			return errors.New("confirmation not confirmed")
+		}
+	}
 	if strings.TrimSpace(approvalToken) == "" {
 		t := h.store.newApproval(uid, approvalTicket{
 			Tool:   meta.Name,

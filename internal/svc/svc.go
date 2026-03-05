@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/casbin/casbin/v2"
+	"github.com/cloudwego/eino-ext/devops"
 	"github.com/cy77cc/k8s-manage/internal/ai"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/cache"
@@ -35,6 +36,10 @@ type ServiceContext struct {
 // MustNewServiceContext 创建服务上下文，如果失败则 panic
 func MustNewServiceContext() *ServiceContext {
 	ctx := context.Background()
+	err := devops.Init(ctx)
+	if err != nil {
+		logger.L().Warn("Failed to initialize devops", logger.Error(err))
+	}
 	chatModel, err := ai.NewChatModel(ctx)
 	if err != nil {
 		logger.L().Warn("Failed to initialize AI chat model",

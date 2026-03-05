@@ -84,6 +84,32 @@ func IsApprovalRequired(err error) (*ApprovalRequiredError, bool) {
 	return nil, false
 }
 
+type ConfirmationRequiredError struct {
+	Token     string
+	Tool      string
+	Preview   map[string]any
+	ExpiresAt time.Time
+	Message   string
+}
+
+func (e *ConfirmationRequiredError) Error() string {
+	if e == nil {
+		return "confirmation required"
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	return "confirmation required"
+}
+
+func IsConfirmationRequired(err error) (*ConfirmationRequiredError, bool) {
+	var cfErr *ConfirmationRequiredError
+	if errors.As(err, &cfErr) {
+		return cfErr, true
+	}
+	return nil, false
+}
+
 type ToolPolicyChecker func(ctx context.Context, meta ToolMeta, params map[string]any) error
 type ToolEventEmitter func(event string, payload any)
 type ToolMemoryAccessor interface {

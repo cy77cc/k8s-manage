@@ -1,9 +1,11 @@
 package ai
 
 import (
+	"context"
 	"sync"
 	"time"
 
+	askills "github.com/cy77cc/k8s-manage/internal/ai/skills"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/svc"
@@ -69,8 +71,10 @@ type executionRecord struct {
 }
 
 type handler struct {
-	svcCtx *svc.ServiceContext
-	store  *memoryStore
+	svcCtx         *svc.ServiceContext
+	store          *memoryStore
+	skillRegistry  *askills.Registry
+	skillExecutor  *askills.Executor
 }
 
 type memoryStore struct {
@@ -86,7 +90,7 @@ type memoryStore struct {
 }
 
 func newHandler(svcCtx *svc.ServiceContext) *handler {
-	return &handler{
+	h := &handler{
 		svcCtx: svcCtx,
 		store: &memoryStore{
 			db:                svcCtx.DB,
@@ -99,6 +103,15 @@ func newHandler(svcCtx *svc.ServiceContext) *handler {
 			referencedContext: map[string]map[string]any{},
 		},
 	}
+	if registry, err := askills.NewRegistry(askills.DefaultSkillsConfigPath); err == nil {
+		h.skillRegistry = registry
+	}
+	if svcCtx != nil && svcCtx.AI != nil {
+		h.skillExecutor = askills.NewExecutor(func(ctx context.Context, toolName string, params map[string]any) (tools.ToolResult, error) {
+			return svcCtx.AI.RunTool(ctx, toolName, params)
+		}, nil, nil)
+	}
+	return h
 }
 
 func (s *memoryStore) dbEnabled() bool { return s != nil && s.db != nil }

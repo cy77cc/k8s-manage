@@ -10,6 +10,8 @@ type GraphInput struct {
 	HelperRequests []experts.HelperRequest
 	HelperResults  []experts.ExpertResult
 	Strategy       experts.ExecutionStrategy
+	PrimaryStream  string
+	HelperStreams  []string
 }
 
 // GraphOutput is the final graph result projected to caller.

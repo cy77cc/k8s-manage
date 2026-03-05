@@ -39,6 +39,9 @@ Untitled Collection/
 # .idea/
 # .vscode/# Logs
 
+volumes/
+
+data/
 
 logs
 *.log

@@ -1,0 +1,109 @@
+version: "1.0"
+
+skills:
+  - name: deploy_service
+    display_name: "部署服务"
+    description: "将服务部署到目标环境，包含预览、审批、执行"
+    trigger_patterns:
+      - "部署服务"
+      - "发布服务"
+      - "上线服务"
+      - "deploy service"
+    risk_level: high
+    required_permissions:
+      - "service:deploy"
+    timeout_minutes: 60
+    parameters:
+      - name: service_id
+        type: int
+        required: true
+        description: "服务ID"
+        enum_source: "service_list_inventory"
+      - name: target_env
+        type: string
+        required: true
+        description: "目标环境"
+        default: "staging"
+      - name: cluster_id
+        type: int
+        required: false
+        description: "目标集群ID"
+        enum_source: "cluster_list_inventory"
+    steps:
+      - name: preview
+        type: tool
+        tool: deployment.release.preview
+        params_template:
+          service_id: "{{params.service_id}}"
+          env: "{{params.target_env}}"
+      - name: approval
+        type: approval
+        params_template:
+          reason: "deploy service {{params.service_id}}"
+      - name: execute
+        type: tool
+        tool: deployment.release.apply
+        params_template:
+          service_id: "{{params.service_id}}"
+          env: "{{params.target_env}}"
+
+  - name: diagnose_host
+    display_name: "主机诊断"
+    description: "执行主机健康检查并返回诊断结论"
+    trigger_patterns:
+      - "诊断主机"
+      - "主机故障"
+      - "host diagnose"
+      - "排查主机"
+    risk_level: low
+    required_permissions:
+      - "host:read"
+    timeout_minutes: 20
+    parameters:
+      - name: host_id
+        type: int
+        required: true
+        description: "主机ID"
+        enum_source: "host_list_inventory"
+    steps:
+      - name: collect
+        type: tool
+        tool: host_health_diagnose
+        params_template:
+          host_id: "{{params.host_id}}"
+
+  - name: batch_exec
+    display_name: "批量执行命令"
+    description: "在多台主机上预览并执行命令"
+    trigger_patterns:
+      - "批量执行"
+      - "批量命令"
+      - "batch exec"
+    risk_level: medium
+    required_permissions:
+      - "host:exec"
+    timeout_minutes: 45
+    parameters:
+      - name: host_ids
+        type: array<int>
+        required: true
+        description: "目标主机ID列表"
+      - name: command
+        type: string
+        required: true
+        description: "执行命令"
+    steps:
+      - name: preview
+        type: tool
+        tool: host.batch.exec.preview
+        params_template:
+          host_ids: "{{params.host_ids}}"
+          command: "{{params.command}}"
+      - name: approval
+        type: approval
+      - name: apply
+        type: tool
+        tool: host.batch.exec.apply
+        params_template:
+          host_ids: "{{params.host_ids}}"
+          command: "{{params.command}}"

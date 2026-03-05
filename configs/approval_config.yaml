@@ -1,0 +1,23 @@
+version: v1
+defaults:
+  require_confirmation_for_readonly: false
+  confirmation_timeout_seconds: 300
+  approval_timeout_seconds: 1800
+  risk_level: medium
+risk_policy:
+  low:
+    requires_approval: false
+    timeout_seconds: 300
+  medium:
+    requires_approval: true
+    timeout_seconds: 1800
+  high:
+    requires_approval: true
+    timeout_seconds: 1800
+tools:
+  service_deploy_apply:
+    risk_level: high
+    approval_timeout_seconds: 1800
+  host_batch_exec_apply:
+    risk_level: medium
+    approval_timeout_seconds: 900

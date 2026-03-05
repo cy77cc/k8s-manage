@@ -42,5 +42,8 @@ func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 		g.POST("/commands/execute", h.executeCommand)
 		g.GET("/commands/history", h.listCommandHistory)
 		g.GET("/commands/history/:id", h.getCommandHistory)
+		g.GET("/skills", h.listSkills)
+		g.POST("/skills/:name/execute", h.executeSkill)
+		g.POST("/skills/reload", h.reloadSkills)
 	}
 }
