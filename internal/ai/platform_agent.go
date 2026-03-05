@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cy77cc/k8s-manage/internal/ai/experts"
+	aigraph "github.com/cy77cc/k8s-manage/internal/ai/graph"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 )
 
@@ -31,6 +32,7 @@ type PlatformAgent struct {
 	registry     experts.ExpertRegistry
 	router       *experts.HybridRouter
 	orchestrator *experts.Orchestrator
+	graphRunner  compose.Runnable[*aigraph.GraphInput, *aigraph.GraphOutput]
 	tools        map[string]tool.InvokableTool
 	metas        map[string]tools.ToolMeta
 	mcp          *tools.MCPClientManager
@@ -84,6 +86,18 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 		return nil, err
 	}
 	orchestrator := experts.NewOrchestrator(registry, experts.NewResultAggregator(experts.AggregationTemplate, chatModel))
+	graphBuilder := aigraph.NewBuilderWithRunners(
+		aigraph.NewRegistryPrimaryRunner(registry),
+		aigraph.NewRegistryHelperRunner(registry),
+	)
+	graphDef, err := graphBuilder.Build(ctx)
+	if err != nil {
+		return nil, err
+	}
+	graphRunner, err := graphDef.Compile(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	return &PlatformAgent{
 		Runnable:     agent,
@@ -91,6 +105,7 @@ func NewPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 		registry:     registry,
 		router:       router,
 		orchestrator: orchestrator,
+		graphRunner:  graphRunner,
 		tools:        toolMap,
 		metas:        metaMap,
 		mcp:          mcpManager,
@@ -123,9 +138,17 @@ func (p *PlatformAgent) Stream(ctx context.Context, messages []*schema.Message) 
 		}
 		return p.Runnable.Stream(ctx, messages)
 	}
+	if p.graphRunner != nil {
+		out, err := p.graphRunner.Invoke(ctx, p.buildGraphInput(req))
+		if err == nil && out != nil {
+			sr, sw := schema.Pipe[*schema.Message](1)
+			sw.Send(schema.AssistantMessage(out.Response, nil), nil)
+			sw.Close()
+			return sr, nil
+		}
+	}
 	if p.orchestrator != nil {
-		stream, err := p.orchestrator.StreamExecute(ctx, req)
-		if err == nil && stream != nil {
+		if stream, err := p.orchestrator.StreamExecute(ctx, req); err == nil && stream != nil {
 			return stream, nil
 		}
 	}
@@ -137,14 +160,22 @@ func (p *PlatformAgent) Generate(ctx context.Context, messages []*schema.Message
 		return nil, fmt.Errorf("agent not initialized")
 	}
 	req := p.buildExecuteRequest(ctx, messages)
-	if req == nil || req.Decision == nil || p.orchestrator == nil {
+	if req == nil || req.Decision == nil {
 		return p.Runnable.Generate(ctx, messages)
 	}
-	result, err := p.orchestrator.Execute(ctx, req)
-	if err != nil {
-		return nil, err
+	if p.graphRunner != nil {
+		out, err := p.graphRunner.Invoke(ctx, p.buildGraphInput(req))
+		if err == nil && out != nil {
+			return schema.AssistantMessage(out.Response, nil), nil
+		}
 	}
-	return schema.AssistantMessage(result.Response, nil), nil
+	if p.orchestrator != nil {
+		result, err := p.orchestrator.Execute(ctx, req)
+		if err == nil && result != nil {
+			return schema.AssistantMessage(result.Response, nil), nil
+		}
+	}
+	return p.Runnable.Generate(ctx, messages)
 }
 
 func sceneFromMessages(content string) string {
@@ -187,6 +218,32 @@ func (p *PlatformAgent) buildExecuteRequest(ctx context.Context, messages []*sch
 		History:      messages,
 		EventEmitter: experts.ProgressEmitterFromContext(ctx),
 	}
+}
+
+func (p *PlatformAgent) buildGraphInput(req *experts.ExecuteRequest) *aigraph.GraphInput {
+	if req == nil || req.Decision == nil {
+		return &aigraph.GraphInput{}
+	}
+	input := &aigraph.GraphInput{
+		Message:  req.Message,
+		Request:  req,
+		Strategy: req.Decision.Strategy,
+	}
+	switch req.Decision.Strategy {
+	case experts.StrategyParallel, experts.StrategySequential:
+		input.HelperRequests = make([]experts.HelperRequest, 0, len(req.Decision.OptionalHelpers))
+		for _, helper := range req.Decision.OptionalHelpers {
+			name := strings.TrimSpace(helper)
+			if name == "" {
+				continue
+			}
+			input.HelperRequests = append(input.HelperRequests, experts.HelperRequest{
+				ExpertName: name,
+				Task:       fmt.Sprintf("协助分析用户请求：%s", req.Message),
+			})
+		}
+	}
+	return input
 }
 
 func (p *PlatformAgent) RunTool(ctx context.Context, toolName string, params map[string]any) (tools.ToolResult, error) {

@@ -64,6 +64,9 @@ func (r *Registry) Load() error {
 		}
 		loaded[item.Name] = expert
 	}
+	if err := r.attachExpertTools(loaded); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	r.experts = loaded
 	r.mu.Unlock()
@@ -89,6 +92,9 @@ func (r *Registry) loadDefaults() error {
 			return err
 		}
 		loaded[item.Name] = expert
+	}
+	if err := r.attachExpertTools(loaded); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	r.experts = loaded
@@ -116,6 +122,34 @@ func (r *Registry) instantiateExpert(cfg ExpertConfig) (*Expert, error) {
 		Agent:        agent,
 		Tools:        selected,
 	}, nil
+}
+
+func (r *Registry) attachExpertTools(loaded map[string]*Expert) error {
+	if len(loaded) == 0 {
+		return nil
+	}
+	for name, expert := range loaded {
+		if expert == nil {
+			continue
+		}
+		merged := make(map[string]tool.InvokableTool, len(expert.Tools)+len(loaded))
+		for toolName, t := range expert.Tools {
+			merged[toolName] = t
+		}
+		for helperName, helperTool := range BuildExpertTools(loaded, name) {
+			if _, exists := merged[helperName]; exists {
+				continue
+			}
+			merged[helperName] = helperTool
+		}
+		expert.Tools = merged
+		agent, err := r.buildAgent(expert.Persona, merged)
+		if err != nil {
+			return err
+		}
+		expert.Agent = agent
+	}
+	return nil
 }
 
 func (r *Registry) buildAgent(persona string, selected map[string]tool.InvokableTool) (*react.Agent, error) {

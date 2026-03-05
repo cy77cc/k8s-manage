@@ -2,10 +2,10 @@ package experts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -13,14 +13,15 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-var helperRequestPattern = regexp.MustCompile(`\[REQUEST_HELPER:\s*([a-zA-Z0-9_]+):\s*([^\]]+)\]`)
-
+// Orchestrator executes expert plans.
+// Deprecated: prefer graph-based orchestration in internal/ai/graph.
 type Orchestrator struct {
 	registry   ExpertRegistry
 	executor   *ExpertExecutor
 	aggregator *ResultAggregator
 }
 
+// Deprecated: prefer graph-based orchestration in internal/ai/graph.
 func NewOrchestrator(registry ExpertRegistry, aggregator *ResultAggregator) *Orchestrator {
 	if aggregator == nil {
 		aggregator = NewResultAggregator(AggregationTemplate, nil)
@@ -361,8 +362,8 @@ func (o *Orchestrator) buildDecisionPrompt(req *ExecuteRequest) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString("如果需要助手，请输出：[REQUEST_HELPER: 助手名称: 任务描述]\n")
-	b.WriteString("如果不需要助手，请输出: [NO_HELPER]\n")
+	b.WriteString("请只输出 JSON，格式如下：\n")
+	b.WriteString("{\"need_helpers\": true/false, \"helper_requests\": [{\"expert_name\":\"助手名称\",\"task\":\"任务\"}], \"direct_answer\":\"无需助手时给出答案\"}\n")
 	return b.String()
 }
 
@@ -392,22 +393,41 @@ func (o *Orchestrator) buildSummaryPrompt(req *ExecuteRequest, helperResults []E
 
 func (o *Orchestrator) parsePrimaryDecision(content string, availableHelpers []string) *PrimaryDecision {
 	decision := &PrimaryDecision{NeedHelpers: false}
-	matches := helperRequestPattern.FindAllStringSubmatch(content, -1)
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
-		expertName := strings.TrimSpace(match[1])
-		task := strings.TrimSpace(match[2])
+	type rawDecision struct {
+		NeedHelpers    bool            `json:"need_helpers"`
+		HelperRequests []HelperRequest `json:"helper_requests"`
+		DirectAnswer   string          `json:"direct_answer"`
+	}
+	var raw rawDecision
+	if err := json.Unmarshal([]byte(strings.TrimSpace(content)), &raw); err == nil {
+		allowed := make(map[string]struct{}, len(availableHelpers))
 		for _, helper := range availableHelpers {
-			if helper == expertName {
-				decision.NeedHelpers = true
-				decision.HelperRequests = append(decision.HelperRequests, HelperRequest{ExpertName: expertName, Task: task})
-				break
+			name := strings.TrimSpace(helper)
+			if name == "" {
+				continue
 			}
+			allowed[name] = struct{}{}
+		}
+		for _, hr := range raw.HelperRequests {
+			name := strings.TrimSpace(hr.ExpertName)
+			task := strings.TrimSpace(hr.Task)
+			if name == "" || task == "" {
+				continue
+			}
+			if _, ok := allowed[name]; !ok {
+				continue
+			}
+			decision.NeedHelpers = true
+			decision.HelperRequests = append(decision.HelperRequests, HelperRequest{
+				ExpertName: name,
+				Task:       task,
+			})
+		}
+		if !decision.NeedHelpers {
+			decision.DirectAnswer = strings.TrimSpace(raw.DirectAnswer)
 		}
 	}
-	if !decision.NeedHelpers {
+	if !decision.NeedHelpers && strings.TrimSpace(decision.DirectAnswer) == "" {
 		decision.DirectAnswer = strings.TrimSpace(content)
 	}
 	return decision

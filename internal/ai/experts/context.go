@@ -1,21 +1,27 @@
 package experts
 
-import "context"
+import (
+	"context"
 
-type progressEmitterKey struct{}
+	aicallbacks "github.com/cy77cc/k8s-manage/internal/ai/callbacks"
+)
 
 func WithProgressEmitter(ctx context.Context, emitter ProgressEmitter) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
+	if emitter == nil {
+		return aicallbacks.WithEmitter(ctx, nil)
 	}
-	return context.WithValue(ctx, progressEmitterKey{}, emitter)
+	return aicallbacks.WithEmitter(ctx, aicallbacks.EventEmitterFunc(func(event string, payload any) bool {
+		emitter(event, payload)
+		return true
+	}))
 }
 
 func ProgressEmitterFromContext(ctx context.Context) ProgressEmitter {
-	if ctx == nil {
+	emitter := aicallbacks.EmitterFromContext(ctx)
+	if emitter == nil {
 		return nil
 	}
-	v := ctx.Value(progressEmitterKey{})
-	emitter, _ := v.(ProgressEmitter)
-	return emitter
+	return func(event string, payload any) {
+		emitter.Emit(event, payload)
+	}
 }

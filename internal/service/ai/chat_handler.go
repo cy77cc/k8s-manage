@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
-	"github.com/cy77cc/k8s-manage/internal/ai/experts"
+	aicallbacks "github.com/cy77cc/k8s-manage/internal/ai/callbacks"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
@@ -463,7 +463,7 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 		scene: scene,
 	})
 	ctx = tools.WithToolPolicyChecker(ctx, h.toolPolicy)
-	ctx = tools.WithToolEventEmitter(ctx, func(event string, payload any) {
+	ctx = aicallbacks.WithEmitter(ctx, aicallbacks.EventEmitterFunc(func(event string, payload any) bool {
 		switch event {
 		case "tool_call", "tool_result":
 			pm := toPayloadMap(payload)
@@ -475,7 +475,7 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 			case "tool_result":
 				tracker.noteResult(callID, toolName)
 			}
-			_ = emit(event, gin.H{
+			return emit(event, gin.H{
 				"tool":             toolName,
 				"call_id":          callID,
 				"payload":          pm,
@@ -483,11 +483,10 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 				"retry":            pm["retry"],
 				"param_resolution": pm["param_resolution"],
 			})
+		default:
+			return emit(event, toPayloadMap(payload))
 		}
-	})
-	ctx = experts.WithProgressEmitter(ctx, func(event string, payload any) {
-		_ = emit(event, toPayloadMap(payload))
-	})
+	}))
 	return ctx
 }
 

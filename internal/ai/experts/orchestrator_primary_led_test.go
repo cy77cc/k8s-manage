@@ -9,7 +9,7 @@ import (
 
 func TestParsePrimaryDecision(t *testing.T) {
 	o := NewOrchestrator(&fakeRegistry{}, NewResultAggregator(AggregationTemplate, nil))
-	content := "[REQUEST_HELPER: k8s_expert: 检查pod状态]\n[REQUEST_HELPER: unknown: 忽略我]"
+	content := `{"need_helpers":true,"helper_requests":[{"expert_name":"k8s_expert","task":"检查pod状态"},{"expert_name":"unknown","task":"忽略我"}]}`
 	decision := o.parsePrimaryDecision(content, []string{"k8s_expert", "topology_expert"})
 	if !decision.NeedHelpers {
 		t.Fatalf("expected NeedHelpers=true")
@@ -19,6 +19,18 @@ func TestParsePrimaryDecision(t *testing.T) {
 	}
 	if decision.HelperRequests[0].ExpertName != "k8s_expert" {
 		t.Fatalf("unexpected helper: %#v", decision.HelperRequests[0])
+	}
+}
+
+func TestParsePrimaryDecisionFallbackDirectAnswer(t *testing.T) {
+	o := NewOrchestrator(&fakeRegistry{}, NewResultAggregator(AggregationTemplate, nil))
+	content := "直接给出结论"
+	decision := o.parsePrimaryDecision(content, []string{"k8s_expert"})
+	if decision.NeedHelpers {
+		t.Fatalf("expected NeedHelpers=false")
+	}
+	if decision.DirectAnswer != content {
+		t.Fatalf("unexpected direct answer: %q", decision.DirectAnswer)
 	}
 }
 

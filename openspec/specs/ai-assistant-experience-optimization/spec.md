@@ -28,3 +28,13 @@ The system SHALL support one-command retrieval of cross-domain information with 
 - **WHEN** the user submits a command requesting service status with recent releases and alerts
 - **THEN** the system MUST return an aggregated summary and structured domain-specific details in a single response
 
+### Requirement: Unified callback events and graph orchestration
+The system SHALL provide a unified event callback channel for tool and expert lifecycle events, and MUST execute multi-expert orchestration through a graph-based workflow with safe fallback.
+
+#### Scenario: Emit tool and expert lifecycle events via one emitter
+- **WHEN** the assistant performs tool calls and expert collaboration
+- **THEN** the system MUST emit `tool_call`/`tool_result`/`expert_progress` events through a single callback emitter context
+
+#### Scenario: Execute multi-expert request via graph with fallback
+- **WHEN** router strategy is `parallel`, `sequential`, or `primary_led`
+- **THEN** the system MUST run graph-based expert orchestration and fallback to existing agent execution path when graph execution is unavailable
