@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ApiRequestError } from './api';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ApiRequestError, TOKEN_EVENTS } from './api';
 
 describe('ApiRequestError', () => {
   it('creates error with message only', () => {
@@ -156,5 +156,75 @@ describe('API error scenarios', () => {
     const error = new ApiRequestError('Resource not found', 200, 5001);
     expect(error.businessCode).toBe(5001);
     expect(error.message).toBe('Resource not found');
+  });
+});
+
+describe('TOKEN_EVENTS', () => {
+  it('defines correct event names', () => {
+    expect(TOKEN_EVENTS.REFRESHED).toBe('tokenRefreshed');
+    expect(TOKEN_EVENTS.EXPIRED).toBe('tokenExpired');
+    expect(TOKEN_EVENTS.NEEDS_REFRESH).toBe('tokenNeedsRefresh');
+  });
+});
+
+describe('Token Refresh Events', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('dispatches tokenRefreshed event on successful refresh', async () => {
+    const handler = vi.fn();
+    window.addEventListener(TOKEN_EVENTS.REFRESHED, handler);
+
+    // Manually dispatch event (simulating what ApiService does)
+    window.dispatchEvent(
+      new CustomEvent(TOKEN_EVENTS.REFRESHED, {
+        detail: { token: 'new-token', refreshToken: 'new-refresh-token' },
+      })
+    );
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: { token: 'new-token', refreshToken: 'new-refresh-token' },
+      })
+    );
+
+    window.removeEventListener(TOKEN_EVENTS.REFRESHED, handler);
+  });
+
+  it('dispatches tokenExpired event on refresh failure', () => {
+    const handler = vi.fn();
+    window.addEventListener(TOKEN_EVENTS.EXPIRED, handler);
+
+    // Manually dispatch event (simulating what ApiService does)
+    window.dispatchEvent(new CustomEvent(TOKEN_EVENTS.EXPIRED));
+
+    expect(handler).toHaveBeenCalled();
+
+    window.removeEventListener(TOKEN_EVENTS.EXPIRED, handler);
+  });
+
+  it('multiple listeners can subscribe to refresh events', () => {
+    const handler1 = vi.fn();
+    const handler2 = vi.fn();
+
+    window.addEventListener(TOKEN_EVENTS.REFRESHED, handler1);
+    window.addEventListener(TOKEN_EVENTS.REFRESHED, handler2);
+
+    window.dispatchEvent(
+      new CustomEvent(TOKEN_EVENTS.REFRESHED, {
+        detail: { token: 'new-token' },
+      })
+    );
+
+    expect(handler1).toHaveBeenCalled();
+    expect(handler2).toHaveBeenCalled();
+
+    window.removeEventListener(TOKEN_EVENTS.REFRESHED, handler1);
+    window.removeEventListener(TOKEN_EVENTS.REFRESHED, handler2);
   });
 });

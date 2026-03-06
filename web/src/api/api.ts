@@ -1,5 +1,10 @@
 import axios from 'axios';
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import {
+  TOKEN_EVENTS,
+  dispatchTokenRefreshed,
+  dispatchTokenExpired,
+} from '../utils/tokenManager';
 
 export class ApiRequestError extends Error {
   statusCode?: number;
@@ -160,12 +165,20 @@ class ApiService {
     return this.instance.request<ApiResponse<any>>(nextConfig);
   }
 
-  private async refreshAccessToken(): Promise<boolean> {
+  /**
+   * 刷新 accessToken
+   * 公开方法，支持主动刷新和事件通知
+   * @returns 刷新是否成功
+   */
+  async refreshAccessToken(): Promise<boolean> {
+    // 复用进行中的刷新请求，确保并发刷新只发起一次
     if (this.refreshPromise) {
       return this.refreshPromise;
     }
+
     const refreshToken = localStorage.getItem('refreshToken');
     if (!refreshToken) {
+      dispatchTokenExpired();
       return false;
     }
 
@@ -175,17 +188,33 @@ class ApiService {
         const payload = response.data;
         const token = payload?.data?.accessToken || payload?.data?.token;
         const nextRefreshToken = payload?.data?.refreshToken;
+
         if (!token) {
+          dispatchTokenExpired();
           return false;
         }
+
+        // 更新 localStorage
         localStorage.setItem('token', token);
         if (nextRefreshToken) {
           localStorage.setItem('refreshToken', nextRefreshToken);
         }
+
+        // 触发刷新成功事件
+        dispatchTokenRefreshed({
+          token,
+          refreshToken: nextRefreshToken,
+        });
+
         return true;
       } catch {
+        // 清除状态
         localStorage.removeItem('token');
         localStorage.removeItem('refreshToken');
+
+        // 触发刷新失败事件
+        dispatchTokenExpired();
+
         return false;
       } finally {
         this.refreshPromise = null;
@@ -197,4 +226,5 @@ class ApiService {
 }
 
 export const apiService = new ApiService();
+export { TOKEN_EVENTS };
 export default apiService;
