@@ -48,6 +48,53 @@ func hostSSHReadonly(ctx context.Context, deps PlatformDeps, input HostSSHReadon
 		})
 }
 
+func hostExec(ctx context.Context, deps PlatformDeps, input HostExecInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(
+		ctx,
+		ToolMeta{
+			Name:       "host_exec",
+			Mode:       ToolModeReadonly,
+			Risk:       ToolRiskMedium,
+			Provider:   "local",
+			Permission: "ai:tool:read",
+		},
+		input,
+		func(in HostExecInput) (any, string, error) {
+			hostID := in.HostID
+			cmd := strings.TrimSpace(in.Command)
+			if hostID <= 0 {
+				return nil, "host_exec", NewMissingParam("host_id", "host_id is required")
+			}
+			if cmd == "" {
+				return nil, "host_exec", NewMissingParam("command", "command is required")
+			}
+			if !isReadonlyHostCommand(cmd) {
+				return nil, "host_exec", NewInvalidParam("command", "command not allowed")
+			}
+			var node model.Node
+			if err := deps.DB.First(&node, hostID).Error; err != nil {
+				return nil, "db", err
+			}
+			out, err := executeHostCommand(deps, &node, cmd)
+			if err != nil {
+				return map[string]any{
+					"host_id":   hostID,
+					"command":   cmd,
+					"stdout":    out,
+					"stderr":    err.Error(),
+					"exit_code": 1,
+				}, "host_exec", nil
+			}
+			return map[string]any{
+				"host_id":   hostID,
+				"command":   cmd,
+				"stdout":    out,
+				"stderr":    "",
+				"exit_code": 0,
+			}, "host_exec", nil
+		})
+}
+
 func hostListInventory(ctx context.Context, deps PlatformDeps, input HostInventoryInput) (ToolResult, error) {
 	return runWithPolicyAndEvent(
 		ctx,
@@ -106,6 +153,72 @@ func hostListInventory(ctx context.Context, deps PlatformDeps, input HostInvento
 				"total": len(items),
 				"list":  items,
 			}, "db", nil
+		})
+}
+
+func hostBatch(ctx context.Context, deps PlatformDeps, input HostBatchInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(
+		ctx,
+		ToolMeta{
+			Name:       "host_batch",
+			Mode:       ToolModeMutating,
+			Risk:       ToolRiskHigh,
+			Provider:   "local",
+			Permission: "ai:tool:execute",
+		},
+		input,
+		func(in HostBatchInput) (any, string, error) {
+			hostIDs, err := normalizeHostIDs(in.HostIDs)
+			if err != nil {
+				return nil, "host_batch", err
+			}
+			cmd := strings.TrimSpace(in.Command)
+			if cmd == "" {
+				return nil, "host_batch", NewMissingParam("command", "command is required")
+			}
+
+			class, risk, blocked := classifyHostCommand(cmd)
+			if blocked {
+				return nil, "host_batch", NewInvalidParam("command", "dangerous command is blocked")
+			}
+
+			nodesByID, missing, err := loadHostNodesMap(deps, hostIDs)
+			if err != nil {
+				return nil, "db", err
+			}
+
+			results := map[string]any{}
+			succeeded := 0
+			failed := 0
+			for _, id := range hostIDs {
+				key := strconv.FormatUint(id, 10)
+				node, ok := nodesByID[id]
+				if !ok {
+					results[key] = map[string]any{"stdout": "", "stderr": "host not found", "exit_code": 1}
+					failed++
+					continue
+				}
+				out, execErr := executeHostCommand(deps, node, cmd)
+				if execErr != nil {
+					results[key] = map[string]any{"stdout": out, "stderr": execErr.Error(), "exit_code": 1}
+					failed++
+					continue
+				}
+				results[key] = map[string]any{"stdout": out, "stderr": "", "exit_code": 0}
+				succeeded++
+			}
+
+			return map[string]any{
+				"reason":           strings.TrimSpace(in.Reason),
+				"command":          cmd,
+				"command_class":    class,
+				"risk":             risk,
+				"target_count":     len(hostIDs),
+				"missing_host_ids": missing,
+				"succeeded":        succeeded,
+				"failed":           failed,
+				"results":          results,
+			}, "host_batch", nil
 		})
 }
 

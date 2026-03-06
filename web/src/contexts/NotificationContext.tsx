@@ -6,7 +6,7 @@ import type {
   WSMessage,
 } from '../types/notification';
 import { notificationApi } from '../api/modules/notification';
-import { Api } from '../api';
+import { aiApi } from '../api/modules/ai';
 import { useNotificationWebSocket } from '../hooks/useNotificationWebSocket';
 import { playNotificationSound } from '../hooks/useNotificationSound';
 import { notify as sendBrowserNotification } from '../utils/browserNotification';
@@ -175,7 +175,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
     const target = notifications.find((n) => n.id === id);
     if (!target) return;
     if (target.notification.type === 'approval' && target.notification.source_id) {
-      await Api.ai.confirmApproval(target.notification.source_id, true);
+      await aiApi.confirmApproval(target.notification.source_id, true);
     } else {
       await notificationApi.confirm(id);
     }
@@ -197,7 +197,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({
     const target = notifications.find((n) => n.id === id);
     if (!target) return;
     if (target.notification.type === 'approval' && target.notification.source_id) {
-      await Api.ai.confirmApproval(target.notification.source_id, false);
+      await aiApi.confirmApproval(target.notification.source_id, false);
       setNotifications((prev) => prev.filter((n) => n.id !== id));
       setUnreadCount((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
       window.dispatchEvent(new CustomEvent('ai-approval-updated', { detail: { token: target.notification.source_id, status: 'rejected' } }));

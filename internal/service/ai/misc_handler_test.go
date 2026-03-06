@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ func TestBranchSession(t *testing.T) {
 		t.Fatalf("auto migrate ai chat tables: %v", err)
 	}
 	baseSessionID := "sess-source-1"
-	if _, err := h.store.appendMessage(1, "services:list", baseSessionID, map[string]any{
+	if _, err := h.sessions.AppendMessage(1, "services:list", baseSessionID, map[string]any{
 		"id":        "u-1",
 		"role":      "user",
 		"content":   "先看服务列表",
@@ -27,7 +28,7 @@ func TestBranchSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
-	if _, err := h.store.appendMessage(1, "services:list", baseSessionID, map[string]any{
+	if _, err := h.sessions.AppendMessage(1, "services:list", baseSessionID, map[string]any{
 		"id":        "a-1",
 		"role":      "assistant",
 		"content":   "这是服务列表结果",
@@ -77,4 +78,105 @@ func TestBranchSession(t *testing.T) {
 	if resp.Data.Messages[0].ID == "u-1" {
 		t.Fatalf("expected cloned message id, got source id")
 	}
+}
+
+func TestListCurrentUpdateAndDeleteSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newCommandTestHandler(t)
+	if err := h.svcCtx.DB.AutoMigrate(&model.AIChatSession{}, &model.AIChatMessage{}); err != nil {
+		t.Fatalf("auto migrate ai chat tables: %v", err)
+	}
+	if _, err := h.sessions.AppendMessage(1, "ops", "sess-flow", map[string]any{
+		"id":        "msg-1",
+		"role":      "user",
+		"content":   "hello",
+		"timestamp": time.Now(),
+	}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	t.Run("list sessions unauthorized", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/ai/sessions", nil)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+		h.listSessions(c)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "unauthorized") {
+			t.Fatalf("unexpected unauthorized response: %d %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("list sessions", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/ai/sessions?scene=ops", nil)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+		c.Set("uid", uint64(1))
+		h.listSessions(c)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "sess-flow") {
+			t.Fatalf("unexpected list sessions response: %d %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("current session", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/ai/sessions/current?scene=ops", nil)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+		c.Set("uid", uint64(1))
+		h.currentSession(c)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "sess-flow") {
+			t.Fatalf("unexpected current session response: %d %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("update title and get session", func(t *testing.T) {
+		raw := bytes.NewBufferString(`{"title":"  renamed session  "}`)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/ai/sessions/sess-flow", raw)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+		c.Params = gin.Params{{Key: "id", Value: "sess-flow"}}
+		c.Set("uid", uint64(1))
+		h.updateSessionTitle(c)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "renamed session") {
+			t.Fatalf("unexpected update title response: %d %s", w.Code, w.Body.String())
+		}
+
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/ai/sessions/sess-flow", nil)
+		getW := httptest.NewRecorder()
+		getC, _ := gin.CreateTestContext(getW)
+		getC.Request = getReq
+		getC.Params = gin.Params{{Key: "id", Value: "sess-flow"}}
+		getC.Set("uid", uint64(1))
+		h.getSession(getC)
+		if getW.Code != http.StatusOK || !strings.Contains(getW.Body.String(), "renamed session") {
+			t.Fatalf("unexpected get session response: %d %s", getW.Code, getW.Body.String())
+		}
+	})
+
+	t.Run("delete session", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/ai/sessions/sess-flow", nil)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+		c.Params = gin.Params{{Key: "id", Value: "sess-flow"}}
+		c.Set("uid", uint64(1))
+		h.deleteSession(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("unexpected delete response: %d %s", w.Code, w.Body.String())
+		}
+
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/ai/sessions/sess-flow", nil)
+		getW := httptest.NewRecorder()
+		getC, _ := gin.CreateTestContext(getW)
+		getC.Request = getReq
+		getC.Params = gin.Params{{Key: "id", Value: "sess-flow"}}
+		getC.Set("uid", uint64(1))
+		h.getSession(getC)
+		if !strings.Contains(getW.Body.String(), "session not found") {
+			t.Fatalf("expected deleted session lookup to fail: %s", getW.Body.String())
+		}
+	})
 }

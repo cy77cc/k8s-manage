@@ -21,19 +21,6 @@ export interface AISession {
   updatedAt: string;
 }
 
-// AI推荐数据结构
-export interface AIRecommendation {
-  id: string;
-  type: string;
-  title: string;
-  content: string;
-  followup_prompt?: string;
-  reasoning?: string;
-  relevance: number;
-  action?: string;
-  params?: Record<string, any>;
-}
-
 export interface EmbeddedRecommendation {
   id: string;
   type: string;
@@ -76,93 +63,11 @@ export interface AIInterruptApprovalResult {
   interrupt_error?: string;
 }
 
-// AI分析结果数据结构
-export interface AIAnalysis {
-  id: string;
-  type: string;
-  title: string;
-  summary: string;
-  details: any;
-  createdAt: string;
-}
-
 // AI对话请求参数
 export interface AIChatParams {
   sessionId?: string;
   message: string;
   context?: any;
-}
-
-// AI分析请求参数
-export interface AIAnalysisParams {
-  type: string;
-  data: any;
-  context?: any;
-}
-
-// AI推荐请求参数
-export interface AIRecommendationParams {
-  type: string;
-  context: any;
-  limit?: number;
-}
-
-export interface AIActionPreviewParams {
-  action: string;
-  params: Record<string, any>;
-}
-
-export interface AIActionExecuteParams {
-  action?: string;
-  approval_token: string;
-}
-
-export interface AICommandPreviewParams {
-  command: string;
-  scene?: string;
-  params?: Record<string, any>;
-}
-
-export interface AICommandExecuteParams {
-  command_id?: string;
-  command?: string;
-  scene?: string;
-  params?: Record<string, any>;
-  confirm: boolean;
-  approval_token?: string;
-}
-
-export interface AICommandResult {
-  status: 'previewed' | 'blocked' | 'succeeded' | 'failed';
-  summary: string;
-  artifacts: Record<string, any>;
-  trace_id: string;
-  next_actions: string[];
-  plan?: Record<string, any>;
-  missing?: string[];
-  prompts?: Record<string, string>;
-  risk: 'readonly' | 'low' | 'high';
-}
-
-export interface AICommandHistoryItem {
-  id: string;
-  command: string;
-  intent: string;
-  status: string;
-  risk: string;
-  trace_id: string;
-  plan_hash: string;
-  execution_summary: string;
-  created_at: string;
-  plan?: Record<string, any>;
-  result?: Record<string, any>;
-}
-
-export interface AICommandSuggestion {
-  command: string;
-  hint?: string;
-  category?: string;
-  source?: string;
 }
 
 export interface AISceneToolsPayload {
@@ -171,17 +76,6 @@ export interface AISceneToolsPayload {
   keywords: string[];
   context_hints: string[];
   tools: AICapability[];
-}
-
-export interface AICommandAliasPayload {
-  scene: string;
-  aliases: Record<string, string>;
-  builtin?: Record<string, string>;
-}
-
-export interface AICommandTemplatePayload {
-  scene: string;
-  templates: Record<string, Record<string, any>>;
 }
 
 interface SSEMetaEvent {
@@ -561,60 +455,6 @@ export const aiApi = {
     return apiService.patch(`/ai/sessions/${id}`, { title });
   },
 
-  // AI分析
-  async analyze(params: AIAnalysisParams): Promise<ApiResponse<AIAnalysis>> {
-    return apiService.post('/ai/analyze', params);
-  },
-
-  // AI推荐
-  async getRecommendations(params: AIRecommendationParams): Promise<ApiResponse<AIRecommendation[]>> {
-    return apiService.post('/ai/recommendations', params);
-  },
-
-  // AI辅助功能
-  async getAssistance(params: {
-    type: string;
-    context: any;
-  }): Promise<ApiResponse<{
-    assistance: string;
-    actions?: Array<{
-      label: string;
-      value: string;
-    }>;
-  }>> {
-    return apiService.post('/ai/assist', params);
-  },
-
-  async previewAction(params: AIActionPreviewParams): Promise<ApiResponse<{
-    approval_token: string;
-    intent: string;
-    risk: string;
-    params: Record<string, any>;
-    previewDiff: string;
-  }>> {
-    return apiService.post('/ai/actions/preview', params);
-  },
-
-  async executeAction(params: AIActionExecuteParams): Promise<ApiResponse<Record<string, any>>> {
-    return apiService.post('/ai/actions/execute', params);
-  },
-
-  async k8sAnalyze(params: { cluster_id: number; namespace?: string; question?: string; context?: Record<string, any> }): Promise<ApiResponse<{
-    insights: string[];
-    risks: string[];
-    recommended_actions: Array<{ action: string; params?: Record<string, any>; reason?: string }>;
-  }>> {
-    return apiService.post('/ai/k8s/analyze', params);
-  },
-
-  async previewK8sAction(params: AIActionPreviewParams): Promise<ApiResponse<any>> {
-    return apiService.post('/ai/k8s/actions/preview', params);
-  },
-
-  async executeK8sAction(params: AIActionExecuteParams): Promise<ApiResponse<Record<string, any>>> {
-    return apiService.post('/ai/k8s/actions/execute', params);
-  },
-
   async getCapabilities(): Promise<ApiResponse<AICapability[]>> {
     return apiService.get('/ai/capabilities');
   },
@@ -655,43 +495,4 @@ export const aiApi = {
     return apiService.get(`/ai/scene/${scene}/tools`);
   },
 
-  async getCommandSuggestions(params?: { scene?: string; q?: string }): Promise<ApiResponse<AICommandSuggestion[]>> {
-    return apiService.get('/ai/commands/suggestions', { params });
-  },
-
-  async getCommandAliases(scene?: string): Promise<ApiResponse<AICommandAliasPayload>> {
-    return apiService.get('/ai/commands/aliases', { params: { scene } });
-  },
-
-  async saveCommandAlias(params: { scene?: string; alias: string; command: string }): Promise<ApiResponse<AICommandAliasPayload>> {
-    return apiService.post('/ai/commands/aliases', params);
-  },
-
-  async deleteCommandAlias(alias: string, scene?: string): Promise<ApiResponse<AICommandAliasPayload>> {
-    return apiService.delete(`/ai/commands/aliases/${alias}`, { params: { scene } });
-  },
-
-  async getCommandTemplates(scene?: string): Promise<ApiResponse<AICommandTemplatePayload>> {
-    return apiService.get('/ai/commands/templates', { params: { scene } });
-  },
-
-  async saveCommandTemplate(params: { scene?: string; name: string; params: Record<string, any> }): Promise<ApiResponse<AICommandTemplatePayload>> {
-    return apiService.post('/ai/commands/templates', params);
-  },
-
-  async previewCommand(params: AICommandPreviewParams): Promise<ApiResponse<AICommandResult>> {
-    return apiService.post('/ai/commands/preview', params);
-  },
-
-  async executeCommand(params: AICommandExecuteParams): Promise<ApiResponse<AICommandResult>> {
-    return apiService.post('/ai/commands/execute', params);
-  },
-
-  async getCommandHistory(limit = 20): Promise<ApiResponse<{ list: AICommandHistoryItem[]; total: number }>> {
-    return apiService.get('/ai/commands/history', { params: { limit } });
-  },
-
-  async getCommandHistoryDetail(id: string): Promise<ApiResponse<{ record: AICommandHistoryItem; audit_events: any[] }>> {
-    return apiService.get(`/ai/commands/history/${id}`);
-  },
 };

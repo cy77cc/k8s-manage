@@ -220,6 +220,59 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 	if err := addLocalTool(
 		&tools,
 		ToolMeta{
+			Name:        "k8s_query",
+			Description: "统一查询 K8s 资源，resource 必填，支持 name/label 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"resource"},
+			DefaultHint: map[string]any{"namespace": "default", "limit": 50},
+		},
+		func(ctx context.Context, input K8sQueryInput) (ToolResult, error) {
+			return k8sQuery(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "k8s_events",
+			Description: "查询 K8s 事件，支持按 kind/name 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			DefaultHint: map[string]any{"namespace": "default", "limit": 50},
+		},
+		func(ctx context.Context, input K8sEventsQueryInput) (ToolResult, error) {
+			return k8sEvents(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "k8s_logs",
+			Description: "查询 Pod 日志，pod 必填，可选 container 和 tail_lines。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskMedium,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"pod"},
+			DefaultHint: map[string]any{"namespace": "default", "tail_lines": 200},
+		},
+		func(ctx context.Context, input K8sLogsInput) (ToolResult, error) {
+			return k8sLogs(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
 			Name:        "k8s_list_resources",
 			Description: "列出 K8s 资源。resource 必填，可选 pods/services/deployments/nodes。",
 			Mode:        ToolModeReadonly,
@@ -269,6 +322,39 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 		return nil, err
 	}
 
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "service_status",
+			Description: "查询服务状态与基础运行信息，service_id 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"service_id"},
+		},
+		func(ctx context.Context, input ServiceStatusInput) (ToolResult, error) {
+			return serviceStatus(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "service_deploy",
+			Description: "统一服务部署工具，preview=true 返回预览，apply=true 执行部署。",
+			Mode:        ToolModeMutating,
+			Risk:        ToolRiskHigh,
+			Provider:    "local",
+			Permission:  "ai:tool:execute",
+			Required:    []string{"service_id", "cluster_id"},
+			DefaultHint: map[string]any{"preview": true, "apply": false},
+		},
+		func(ctx context.Context, input ServiceDeployInput) (ToolResult, error) {
+			return serviceDeploy(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
 	if err := addLocalTool(
 		&tools,
 		ToolMeta{
@@ -586,6 +672,39 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 	if err := addLocalTool(
 		&tools,
 		ToolMeta{
+			Name:        "monitor_alert",
+			Description: "查询活跃告警，支持 severity/service_id 过滤。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			DefaultHint: map[string]any{"limit": 50},
+		},
+		func(ctx context.Context, input MonitorAlertInput) (ToolResult, error) {
+			return monitorAlert(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "monitor_metric",
+			Description: "查询监控指标，query 必填，可选 time_range/step。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"query"},
+			DefaultHint: map[string]any{"time_range": "1h", "step": 60},
+		},
+		func(ctx context.Context, input MonitorMetricInput) (ToolResult, error) {
+			return monitorMetric(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
 			Name:        "monitor_alert_rule_list",
 			Description: "查询告警规则列表，支持 status/keyword 过滤。",
 			Mode:        ToolModeReadonly,
@@ -708,6 +827,22 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 	if err := addLocalTool(
 		&tools,
 		ToolMeta{
+			Name:        "host_exec",
+			Description: "在单台主机执行只读命令，host_id/command 必填。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskMedium,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			Required:    []string{"host_id", "command"},
+		},
+		func(ctx context.Context, input HostExecInput) (ToolResult, error) {
+			return hostExec(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
 			Name:        "host_ssh_exec_readonly",
 			Description: "远程只读命令执行，host_id/command 必填。",
 			Mode:        ToolModeReadonly,
@@ -767,6 +902,22 @@ func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
 		},
 		func(ctx context.Context, input ServiceInventoryInput) (ToolResult, error) {
 			return serviceListInventory(ctx, deps, input)
+		}); err != nil {
+		return nil, err
+	}
+	if err := addLocalTool(
+		&tools,
+		ToolMeta{
+			Name:        "host_batch",
+			Description: "批量执行主机命令（需审批），禁止危险命令。",
+			Mode:        ToolModeMutating,
+			Risk:        ToolRiskHigh,
+			Provider:    "local",
+			Permission:  "ai:tool:execute",
+			Required:    []string{"host_ids", "command"},
+		},
+		func(ctx context.Context, input HostBatchInput) (ToolResult, error) {
+			return hostBatch(ctx, deps, input)
 		}); err != nil {
 		return nil, err
 	}

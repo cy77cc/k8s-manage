@@ -69,40 +69,38 @@ type executionRecord struct {
 }
 
 type handler struct {
-	svcCtx *svc.ServiceContext
-	store  *memoryStore
+	svcCtx   *svc.ServiceContext
+	sessions *SessionStore
+	runtime  *runtimeStore
 }
 
-type memoryStore struct {
+type runtimeStore struct {
 	mu                sync.RWMutex
 	db                *gorm.DB
 	approvals         map[string]*approvalTicket
 	executions        map[string]*executionRecord
 	recommendations   map[string][]recommendationRecord
 	toolParams        map[string]map[string]any
-	commandAliases    map[string]map[string]string
-	commandTemplates  map[string]map[string]map[string]any
 	referencedContext map[string]map[string]any
 }
 
 func newHandler(svcCtx *svc.ServiceContext) *handler {
 	h := &handler{
-		svcCtx: svcCtx,
-		store: &memoryStore{
+		svcCtx:   svcCtx,
+		sessions: NewSessionStore(svcCtx.DB, svcCtx.Rdb),
+		runtime: &runtimeStore{
 			db:                svcCtx.DB,
 			approvals:         map[string]*approvalTicket{},
 			executions:        map[string]*executionRecord{},
 			recommendations:   map[string][]recommendationRecord{},
 			toolParams:        map[string]map[string]any{},
-			commandAliases:    map[string]map[string]string{},
-			commandTemplates:  map[string]map[string]map[string]any{},
 			referencedContext: map[string]map[string]any{},
 		},
 	}
 	return h
 }
 
-func (s *memoryStore) dbEnabled() bool { return s != nil && s.db != nil }
+func (s *runtimeStore) dbEnabled() bool { return s != nil && s.db != nil }
 
 func toSessionModel(uid uint64, scene string, in *aiSession) *model.AIChatSession {
 	return &model.AIChatSession{

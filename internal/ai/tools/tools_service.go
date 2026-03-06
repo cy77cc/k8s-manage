@@ -35,6 +35,61 @@ func serviceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetai
 		})
 }
 
+func serviceStatus(ctx context.Context, deps PlatformDeps, input ServiceStatusInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(
+		ctx,
+		ToolMeta{
+			Name:        "service_status",
+			Description: "读取服务当前状态与基础信息。",
+			Mode:        ToolModeReadonly,
+			Risk:        ToolRiskLow,
+			Provider:    "local",
+			Permission:  "ai:tool:read",
+			DefaultHint: map[string]any{"service_id": 0},
+		},
+		input,
+		func(in ServiceStatusInput) (any, string, error) {
+			if in.ServiceID <= 0 {
+				return nil, "validation", NewMissingParam("service_id", "service_id is required")
+			}
+			var svc model.Service
+			if err := deps.DB.First(&svc, in.ServiceID).Error; err != nil {
+				return nil, "db", err
+			}
+			return map[string]any{
+				"service_id":   svc.ID,
+				"name":         svc.Name,
+				"status":       svc.Status,
+				"env":          svc.Env,
+				"runtime_type": svc.RuntimeType,
+				"image":        svc.Image,
+				"replicas":     svc.Replicas,
+				"updated_at":   svc.UpdatedAt,
+			}, "db", nil
+		})
+}
+
+func serviceDeployPreviewData(deps PlatformDeps, sid, cid int) (any, string, error) {
+	if sid <= 0 {
+		return nil, "preview", NewMissingParam("service_id", "service_id is required")
+	}
+	if cid <= 0 {
+		return nil, "preview", NewMissingParam("cluster_id", "cluster_id is required")
+	}
+	var s model.Service
+	if err := deps.DB.First(&s, sid).Error; err != nil {
+		return nil, "db", err
+	}
+	return map[string]any{
+		"preview":    true,
+		"service_id": sid,
+		"cluster_id": cid,
+		"name":       s.Name,
+		"image":      s.Image,
+		"replicas":   s.Replicas,
+	}, "preview", nil
+}
+
 func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceDeployPreviewInput) (ToolResult, error) {
 	return runWithPolicyAndEvent(
 		ctx,
@@ -49,22 +104,55 @@ func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceD
 		},
 		input,
 		func(in ServiceDeployPreviewInput) (any, string, error) {
-			sid := in.ServiceID
-			cid := in.ClusterID
-			if sid <= 0 {
-				return nil, "preview", NewMissingParam("service_id", "service_id is required")
-			}
-			if cid <= 0 {
-				return nil, "preview", NewMissingParam("cluster_id", "cluster_id is required")
-			}
-			var s model.Service
-			if err := deps.DB.First(&s, sid).Error; err != nil {
-				return nil, "db", err
-			}
-			return map[string]any{"service_id": sid, "cluster_id": cid, "name": s.Name, "image": s.Image, "replicas": s.Replicas}, "preview", nil
+			return serviceDeployPreviewData(deps, in.ServiceID, in.ClusterID)
 		})
 }
 
+func serviceDeployApplyData(deps PlatformDeps, sid, cid int) (any, string, error) {
+	if sid <= 0 {
+		return nil, "deploy", NewMissingParam("service_id", "service_id is required")
+	}
+	if cid <= 0 {
+		return nil, "deploy", NewMissingParam("cluster_id", "cluster_id is required")
+	}
+	var svc model.Service
+	if err := deps.DB.First(&svc, sid).Error; err != nil {
+		return nil, "db", err
+	}
+	var cluster model.Cluster
+	if err := deps.DB.First(&cluster, cid).Error; err != nil {
+		return nil, "db", err
+	}
+	_ = cluster
+	return map[string]any{
+		"applied":    true,
+		"service_id": sid,
+		"cluster_id": cid,
+		"message":    "deploy apply executed in MVP mode",
+		"image":      svc.Image,
+	}, "deploy", nil
+}
+
+func serviceDeploy(ctx context.Context, deps PlatformDeps, input ServiceDeployInput) (ToolResult, error) {
+	return runWithPolicyAndEvent(
+		ctx,
+		ToolMeta{
+			Name:        "service_deploy",
+			Description: "统一服务部署工具，支持 preview/apply。",
+			Mode:        ToolModeMutating,
+			Risk:        ToolRiskHigh,
+			Provider:    "local",
+			Permission:  "ai:tool:execute",
+			DefaultHint: map[string]any{"preview": true, "apply": false},
+		},
+		input,
+		func(in ServiceDeployInput) (any, string, error) {
+			if in.Apply {
+				return serviceDeployApplyData(deps, in.ServiceID, in.ClusterID)
+			}
+			return serviceDeployPreviewData(deps, in.ServiceID, in.ClusterID)
+		})
+}
 func serviceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDeployApplyInput) (ToolResult, error) {
 	return runWithPolicyAndEvent(
 		ctx,
@@ -79,30 +167,7 @@ func serviceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDep
 		},
 		input,
 		func(in ServiceDeployApplyInput) (any, string, error) {
-			sid := in.ServiceID
-			cid := in.ClusterID
-			if sid <= 0 {
-				return nil, "deploy", NewMissingParam("service_id", "service_id is required")
-			}
-			if cid <= 0 {
-				return nil, "deploy", NewMissingParam("cluster_id", "cluster_id is required")
-			}
-			var svc model.Service
-			if err := deps.DB.First(&svc, sid).Error; err != nil {
-				return nil, "db", err
-			}
-			var cluster model.Cluster
-			if err := deps.DB.First(&cluster, cid).Error; err != nil {
-				return nil, "db", err
-			}
-			_ = cluster
-			return map[string]any{
-				"applied":    true,
-				"service_id": sid,
-				"cluster_id": cid,
-				"message":    "deploy apply executed in MVP mode",
-				"image":      svc.Image,
-			}, "deploy", nil
+			return serviceDeployApplyData(deps, in.ServiceID, in.ClusterID)
 		})
 }
 

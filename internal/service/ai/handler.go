@@ -46,7 +46,7 @@ func (h *handler) chatWithADK(c *gin.Context, req chatRequest, uid uint64, msg s
 	sid := strings.TrimSpace(req.SessionID)
 	scene := normalizeScene(toString(req.Context["scene"]))
 	if sid == "" {
-		if session, ok := h.store.currentSession(uid, scene); ok {
+		if session, ok := h.sessions.CurrentSession(uid, scene); ok {
 			sid = session.ID
 		} else {
 			sid = fmt.Sprintf("sess-%d", time.Now().UnixNano())
@@ -54,7 +54,7 @@ func (h *handler) chatWithADK(c *gin.Context, req chatRequest, uid uint64, msg s
 	}
 
 	userTime := time.Now()
-	session, err := h.store.appendMessage(uid, scene, sid, map[string]any{
+	session, err := h.sessions.AppendMessage(uid, scene, sid, map[string]any{
 		"id":        fmt.Sprintf("u-%d", userTime.UnixNano()),
 		"role":      "user",
 		"content":   msg,
@@ -81,7 +81,7 @@ func (h *handler) chatWithADK(c *gin.Context, req chatRequest, uid uint64, msg s
 
 	approvalToken := strings.TrimSpace(toString(req.Context["approval_token"]))
 	tracker := newToolEventTracker()
-	h.store.rememberContext(uid, scene, extractResourceContext(req.Context, msg))
+	h.runtime.rememberContext(uid, scene, extractResourceContext(req.Context, msg))
 	streamCtx := h.buildToolContext(c.Request.Context(), uid, approvalToken, scene, msg, req.Context, emitWithSession, tracker)
 
 	prompt := msg
@@ -137,7 +137,7 @@ func (h *handler) chatWithADK(c *gin.Context, req chatRequest, uid uint64, msg s
 	}
 
 	assistantTime := time.Now()
-	session, err = h.store.appendMessage(uid, scene, sid, map[string]any{
+	session, err = h.sessions.AppendMessage(uid, scene, sid, map[string]any{
 		"id":        fmt.Sprintf("a-%d", assistantTime.UnixNano()),
 		"role":      "assistant",
 		"content":   content,

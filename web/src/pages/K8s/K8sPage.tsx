@@ -19,9 +19,6 @@ const K8sPage: React.FC = () => {
   const [ingresses, setIngresses] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [dataSourceHint, setDataSourceHint] = useState<string>('');
-  const [aiInsights, setAiInsights] = useState<string[]>([]);
-  const [aiQuestion, setAiQuestion] = useState('');
-  const [k8sActionToken, setK8sActionToken] = useState('');
   const [selectedCluster, setSelectedCluster] = useState<Cluster | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -107,31 +104,6 @@ const K8sPage: React.FC = () => {
     setTopologyOpen(true);
   };
 
-  const aiAnalyze = async () => {
-    if (!selectedCluster) return;
-    const res = await Api.ai.k8sAnalyze({
-      cluster_id: Number(selectedCluster.id),
-      question: aiQuestion,
-      context: { page: '/k8s', cluster: selectedCluster.name },
-    });
-    setAiInsights(res.data.insights || []);
-    const action = res.data.recommended_actions?.[0];
-    if (action?.action) {
-      const preview = await Api.ai.previewK8sAction({ action: action.action, params: action.params || {} });
-      setK8sActionToken(preview.data.approval_token || '');
-    }
-  };
-
-  const executeAiAction = async () => {
-    if (!k8sActionToken) return;
-    await Api.ai.executeK8sAction({ approval_token: k8sActionToken });
-    setK8sActionToken('');
-    message.success('AI建议动作执行完成');
-    if (selectedCluster) {
-      openDetail(selectedCluster);
-    }
-  };
-
   return (
     <Card
       title="Kubernetes 集群"
@@ -159,7 +131,7 @@ const K8sPage: React.FC = () => {
         {dataSourceHint ? <Tag color={dataSourceHint.includes('live') ? 'success' : 'warning'}>data_source: {dataSourceHint}</Tag> : null}
         <Tabs
           items={[
-            { key: 'overview', label: 'Overview', children: <div><ClusterOverview nodes={nodes} deployments={deployments} pods={pods} services={services} ingresses={ingresses} dataSourceHint={dataSourceHint} /><div style={{ marginTop: 12 }}><Input placeholder="询问AI如何运维该集群" value={aiQuestion} onChange={(e) => setAiQuestion(e.target.value)} /><Space style={{ marginTop: 8 }}><Button onClick={aiAnalyze}>AI诊断</Button><Button type="primary" disabled={!k8sActionToken} onClick={executeAiAction}>执行AI建议</Button></Space><ul>{aiInsights.map((x, i) => <li key={i}>{x}</li>)}</ul></div></div> },
+            { key: 'overview', label: 'Overview', children: <ClusterOverview nodes={nodes} deployments={deployments} pods={pods} services={services} ingresses={ingresses} dataSourceHint={dataSourceHint} /> },
             { key: 'namespaces-policy', label: 'Namespaces', children: selectedCluster ? <NamespacePolicyPanel clusterId={String(selectedCluster.id)} /> : null },
             { key: 'rollouts', label: 'Rollouts', children: selectedCluster ? <RolloutPanel clusterId={String(selectedCluster.id)} /> : null },
             { key: 'hpa', label: 'HPA', children: selectedCluster ? <HPAEditor clusterId={String(selectedCluster.id)} /> : null },

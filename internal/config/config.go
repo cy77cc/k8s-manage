@@ -141,6 +141,7 @@ type FeatureFlags struct {
 	HostHealthDiagnostics   *bool `mapstructure:"host_health_diagnostics"`
 	HostMaintenanceMode     *bool `mapstructure:"host_maintenance_mode"`
 	AIGovernedHostExecution *bool `mapstructure:"ai_governed_host_execution"`
+	AIAssistantV2           *bool `mapstructure:"ai_assistant_v2"`
 }
 
 type Postgres struct {
@@ -240,8 +241,4 @@ func HostHealthDiagnosticsEnabled() bool {
 
 func HostMaintenanceModeEnabled() bool {
 	return boolOrDefault(CFG.FeatureFlags.HostMaintenanceMode, true)
-}
-
-func AIGovernedHostExecutionEnabled() bool {
-	return boolOrDefault(CFG.FeatureFlags.AIGovernedHostExecution, true)
 }

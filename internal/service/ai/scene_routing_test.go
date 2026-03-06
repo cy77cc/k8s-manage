@@ -40,35 +40,3 @@ func TestSceneToolsEndpoint(t *testing.T) {
 		t.Fatalf("unexpected scene: %s", resp.Data.Scene)
 	}
 }
-
-func TestCommandSuggestionsFilter(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	h := newCommandTestHandler(t)
-	h.store.saveAlias(1, "scene:services:list", "svcstat", "service.status")
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/ai/commands/suggestions?scene=scene:services:list&q=svc", nil)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = req
-	c.Set("uid", uint64(1))
-
-	h.commandSuggestions(c)
-	if w.Code != http.StatusOK {
-		t.Fatalf("unexpected status code: %d", w.Code)
-	}
-	var resp struct {
-		Code int `json:"code"`
-		Data []struct {
-			Command string `json:"command"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Code != 1000 {
-		t.Fatalf("unexpected business code: %d", resp.Code)
-	}
-	if len(resp.Data) == 0 {
-		t.Fatalf("expected filtered suggestions")
-	}
-}

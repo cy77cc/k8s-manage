@@ -104,3 +104,49 @@ func TestConfirmConfirmation_ForbiddenForNonOwner(t *testing.T) {
 	}
 }
 
+func TestConfirmConfirmation_CancelByOwner(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newCommandTestHandler(t)
+	if err := h.svcCtx.DB.AutoMigrate(&model.ConfirmationRequest{}); err != nil {
+		t.Fatalf("auto migrate confirmation: %v", err)
+	}
+	svc := NewConfirmationService(h.svcCtx.DB)
+	item, err := svc.RequestConfirmation(httptest.NewRequest(http.MethodGet, "/", nil).Context(), ConfirmationRequestInput{
+		RequestUserID: 1,
+		ToolName:      "host_batch_exec_apply",
+		ToolMode:      "mutating",
+		RiskLevel:     "medium",
+		Timeout:       2 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("request confirmation: %v", err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"approve": false, "reason": "cancel it"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ai/confirmations/"+item.ID+"/confirm", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	c.Params = gin.Params{{Key: "id", Value: item.ID}}
+	c.Set("uid", uint64(1))
+
+	h.confirmConfirmation(c)
+
+	var resp struct {
+		Code xcode.Xcode `json:"code"`
+		Data struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Code != xcode.Success {
+		t.Fatalf("expected success, got code=%d body=%s", resp.Code, w.Body.String())
+	}
+	if resp.Data.Status != confirmationStatusCancelled {
+		t.Fatalf("expected status=%s, got %s", confirmationStatusCancelled, resp.Data.Status)
+	}
+}

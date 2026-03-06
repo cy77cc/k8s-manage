@@ -4,6 +4,57 @@
 
 本文档介绍了 OpsPilot 平台重构后的组件库使用方法。所有组件都基于 Ant Design，并通过统一的主题配置实现了一致的视觉风格。
 
+## AI Chat V2
+
+当前 AI 入口已经统一到 `web/src/pages/AIChat/`。旧的 `web/src/components/AI/*` 组件和旧命令中心页面已移除，不再作为可复用组件来源。
+
+### 页面结构
+
+- `ChatPage`
+- `ConversationSidebar`
+- `ChatMain`
+- `useChatSession`
+- `useSSEConnection`
+- `useConfirmation`
+- `useAIChatShortcuts`
+
+### 设计约束
+
+- AI 页面是页面级组合，不再提供旧的全局悬浮助手组件
+- `/ai` 路由直接渲染 `AIChatPage`
+- 工具轨迹、审批卡片、推荐动作统一在 `ChatMain` 内展示
+- 会话数据通过 `/api/v1/ai/sessions*` 和 SSE `done.session` 同步
+
+### 使用方式
+
+```tsx
+import AIChatPage from '../src/pages/AIChat/ChatPage';
+
+export default function AIPageRoute() {
+  return <AIChatPage />;
+}
+```
+
+### 关键类型
+
+AI 页面内部类型集中在 `web/src/pages/AIChat/types.ts`：
+
+- `AIChatSession`
+- `AIChatMessage`
+- `AIChatToolTrace`
+- `AIChatAskRequest`
+- `AIChatDonePayload`
+
+### 不再使用的旧组件
+
+以下组件已从代码库移除，不应继续引用：
+
+- `ChatInterface`
+- `GlobalAIAssistant`
+- `CommandPanel`
+- `AnalysisPanel`
+- `RecommendationPanel`
+
 ## 设计原则
 
 - **一致性**: 所有组件遵循统一的设计规范

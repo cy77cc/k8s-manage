@@ -22,7 +22,6 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../Auth/AuthContext';
 import ProjectSwitcher from '../Project/ProjectSwitcher';
-import GlobalAIAssistant from '../AI/GlobalAIAssistant';
 import { NotificationBell } from '../Notification';
 import '../Notification/notification.css';
 import { useI18n } from '../../i18n';
@@ -398,9 +397,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                 onClick={() => setHelpOpen(true)}
               />
             </Tooltip>
-
-            {/* AI 助手 */}
-            <GlobalAIAssistant inlineTrigger />
 
             {/* 通知 */}
             <NotificationBell onViewAll={() => navigate('/monitor')} />

@@ -17,6 +17,15 @@ func TestBuildLocalTools_HasSchemaAndRequired(t *testing.T) {
 	}
 
 	cases := []string{
+		"k8s_query",
+		"k8s_logs",
+		"k8s_events",
+		"host_exec",
+		"host_batch",
+		"service_deploy",
+		"service_status",
+		"monitor_alert",
+		"monitor_metric",
 		"os_get_cpu_mem",
 		"k8s_get_pod_logs",
 		"service_deploy_apply",

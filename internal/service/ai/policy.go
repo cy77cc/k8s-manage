@@ -19,6 +19,9 @@ func (h *handler) toolPolicy(ctx context.Context, meta tools.ToolMeta, params ma
 	if !h.hasPermission(uid, meta.Permission) {
 		return errors.New("permission denied")
 	}
+	if shouldSkipToolApproval(meta, params) {
+		return nil
+	}
 	if meta.Mode == tools.ToolModeReadonly {
 		return nil
 	}
@@ -49,7 +52,7 @@ func (h *handler) toolPolicy(ctx context.Context, meta tools.ToolMeta, params ma
 		}
 	}
 	if strings.TrimSpace(approvalToken) == "" {
-		t := h.store.newApproval(uid, approvalTicket{
+		t := h.runtime.newApproval(uid, approvalTicket{
 			Tool:   meta.Name,
 			Params: params,
 			Risk:   meta.Risk,
@@ -63,7 +66,7 @@ func (h *handler) toolPolicy(ctx context.Context, meta tools.ToolMeta, params ma
 			Message:   "approval required",
 		}
 	}
-	t, ok := h.store.getApproval(approvalToken)
+	t, ok := h.runtime.getApproval(approvalToken)
 	if !ok {
 		return errors.New("approval not found")
 	}
@@ -80,6 +83,15 @@ func (h *handler) toolPolicy(ctx context.Context, meta tools.ToolMeta, params ma
 		return errors.New("approval not approved")
 	}
 	return nil
+}
+
+func shouldSkipToolApproval(meta tools.ToolMeta, params map[string]any) bool {
+	if meta.Name != "service_deploy" {
+		return false
+	}
+	applyRequested := toBool(params["apply"])
+	previewRequested := toBool(params["preview"])
+	return previewRequested && !applyRequested
 }
 
 func (h *handler) newConfirmationRequiredError(ctx context.Context, uid uint64, runtime map[string]any, meta tools.ToolMeta, params map[string]any, confirmationSvc *ConfirmationService) error {

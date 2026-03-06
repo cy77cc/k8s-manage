@@ -17,7 +17,7 @@ func BuildMCPProxyTools(manager *MCPClientManager) ([]RegisteredTool, error) {
 	out := make([]RegisteredTool, 0, len(list))
 	for _, t := range list {
 		meta := ToolMeta{
-			Name:        "mcp.default." + t.Name,
+			Name:        t.Name,
 			Description: t.Description,
 			Mode:        ToolModeReadonly,
 			Risk:        ToolRiskMedium,

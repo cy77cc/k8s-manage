@@ -23,10 +23,6 @@ vi.mock('../Project/ProjectSwitcher', () => ({
   default: () => <div data-testid="project-switcher" />,
 }));
 
-vi.mock('../AI/GlobalAIAssistant', () => ({
-  default: () => <div data-testid="ai-assistant" />,
-}));
-
 vi.mock('../Notification', () => ({
   NotificationBell: () => <div data-testid="notification-bell" />,
 }));

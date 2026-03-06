@@ -27,6 +27,8 @@ func seedPermissionTestData(t *testing.T, h *handler) {
 	_ = db.Exec("DELETE FROM permissions").Error
 	_ = db.Exec("DELETE FROM roles").Error
 	_ = db.Exec("DELETE FROM users").Error
+	_ = db.Exec("DELETE FROM services").Error
+	_ = db.Exec("DELETE FROM nodes").Error
 
 	_ = db.Create(&model.User{ID: 1, Username: "admin001", PasswordHash: "x", Email: "admin001@example.com"}).Error
 	_ = db.Create(&model.User{ID: 2, Username: "approver1", PasswordHash: "x", Email: "approver1@example.com"}).Error

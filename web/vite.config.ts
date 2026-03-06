@@ -47,16 +47,45 @@ export default defineConfig({
     // 代码分割优化
     rollupOptions: {
       output: {
-        // 手动分块
-        manualChunks: {
-          // React 核心库
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          // Ant Design
-          'antd-vendor': ['antd', '@ant-design/icons'],
-          // 动画库
-          'animation-vendor': ['framer-motion'],
-          // 工具库
-          'utils-vendor': ['axios', 'dayjs'],
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/react-router-dom/')) {
+              return 'react-vendor'
+            }
+            // antd 和 @ant-design/icons 必须在同一个 chunk 中，避免循环依赖导致的初始化错误
+            if (id.includes('/antd/') || id.includes('/@ant-design/icons/') || id.includes('/@ant-design/cssinjs/') || id.includes('/rc-')) {
+              return 'antd-vendor'
+            }
+            if (id.includes('/@ant-design/x/')) {
+              return 'ai-ui'
+            }
+            if (id.includes('/framer-motion/')) {
+              return 'animation-vendor'
+            }
+            if (
+              id.includes('/react-markdown/') ||
+              id.includes('/react-syntax-highlighter/') ||
+              id.includes('/remark-gfm/')
+            ) {
+              return 'markdown-vendor'
+            }
+            if (
+              id.includes('/@monaco-editor/') ||
+              id.includes('/monaco-editor/') ||
+              id.includes('/xterm/') ||
+              id.includes('/xterm-addon-fit/')
+            ) {
+              return 'editor-vendor'
+            }
+            if (id.includes('/@ant-design/charts/') || id.includes('/recharts/')) {
+              return 'charts-vendor'
+            }
+            if (id.includes('/axios/') || id.includes('/dayjs/') || id.includes('/ahooks/') || id.includes('/cmdk/')) {
+              return 'utils-vendor'
+            }
+          }
+
+          return undefined
         },
         // 文件命名
         chunkFileNames: 'assets/js/[name]-[hash].js',

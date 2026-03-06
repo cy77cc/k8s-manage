@@ -1,8 +1,8 @@
 package ai
 
 import (
-	"strings"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	adkcore "github.com/cloudwego/eino/adk"
@@ -136,5 +136,39 @@ func TestInterruptPayloadFromSignalIncludesApprovalMetadata(t *testing.T) {
 	}
 	if payload["approval_required"] != true {
 		t.Fatalf("expected approval_required true, got %#v", payload["approval_required"])
+	}
+}
+
+func TestSSEWriterEmitsDonePayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	w := newSSEWriter(c, rec, "turn-test-done")
+	payload := buildDonePayload(
+		&aiSession{ID: "sess-done"},
+		"ok",
+		toolSummary{Calls: 2, Results: 2},
+		[]recommendationRecord{{ID: "r1", Type: "suggestion", Title: "Next", Content: "do next"}},
+	)
+	if ok := w.Emit("done", payload); !ok {
+		t.Fatalf("expected done emit ok")
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close sse writer: %v", err)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: done") {
+		t.Fatalf("missing done event: %s", body)
+	}
+	if !strings.Contains(body, "\"stream_state\":\"ok\"") {
+		t.Fatalf("missing stream_state in done payload: %s", body)
+	}
+	if !strings.Contains(body, "\"turn_recommendations\"") {
+		t.Fatalf("missing recommendations in done payload: %s", body)
+	}
+	if !strings.Contains(body, "\"session\":{\"id\":\"sess-done\"") {
+		t.Fatalf("missing session payload: %s", body)
 	}
 }

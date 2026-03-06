@@ -291,19 +291,19 @@ func (h *handler) buildToolContext(ctx context.Context, uid uint64, approvalToke
 	if _, ok := normalized["require_confirmation"]; !ok {
 		normalized["require_confirmation"] = true
 	}
-	for k, v := range h.store.getRememberedContext(uid, scene) {
+	for k, v := range h.runtime.getRememberedContext(uid, scene) {
 		if strings.TrimSpace(toString(normalized[k])) == "" {
 			normalized[k] = v
 		}
 	}
-	for k, v := range resolveReferencePronouns(userMessage, h.store.getRememberedContext(uid, scene)) {
+	for k, v := range resolveReferencePronouns(userMessage, h.runtime.getRememberedContext(uid, scene)) {
 		if strings.TrimSpace(toString(normalized[k])) == "" {
 			normalized[k] = v
 		}
 	}
 	ctx = tools.WithToolRuntimeContext(ctx, normalized)
 	ctx = tools.WithToolMemoryAccessor(ctx, &toolMemoryAccessor{
-		store: h.store,
+		store: h.runtime,
 		uid:   uid,
 		scene: scene,
 	})

@@ -18,19 +18,24 @@ type MCPConfig struct {
 	Transport string
 	Endpoint  string
 	Command   string
+	Prefix    string
 }
 
 type MCPToolInfo struct {
 	Name        string
+	RemoteName  string
 	Description string
 	Schema      map[string]any
 	Required    []string
 }
 
 type MCPClientManager struct {
-	mu    sync.RWMutex
-	cli   *client.Client
-	tools []MCPToolInfo
+	mu          sync.RWMutex
+	cli         *client.Client
+	tools       []MCPToolInfo
+	prefix      string
+	remoteIndex map[string]string
+	callToolFn  func(ctx context.Context, toolName string, args map[string]any) (*mcp.CallToolResult, error)
 }
 
 func MCPConfigFromEnv() MCPConfig {
@@ -44,11 +49,16 @@ func MCPConfigFromEnv() MCPConfig {
 		endpoint = "http://localhost:12345/sse"
 	}
 	command := strings.TrimSpace(os.Getenv("AI_MCP_COMMAND"))
+	prefix := NormalizeToolName(strings.TrimSpace(os.Getenv("AI_MCP_PREFIX")))
+	if prefix == "" {
+		prefix = "mcp_default"
+	}
 	return MCPConfig{
 		Enable:    enable,
 		Transport: transportType,
 		Endpoint:  endpoint,
 		Command:   command,
+		Prefix:    prefix,
 	}
 }
 
@@ -57,7 +67,10 @@ func NewMCPClientManager(ctx context.Context, cfg MCPConfig) (*MCPClientManager,
 		return nil, nil
 	}
 
-	manager := &MCPClientManager{}
+	manager := &MCPClientManager{
+		prefix:      sanitizeMCPPrefix(cfg.Prefix),
+		remoteIndex: map[string]string{},
+	}
 	var cli *client.Client
 	var err error
 	switch strings.ToLower(strings.TrimSpace(cfg.Transport)) {
@@ -100,14 +113,52 @@ func NewMCPClientManager(ctx context.Context, cfg MCPConfig) (*MCPClientManager,
 	}
 
 	manager.cli = cli
-	if err := manager.refreshTools(startCtx); err != nil {
+	if err := manager.RefreshTools(startCtx); err != nil {
 		_ = cli.Close()
 		return nil, err
 	}
 	return manager, nil
 }
 
-func (m *MCPClientManager) refreshTools(ctx context.Context) error {
+func sanitizeMCPPrefix(prefix string) string {
+	normalized := NormalizeToolName(prefix)
+	if normalized == "" {
+		return "mcp_default"
+	}
+	return normalized
+}
+
+func (m *MCPClientManager) Prefix() string {
+	if m == nil {
+		return "mcp_default"
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if strings.TrimSpace(m.prefix) == "" {
+		return "mcp_default"
+	}
+	return m.prefix
+}
+
+func (m *MCPClientManager) ToolNameForRemote(remoteName string) string {
+	prefix := m.Prefix()
+	if strings.TrimSpace(remoteName) == "" {
+		return prefix
+	}
+	return prefix + "_" + NormalizeToolName(remoteName)
+}
+
+func (m *MCPClientManager) RemoteNameForTool(toolName string) string {
+	if m == nil {
+		return ""
+	}
+	normalized := NormalizeToolName(toolName)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.remoteIndex[normalized]
+}
+
+func (m *MCPClientManager) RefreshTools(ctx context.Context) error {
 	if m == nil || m.cli == nil {
 		return nil
 	}
@@ -116,6 +167,7 @@ func (m *MCPClientManager) refreshTools(ctx context.Context) error {
 		return fmt.Errorf("mcp list tools failed: %w", err)
 	}
 	out := make([]MCPToolInfo, 0, len(res.Tools))
+	index := make(map[string]string, len(res.Tools))
 	for _, t := range res.Tools {
 		schema := map[string]any{}
 		required := []string{}
@@ -127,15 +179,19 @@ func (m *MCPClientManager) refreshTools(ctx context.Context) error {
 				schema["required"] = required
 			}
 		}
+		prefixedName := m.ToolNameForRemote(t.Name)
 		out = append(out, MCPToolInfo{
-			Name:        t.Name,
+			Name:        prefixedName,
+			RemoteName:  t.Name,
 			Description: t.Description,
 			Schema:      schema,
 			Required:    required,
 		})
+		index[prefixedName] = t.Name
 	}
 	m.mu.Lock()
 	m.tools = out
+	m.remoteIndex = index
 	m.mu.Unlock()
 	return nil
 }
@@ -153,17 +209,24 @@ func (m *MCPClientManager) ListTools() []MCPToolInfo {
 
 func (m *MCPClientManager) CallTool(ctx context.Context, toolName string, args map[string]any) (*mcp.CallToolResult, error) {
 	if m == nil || m.cli == nil {
-		return nil, fmt.Errorf("mcp client not enabled")
+		if m == nil || m.callToolFn == nil {
+			return nil, fmt.Errorf("mcp client not enabled")
+		}
+	}
+	remoteName := strings.TrimSpace(toolName)
+	if mapped := strings.TrimSpace(m.RemoteNameForTool(toolName)); mapped != "" {
+		remoteName = mapped
+	}
+	if m.callToolFn != nil {
+		return m.callToolFn(ctx, remoteName, args)
 	}
 	return m.cli.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
-			Name:      toolName,
+			Name:      remoteName,
 			Arguments: args,
 		},
 	})
 }
-
-
 
 func (m *MCPClientManager) Close() error {
 	if m == nil || m.cli == nil {

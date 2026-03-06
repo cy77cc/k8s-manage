@@ -61,8 +61,3 @@ func CheckModelHealth(ctx context.Context, chatModel model.ToolCallingChatModel)
 	}
 	return nil
 }
-
-// NewChatModel keeps backward-compatible constructor name.
-func NewChatModel(ctx context.Context) (model.ToolCallingChatModel, error) {
-	return NewToolCallingChatModel(ctx)
-}

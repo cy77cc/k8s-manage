@@ -42,7 +42,7 @@ func MustNewServiceContext() *ServiceContext {
 	if err != nil {
 		logger.L().Warn("Failed to initialize devops", logger.Error(err))
 	}
-	chatModel, err := ai.NewChatModel(ctx)
+	chatModel, err := ai.NewToolCallingChatModel(ctx)
 	if err != nil {
 		logger.L().Warn("Failed to initialize AI chat model",
 			logger.String("provider", config.CFG.LLM.Provider),

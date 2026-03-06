@@ -22,6 +22,7 @@ type PlatformRunner struct {
 	checkpoints  adk.CheckPointStore
 	agent        adk.Agent
 	Model        model.ToolCallingChatModel
+	registry     *ToolRegistry
 	tools        map[string]tool.InvokableTool
 	metas        map[string]tools.ToolMeta
 	mcp          *tools.MCPClientManager
@@ -54,14 +55,10 @@ func NewPlatformRunner(ctx context.Context, chatModel model.ToolCallingChatModel
 		return nil, err
 	}
 
-	baseTools := make([]tool.BaseTool, 0, len(registered))
-	toolMap := make(map[string]tool.InvokableTool, len(registered))
-	metaMap := make(map[string]tools.ToolMeta, len(registered))
-	for _, item := range registered {
-		baseTools = append(baseTools, tools.WrapRegisteredTool(item))
-		toolMap[item.Meta.Name] = item.Tool
-		metaMap[item.Meta.Name] = item.Meta
-	}
+	registry := NewToolRegistry(registered)
+	baseTools := registry.BaseTools()
+	toolMap := registry.ToolMap()
+	metaMap := registry.MetaMap()
 
 	agent, err := newPlatformAgent(ctx, chatModel, baseTools)
 	if err != nil {
@@ -94,6 +91,7 @@ func NewPlatformRunner(ctx context.Context, chatModel model.ToolCallingChatModel
 		checkpoints:  store,
 		agent:        agent,
 		Model:        chatModel,
+		registry:     registry,
 		tools:        toolMap,
 		metas:        metaMap,
 		mcp:          mcpManager,
@@ -123,6 +121,13 @@ func (p *PlatformRunner) ToolMetas() []tools.ToolMeta {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func (p *PlatformRunner) ToolRegistry() *ToolRegistry {
+	if p == nil {
+		return nil
+	}
+	return p.registry
 }
 
 func (p *PlatformRunner) Query(ctx context.Context, sessionID, message string, opts ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {

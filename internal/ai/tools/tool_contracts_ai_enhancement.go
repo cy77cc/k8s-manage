@@ -97,7 +97,19 @@ type MonitorAlertActiveInput struct {
 	Limit     int    `json:"limit,omitempty" jsonschema:"description=max alerts,default=50"`
 }
 
+type MonitorAlertInput struct {
+	Severity  string `json:"severity,omitempty" jsonschema:"description=optional severity filter"`
+	ServiceID int    `json:"service_id,omitempty" jsonschema:"description=optional service id filter"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"description=max alerts,default=50"`
+}
+
 type MonitorMetricQueryInput struct {
+	Query     string `json:"query" jsonschema:"required,description=metric query or metric name"`
+	TimeRange string `json:"time_range,omitempty" jsonschema:"description=time range,default=1h"`
+	Step      int    `json:"step,omitempty" jsonschema:"description=step seconds,default=60"`
+}
+
+type MonitorMetricInput struct {
 	Query     string `json:"query" jsonschema:"required,description=metric query or metric name"`
 	TimeRange string `json:"time_range,omitempty" jsonschema:"description=time range,default=1h"`
 	Step      int    `json:"step,omitempty" jsonschema:"description=step seconds,default=60"`

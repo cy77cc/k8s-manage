@@ -68,7 +68,7 @@ func (h *handler) previewTool(c *gin.Context) {
 		"approval_required": meta.Mode == tools.ToolModeMutating,
 	}
 	if meta.Mode == tools.ToolModeMutating {
-		t := h.store.newApproval(uid, approvalTicket{
+		t := h.runtime.newApproval(uid, approvalTicket{
 			Tool:   meta.Name,
 			Params: req.Params,
 			Risk:   meta.Risk,
@@ -135,7 +135,7 @@ func (h *handler) executeTool(c *gin.Context) {
 	if result.LatencyMS == 0 {
 		rec.Result.LatencyMS = time.Since(start).Milliseconds()
 	}
-	h.store.saveExecution(rec)
+	h.runtime.saveExecution(rec)
 	httpx.OK(c, rec)
 }
 
@@ -144,7 +144,7 @@ func (h *handler) getExecution(c *gin.Context) {
 		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
 		return
 	}
-	rec, ok := h.store.getExecution(c.Param("id"))
+	rec, ok := h.runtime.getExecution(c.Param("id"))
 	if !ok {
 		httpx.Fail(c, xcode.NotFound, "execution not found")
 		return
@@ -176,7 +176,7 @@ func (h *handler) createApproval(c *gin.Context) {
 		httpx.Fail(c, xcode.ParamError, "readonly tool does not require approval")
 		return
 	}
-	t := h.store.newApproval(uid, approvalTicket{
+	t := h.runtime.newApproval(uid, approvalTicket{
 		Tool:   meta.Name,
 		Params: req.Params,
 		Risk:   meta.Risk,
@@ -204,13 +204,13 @@ func (h *handler) confirmApproval(c *gin.Context) {
 		return
 	}
 	id := c.Param("id")
-	t, ok := h.store.getApproval(id)
+	t, ok := h.runtime.getApproval(id)
 	if !ok {
 		httpx.Fail(c, xcode.NotFound, "approval not found")
 		return
 	}
 	if time.Now().After(t.ExpiresAt) {
-		_, _ = h.store.setApprovalStatus(id, "expired", uid)
+		_, _ = h.runtime.setApprovalStatus(id, "expired", uid)
 		httpx.Fail(c, xcode.ParamError, "approval expired")
 		return
 	}
@@ -218,7 +218,7 @@ func (h *handler) confirmApproval(c *gin.Context) {
 	if req.Approve {
 		status = "approved"
 	}
-	out, _ := h.store.setApprovalStatus(id, status, uid)
+	out, _ := h.runtime.setApprovalStatus(id, status, uid)
 	httpx.OK(c, out)
 }
 
