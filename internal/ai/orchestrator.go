@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"regexp"
 	"sort"
 	"strconv"
@@ -40,19 +39,28 @@ type ChatStreamRequest struct {
 
 // Orchestrator is the high-level AI core entrypoint for gateway chat and resume flows.
 type Orchestrator struct {
-	runner   runnerAPI
-	sessions sessionStore
-	runtime  *logic.RuntimeStore
-	control  *ControlPlane
+	runner    runnerAPI
+	sessions  sessionStore
+	runtime   *logic.RuntimeStore
+	control   *ControlPlane
+	planner   *Planner
+	router    *ExecutorRouter
+	replanner *Replanner
+	projector *PlatformEventProjector
 }
 
 func NewOrchestrator(runner runnerAPI, sessions sessionStore, runtime *logic.RuntimeStore, control *ControlPlane) *Orchestrator {
-	return &Orchestrator{
+	orch := &Orchestrator{
 		runner:   runner,
 		sessions: sessions,
 		runtime:  runtime,
 		control:  control,
 	}
+	orch.planner = NewPlanner()
+	orch.replanner = NewReplanner()
+	orch.projector = NewPlatformEventProjector()
+	orch.router = orch.newExecutorRouter()
+	return orch
 }
 
 func (o *Orchestrator) ChatStream(ctx context.Context, req ChatStreamRequest, emit func(string, map[string]any) bool) error {
@@ -101,15 +109,20 @@ func (o *Orchestrator) ChatStream(ctx context.Context, req ChatStreamRequest, em
 		return emit(event, payload)
 	}
 
-	approvalToken := strings.TrimSpace(logic.ToString(req.Context["approval_token"]))
-	tracker := newToolEventTracker()
 	o.runtime.RememberContext(req.UserID, scene, extractResourceContext(req.Context, msg))
-	streamCtx := o.buildToolContext(ctx, req.UserID, approvalToken, scene, msg, req.Context, emitWithSession, tracker)
-	prompt := o.buildPrompt(msg, scene, req.Context)
+	plan, err := o.planner.BuildPlan(ctx, PlanningRequest{
+		SessionID: sid,
+		Message:   msg,
+		Context:   req.Context,
+	})
+	if err != nil {
+		_ = emitWithSession("error", map[string]any{"message": err.Error()})
+		return nil
+	}
+	plan.SessionID = sid
+	_ = o.emitPlatformEvent(emitWithSession, o.projector.PlanCreated(plan))
 
-	iter := o.runner.Query(streamCtx, sid, prompt)
-	var assistantContent strings.Builder
-	var reasoningContent strings.Builder
+	var lastRecord ExecutionRecord
 	var fatalErr *streamErrorPayload
 	var finalOnce sync.Once
 	emitFinal := func(event string, payload map[string]any) {
@@ -117,23 +130,54 @@ func (o *Orchestrator) ChatStream(ctx context.Context, req ChatStreamRequest, em
 			_ = emit(event, payload)
 		})
 	}
+	runtimeCtx := map[string]any{}
+	for k, v := range req.Context {
+		runtimeCtx[k] = v
+	}
+	runtimeCtx["user_id"] = req.UserID
 
-	for {
-		event, ok := iter.Next()
-		if !ok {
+	for i := range plan.Steps {
+		step := plan.Steps[i]
+		_ = o.emitPlatformEvent(emitWithSession, o.projector.StepStatus(plan, step, StepStatusRunning))
+		record, execErr := o.router.Execute(ctx, ExecutionRequest{
+			Plan:    plan,
+			Step:    step,
+			Message: msg,
+			Context: runtimeCtx,
+			Emit:    emitWithSession,
+		})
+		lastRecord = record
+		if execErr != nil {
+			fatalErr = &streamErrorPayload{Code: "execution_failed", Message: execErr.Error(), Recoverable: true}
+			_ = o.emitPlatformEvent(emitWithSession, o.projector.StepStatus(plan, step, StepStatusFailed))
 			break
 		}
-		if err := o.processADKEvent(emitWithSession, tracker, event, &assistantContent, &reasoningContent); err != nil {
-			if errors.Is(err, io.EOF) {
-				continue
-			}
-			fatalErr = &streamErrorPayload{Code: "stream_interrupted", Message: err.Error(), Recoverable: true}
+		for _, evidence := range record.Evidence {
+			_ = o.emitPlatformEvent(emitWithSession, o.projector.Evidence(plan, step, evidence))
+		}
+		status := StepStatusCompleted
+		if record.Status == ExecutionStatusFailed || record.Status == ExecutionStatusBlocked {
+			status = StepStatusFailed
+		}
+		_ = o.emitPlatformEvent(emitWithSession, o.projector.StepStatus(plan, step, status))
+		if step.Domain != DomainHost || i == len(plan.Steps)-1 {
 			break
 		}
 	}
 
-	summary := tracker.summary()
-	content := strings.TrimSpace(assistantContent.String())
+	decision, decisionErr := o.replanner.Decide(ctx, ReplanRequest{Plan: plan, Execution: lastRecord})
+	if decisionErr != nil {
+		fatalErr = &streamErrorPayload{Code: "replan_failed", Message: decisionErr.Error(), Recoverable: true}
+	}
+	_ = o.emitPlatformEvent(emitWithSession, o.projector.Replan(plan, decision))
+	if decision.FinalOutcome.Summary != "" {
+		_ = o.emitPlatformEvent(emitWithSession, o.projector.Summary(plan, decision.FinalOutcome))
+	}
+	if len(decision.FinalOutcome.NextActions) > 0 {
+		_ = o.emitPlatformEvent(emitWithSession, o.projector.NextActions(plan, decision.FinalOutcome.NextActions))
+	}
+
+	content := strings.TrimSpace(lastRecord.Summary)
 	if content == "" {
 		if fatalErr != nil {
 			content = fmt.Sprintf("本轮执行未完整结束：%s", fatalErr.Message)
@@ -147,7 +191,7 @@ func (o *Orchestrator) ChatStream(ctx context.Context, req ChatStreamRequest, em
 		"id":        formatID("a", assistantTime),
 		"role":      "assistant",
 		"content":   content,
-		"thinking":  strings.TrimSpace(reasoningContent.String()),
+		"thinking":  "",
 		"timestamp": assistantTime,
 	})
 	if err != nil {
@@ -155,6 +199,10 @@ func (o *Orchestrator) ChatStream(ctx context.Context, req ChatStreamRequest, em
 		return nil
 	}
 
+	summary := toolSummary{}
+	if len(lastRecord.Evidence) > 0 {
+		summary.Results = len(lastRecord.Evidence)
+	}
 	streamState := resolveStreamState(fatalErr, summary)
 	recs := o.refreshSuggestions(req.UserID, scene, content)
 	if fatalErr != nil {

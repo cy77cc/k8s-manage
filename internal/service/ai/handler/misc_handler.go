@@ -22,7 +22,7 @@ func (h *AIHandler) listSessions(c *gin.Context) {
 		return
 	}
 	scene := c.Query("scene")
-	httpx.OK(c, h.sessions.ListSessions(uid, scene))
+	httpx.OK(c, h.gateway.ListSessions(uid, scene))
 }
 
 func (h *AIHandler) currentSession(c *gin.Context) {
@@ -32,7 +32,7 @@ func (h *AIHandler) currentSession(c *gin.Context) {
 		return
 	}
 	scene := c.Query("scene")
-	session, found := h.sessions.CurrentSession(uid, scene)
+	session, found := h.gateway.CurrentSession(uid, scene)
 	if !found {
 		httpx.OK(c, nil)
 		return
@@ -46,7 +46,7 @@ func (h *AIHandler) getSession(c *gin.Context) {
 		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
 		return
 	}
-	session, found := h.sessions.GetSession(uid, c.Param("id"))
+	session, found := h.gateway.GetSession(uid, c.Param("id"))
 	if !found {
 		httpx.Fail(c, xcode.NotFound, "session not found")
 		return
@@ -68,7 +68,7 @@ func (h *AIHandler) branchSession(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	session, err := h.sessions.BranchSession(uid, c.Param("id"), req.MessageID, req.Title)
+	session, err := h.gateway.BranchSession(uid, c.Param("id"), req.MessageID, req.Title)
 	if err != nil {
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
@@ -89,7 +89,7 @@ func (h *AIHandler) deleteSession(c *gin.Context) {
 		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
 		return
 	}
-	h.sessions.DeleteSession(uid, c.Param("id"))
+	h.gateway.DeleteSession(uid, c.Param("id"))
 	httpx.OK(c, nil)
 }
 
@@ -111,7 +111,7 @@ func (h *AIHandler) updateSessionTitle(c *gin.Context) {
 		httpx.Fail(c, xcode.ParamError, "title is required")
 		return
 	}
-	session, err := h.sessions.UpdateSessionTitle(uid, c.Param("id"), title)
+	session, err := h.gateway.UpdateSessionTitle(uid, c.Param("id"), title)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Fail(c, xcode.NotFound, "session not found")

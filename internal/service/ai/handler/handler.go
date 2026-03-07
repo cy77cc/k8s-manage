@@ -33,7 +33,14 @@ func (h *AIHandler) chatWithADK(c *gin.Context, req ChatRequest, uid uint64, msg
 
 	turnID := "turn-" + strconvFormatInt(time.Now().UnixNano())
 	writer := events.NewSSEWriter(c, flusher, turnID)
-	emit := writer.Emit
+	emit := func(event string, payload gin.H) bool {
+		for _, projected := range events.ProjectCompatibilityEvents(event, payload) {
+			if !writer.Emit(projected.Name, projected.Payload) {
+				return false
+			}
+		}
+		return true
+	}
 	defer writer.Close()
 
 	stopHeartbeat := make(chan struct{})

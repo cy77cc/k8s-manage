@@ -4,13 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
+	coreai "github.com/cy77cc/k8s-manage/internal/ai"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func (h *AIHandler) capabilities(c *gin.Context) {
@@ -47,38 +48,17 @@ func (h *AIHandler) previewTool(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	meta, ok := h.findMeta(req.Tool)
-	if !ok {
-		httpx.Fail(c, xcode.NotFound, "tool not found")
+	data, err := h.gateway.PreviewTool(uid, req.Tool, req.Params)
+	if err != nil {
+		switch {
+		case errors.Is(err, coreai.ErrToolNotFound):
+			httpx.Fail(c, xcode.NotFound, "tool not found")
+		case errors.Is(err, coreai.ErrPermissionDenied):
+			httpx.Fail(c, xcode.Forbidden, "permission denied")
+		default:
+			httpx.Fail(c, xcode.ServerError, err.Error())
+		}
 		return
-	}
-	req.Tool = meta.Name
-	if h.ai == nil {
-		httpx.Fail(c, xcode.ServerError, "ai agent not initialized")
-		return
-	}
-	if !h.hasPermission(uid, meta.Permission) {
-		httpx.Fail(c, xcode.Forbidden, "permission denied")
-		return
-	}
-	data := gin.H{
-		"tool":              meta.Name,
-		"mode":              meta.Mode,
-		"risk":              meta.Risk,
-		"params":            req.Params,
-		"approval_required": meta.Mode == tools.ToolModeMutating,
-	}
-	if meta.Mode == tools.ToolModeMutating {
-		t := h.runtime.NewApproval(uid, ApprovalTicket{
-			Tool:   meta.Name,
-			Params: req.Params,
-			Risk:   meta.Risk,
-			Mode:   meta.Mode,
-			Meta:   meta,
-		})
-		data["approval_token"] = t.ID
-		data["expiresAt"] = t.ExpiresAt
-		data["previewDiff"] = "Mutating operation requires approval."
 	}
 	httpx.OK(c, data)
 }
@@ -98,45 +78,18 @@ func (h *AIHandler) executeTool(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	meta, ok := h.findMeta(req.Tool)
-	if !ok {
-		httpx.Fail(c, xcode.NotFound, "tool not found")
+	rec, err := h.gateway.ExecuteTool(c.Request.Context(), uid, req.Tool, req.Params, req.ApprovalToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, coreai.ErrToolNotFound):
+			httpx.Fail(c, xcode.NotFound, "tool not found")
+		case errors.Is(err, coreai.ErrPermissionDenied):
+			httpx.Fail(c, xcode.Forbidden, "permission denied")
+		default:
+			httpx.Fail(c, xcode.ServerError, err.Error())
+		}
 		return
 	}
-	req.Tool = meta.Name
-	rec := &ExecutionRecord{
-		ID:         "exe-" + strconvFormatInt(time.Now().UnixNano()),
-		Tool:       req.Tool,
-		Params:     req.Params,
-		Mode:       meta.Mode,
-		Status:     "running",
-		RequestUID: uid,
-		CreatedAt:  time.Now(),
-	}
-	start := time.Now()
-	ctx := tools.WithToolUser(c.Request.Context(), uid, strings.TrimSpace(req.ApprovalToken))
-	ctx = tools.WithToolPolicyChecker(ctx, h.toolPolicy)
-	result, err := h.ai.RunTool(ctx, req.Tool, req.Params)
-	finished := time.Now()
-	rec.FinishedAt = &finished
-	rec.Result = &result
-	if err != nil {
-		rec.Status = "failed"
-		rec.Error = err.Error()
-	} else if result.OK {
-		rec.Status = "succeeded"
-	} else {
-		rec.Status = "failed"
-		rec.Error = result.Error
-	}
-	if apErr, ok := tools.IsApprovalRequired(err); ok {
-		rec.Status = "failed"
-		rec.Error = apErr.Error()
-	}
-	if result.LatencyMS == 0 {
-		rec.Result.LatencyMS = time.Since(start).Milliseconds()
-	}
-	h.runtime.SaveExecution(rec)
 	httpx.OK(c, rec)
 }
 
@@ -145,9 +98,9 @@ func (h *AIHandler) getExecution(c *gin.Context) {
 		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
 		return
 	}
-	rec, ok := h.runtime.GetExecution(c.Param("id"))
+	rec, ok := h.gateway.GetExecution(c.Param("id"))
 	if !ok {
-		httpx.Fail(c, xcode.NotFound, "execution not found")
+		httpx.Fail(c, xcode.NotFound, "tool not found")
 		return
 	}
 	httpx.OK(c, rec)
@@ -167,23 +120,18 @@ func (h *AIHandler) createApproval(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	meta, ok := h.findMeta(req.Tool)
-	if !ok {
-		httpx.Fail(c, xcode.NotFound, "tool not found")
+	t, err := h.gateway.CreateApproval(uid, req.Tool, req.Params)
+	if err != nil {
+		switch {
+		case errors.Is(err, coreai.ErrToolNotFound):
+			httpx.Fail(c, xcode.NotFound, "tool not found")
+		case errors.Is(err, coreai.ErrPermissionDenied):
+			httpx.Fail(c, xcode.Forbidden, "permission denied")
+		default:
+			httpx.Fail(c, xcode.ParamError, err.Error())
+		}
 		return
 	}
-	req.Tool = meta.Name
-	if meta.Mode == tools.ToolModeReadonly {
-		httpx.Fail(c, xcode.ParamError, "readonly tool does not require approval")
-		return
-	}
-	t := h.runtime.NewApproval(uid, ApprovalTicket{
-		Tool:   meta.Name,
-		Params: req.Params,
-		Risk:   meta.Risk,
-		Mode:   meta.Mode,
-		Meta:   meta,
-	})
 	httpx.OK(c, t)
 }
 
@@ -204,22 +152,20 @@ func (h *AIHandler) confirmApproval(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	id := c.Param("id")
-	t, ok := h.runtime.GetApproval(id)
-	if !ok {
-		httpx.Fail(c, xcode.NotFound, "approval not found")
+	out, err := h.gateway.ConfirmApproval(uid, c.Param("id"), req.Approve)
+	if err != nil {
+		switch {
+		case errors.Is(err, coreai.ErrPermissionDenied):
+			httpx.Fail(c, xcode.Forbidden, "permission denied")
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Fail(c, xcode.NotFound, "approval not found")
+		case errors.Is(err, coreai.ErrApprovalExpired):
+			httpx.Fail(c, xcode.ParamError, "approval expired")
+		default:
+			httpx.Fail(c, xcode.ParamError, err.Error())
+		}
 		return
 	}
-	if time.Now().After(t.ExpiresAt) {
-		_, _ = h.runtime.SetApprovalStatus(id, "expired", uid)
-		httpx.Fail(c, xcode.ParamError, "approval expired")
-		return
-	}
-	status := "rejected"
-	if req.Approve {
-		status = "approved"
-	}
-	out, _ := h.runtime.SetApprovalStatus(id, status, uid)
 	httpx.OK(c, out)
 }
 
@@ -241,39 +187,18 @@ func (h *AIHandler) confirmConfirmation(c *gin.Context) {
 		httpx.Fail(c, xcode.ParamError, "confirmation id is required")
 		return
 	}
-	svc := logic.NewConfirmationService(h.svcCtx.DB)
-	item, err := svc.Get(c.Request.Context(), id)
+	out, err := h.gateway.ConfirmConfirmation(c.Request.Context(), uid, id, req.Approve)
 	if err != nil {
-		if errors.Is(err, logic.ErrConfirmationNotFound) {
+		switch {
+		case errors.Is(err, logic.ErrConfirmationNotFound):
 			httpx.Fail(c, xcode.NotFound, "confirmation not found")
-			return
-		}
-		httpx.ServerErr(c, err)
-		return
-	}
-	if item.RequestUserID != uid && !h.isAdmin(uid) {
-		httpx.Fail(c, xcode.Forbidden, "permission denied")
-		return
-	}
-	if time.Now().After(item.ExpiresAt) {
-		_, _ = svc.ExpirePending(c.Request.Context(), time.Now())
-		httpx.Fail(c, xcode.ParamError, "confirmation expired")
-		return
-	}
-
-	if req.Approve {
-		out, err := svc.Confirm(c.Request.Context(), id)
-		if err != nil {
+		case errors.Is(err, coreai.ErrPermissionDenied):
+			httpx.Fail(c, xcode.Forbidden, "permission denied")
+		case errors.Is(err, coreai.ErrApprovalExpired):
+			httpx.Fail(c, xcode.ParamError, "confirmation expired")
+		default:
 			httpx.Fail(c, xcode.ParamError, err.Error())
-			return
 		}
-		httpx.OK(c, out)
-		return
-	}
-
-	out, err := svc.Cancel(c.Request.Context(), id)
-	if err != nil {
-		httpx.Fail(c, xcode.ParamError, err.Error())
 		return
 	}
 	httpx.OK(c, out)

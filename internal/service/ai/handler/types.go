@@ -7,6 +7,7 @@ import (
 	coreai "github.com/cy77cc/k8s-manage/internal/ai"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cloudwego/eino/schema"
+	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
 )
@@ -36,12 +37,28 @@ type aiControlPlane interface {
 	FindMeta(name string) (tools.ToolMeta, bool)
 }
 
+type aiGatewayRuntime interface {
+	ListSessions(uid uint64, scene string) []*logic.AISession
+	CurrentSession(uid uint64, scene string) (*logic.AISession, bool)
+	GetSession(uid uint64, id string) (*logic.AISession, bool)
+	BranchSession(uid uint64, sourceSessionID, anchorMessageID, title string) (*logic.AISession, error)
+	DeleteSession(uid uint64, id string)
+	UpdateSessionTitle(uid uint64, id, title string) (*logic.AISession, error)
+	PreviewTool(uid uint64, tool string, params map[string]any) (map[string]any, error)
+	ExecuteTool(ctx context.Context, uid uint64, tool string, params map[string]any, approvalToken string) (*logic.ExecutionRecord, error)
+	GetExecution(id string) (*logic.ExecutionRecord, bool)
+	CreateApproval(uid uint64, tool string, params map[string]any) (*logic.ApprovalTicket, error)
+	ConfirmApproval(uid uint64, id string, approve bool) (*logic.ApprovalTicket, error)
+	ConfirmConfirmation(ctx context.Context, uid uint64, id string, approve bool) (*model.ConfirmationRequest, error)
+}
+
 // AIHandler handles AI service HTTP requests
 type AIHandler struct {
 	svcCtx        *svc.ServiceContext
 	ai            aiToolRunner
 	orchestrator  aiOrchestrator
 	control       aiControlPlane
+	gateway       aiGatewayRuntime
 	sessions      *logic.SessionStore
 	runtime       *logic.RuntimeStore
 }
@@ -56,6 +73,7 @@ func NewAIHandler(svcCtx *svc.ServiceContext) *AIHandler {
 		ai:           svcCtx.AI,
 		orchestrator: coreai.NewOrchestrator(svcCtx.AI, sessions, runtime, control),
 		control:      control,
+		gateway:      coreai.NewGatewayRuntime(svcCtx.DB, svcCtx.AI, control, sessions, runtime),
 		sessions:     sessions,
 		runtime:      runtime,
 	}
