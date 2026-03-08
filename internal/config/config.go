@@ -23,6 +23,7 @@ type Config struct {
 	Metrics      Metrics      `mapstructure:"metrics"`
 	Security     Security     `mapstructure:"security"`
 	LLM          LLM          `mapstructure:"llm"`
+	AI           AI           `mapstructure:"ai"`
 	Embedder     Embedder     `mapstructure:"embedder"`
 	FeatureFlags FeatureFlags `mapstructure:"feature_flags"`
 	Milvus       Milvus       `mapstructure:"milvus"`
@@ -135,6 +136,10 @@ type LLM struct {
 	APIKey      string  `mapstructure:"api_key"`
 	Model       string  `mapstructure:"model"`
 	Temperature float64 `mapstructure:"temperature"`
+}
+
+type AI struct {
+	UseMultiDomainArch bool `mapstructure:"use_multi_domain_arch"`
 }
 
 type FeatureFlags struct {

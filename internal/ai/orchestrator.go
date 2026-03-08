@@ -56,8 +56,8 @@ func NewOrchestrator(runner runnerAPI, sessions sessionStore, runtime *logic.Run
 		runtime:  runtime,
 		control:  control,
 	}
-	orch.planner = NewPlanner()
-	orch.replanner = NewReplanner()
+	orch.planner = NewPlanner(runner)
+	orch.replanner = NewReplanner(runner)
 	orch.projector = NewPlatformEventProjector()
 	orch.router = orch.newExecutorRouter()
 	return orch
@@ -204,7 +204,10 @@ func (o *Orchestrator) ChatStream(ctx context.Context, req ChatStreamRequest, em
 		summary.Results = len(lastRecord.Evidence)
 	}
 	streamState := resolveStreamState(fatalErr, summary)
-	recs := o.refreshSuggestions(req.UserID, scene, content)
+	var recs []logic.RecommendationRecord
+	if fatalErr == nil && decision.Outcome == ReplanOutcomeFinish {
+		recs = o.refreshSuggestions(ctx, req.UserID, scene, content)
+	}
 	if fatalErr != nil {
 		emitFinal("error", map[string]any{
 			"code":         fatalErr.Code,
@@ -351,12 +354,19 @@ func (o *Orchestrator) buildToolContext(ctx context.Context, uid uint64, approva
 	return ctx
 }
 
-func (o *Orchestrator) refreshSuggestions(uid uint64, scene, answer string) []logic.RecommendationRecord {
+func (o *Orchestrator) refreshSuggestions(ctx context.Context, uid uint64, scene, answer string) []logic.RecommendationRecord {
 	scene = logic.NormalizeScene(scene)
 	prompt := "你是 suggestion 智能体。基于下面回答提炼 3 条可执行建议，每条一行，格式为：标题|内容|相关度(0-1)|思考摘要（不超过60字）。回答内容如下：\n" + answer
 	out := []logic.RecommendationRecord{}
 	if o.runner != nil {
-		msg, err := o.runner.Generate(context.Background(), []*schema.Message{schema.UserMessage(prompt)})
+		generateCtx := ctx
+		if generateCtx == nil {
+			generateCtx = context.Background()
+		}
+		var cancel context.CancelFunc
+		generateCtx, cancel = context.WithTimeout(generateCtx, 5*time.Second)
+		defer cancel()
+		msg, err := o.runner.Generate(generateCtx, []*schema.Message{schema.UserMessage(prompt)})
 		if err == nil && msg != nil {
 			lines := strings.Split(msg.Content, "\n")
 			for _, line := range lines {

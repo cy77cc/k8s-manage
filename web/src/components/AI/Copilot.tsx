@@ -38,12 +38,18 @@ const { useToken } = theme;
 // SSE 事件类型
 type SSEEventType =
   | 'meta'
+  | 'plan_created'
+  | 'step_status'
   | 'delta'
   | 'thinking_delta'
   | 'tool_call'
   | 'tool_result'
+  | 'ask_user'
   | 'approval_required'
   | 'confirmation_required'
+  | 'replan_decision'
+  | 'summary'
+  | 'next_actions'
   | 'done'
   | 'error'
   | 'heartbeat';
@@ -111,6 +117,16 @@ interface ConversationItem {
   label: string;
   group: string;
   messages: ExtendedChatMessage[];
+}
+
+function getLastAssistantMessage(session: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const messages = Array.isArray(session?.messages) ? (session?.messages as Record<string, unknown>[]) : [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'assistant') {
+      return messages[i];
+    }
+  }
+  return undefined;
 }
 
 // 发送 SSE 请求
@@ -338,10 +354,33 @@ export const Copilot: React.FC<CopilotProps> = ({
               assistantThinking += (data.contentChunk as string) || '';
               break;
 
+            case 'summary':
+              assistantContent = String(data.summary || assistantContent || '');
+              break;
+
+            case 'ask_user':
+              assistantContent ||= String(data.description || data.title || '需要你确认后继续执行');
+              break;
+
+            case 'replan_decision':
+              if (data.outcome === 'ask_user') {
+                assistantContent ||= String(data.rationale || '当前执行未完成，需要你决定下一步动作');
+              }
+              break;
+
             case 'done':
               // 提取推荐
               if (data.turn_recommendations) {
                 assistantRecommendations = data.turn_recommendations as EmbeddedRecommendation[];
+              }
+              if (data.session && typeof data.session === 'object') {
+                const session = data.session as Record<string, unknown>;
+                const finalAssistant = getLastAssistantMessage(session);
+                assistantContent ||= String(finalAssistant?.content || '');
+                assistantThinking ||= String(finalAssistant?.thinking || '');
+                if (session.id) {
+                  setSessionId(session.id as string);
+                }
               }
               setIsLoading(false);
               break;

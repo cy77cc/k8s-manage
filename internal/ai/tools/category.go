@@ -1,6 +1,34 @@
 package tools
 
+import "strings"
+
 // Tool category builders - filter tools by category for scene-specific tool access
+
+func classifyToolDomain(name string) ToolDomain {
+	switch normalized := NormalizeToolName(name); {
+	case strings.HasPrefix(normalized, "host_"), strings.HasPrefix(normalized, "k8s_"), strings.HasPrefix(normalized, "os_"), strings.HasPrefix(normalized, "cluster_"):
+		return DomainInfrastructure
+	case strings.HasPrefix(normalized, "service_"), strings.HasPrefix(normalized, "deployment_"), strings.HasPrefix(normalized, "credential_"):
+		return DomainService
+	case strings.HasPrefix(normalized, "cicd_"), strings.HasPrefix(normalized, "job_"):
+		return DomainCICD
+	case strings.HasPrefix(normalized, "monitor_"), strings.HasPrefix(normalized, "topology_"):
+		return DomainMonitor
+	case strings.HasPrefix(normalized, "config_"):
+		return DomainConfig
+	case strings.HasPrefix(normalized, "user_"), strings.HasPrefix(normalized, "role_"), strings.HasPrefix(normalized, "permission_"), strings.HasPrefix(normalized, "audit_"):
+		return DomainUser
+	default:
+		return DomainGeneral
+	}
+}
+
+func classifyToolCategory(meta ToolMeta) ToolCategory {
+	if meta.Mode == ToolModeMutating {
+		return CategoryAction
+	}
+	return CategoryDiscovery
+}
 
 // buildCICDTools returns CI/CD and job related tools
 func buildCICDTools(all []RegisteredTool) []RegisteredTool {

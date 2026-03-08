@@ -67,7 +67,7 @@ func (o *Orchestrator) executeStep(ctx context.Context, req ExecutionRequest) (E
 		emit,
 		tracker,
 	)
-	iter := o.runner.Query(streamCtx, req.Plan.SessionID, o.buildPrompt(req.Message, logic.NormalizeScene(logic.ToString(req.Context["scene"])), req.Context))
+	iter := o.runner.Query(streamCtx, req.Plan.SessionID, o.buildExecutionPrompt(req))
 	for {
 		event, ok := iter.Next()
 		if !ok {
@@ -136,4 +136,28 @@ func toolUserIDFromContext(runtime map[string]any) uint64 {
 		}
 	}
 	return 0
+}
+
+func (o *Orchestrator) buildExecutionPrompt(req ExecutionRequest) string {
+	scene := logic.NormalizeScene(logic.ToString(req.Context["scene"]))
+	stepContext := map[string]any{
+		"objective": req.Plan.Objective.Summary,
+		"step": map[string]any{
+			"id":     req.Step.StepID,
+			"title":  req.Step.Title,
+			"kind":   req.Step.Kind,
+			"domain": req.Step.Domain,
+			"goal":   req.Step.Goal,
+			"inputs": req.Step.Inputs,
+		},
+		"runtime_context": req.Context,
+	}
+	task := strings.TrimSpace(fmt.Sprintf(
+		"当前只执行这一个步骤，不要自己改写目标。\n领域: %s\n步骤: %s\n目标: %s\n用户原始请求: %s",
+		req.Step.Domain,
+		req.Step.Title,
+		req.Step.Goal,
+		req.Message,
+	))
+	return o.buildPrompt(task, scene, stepContext)
 }

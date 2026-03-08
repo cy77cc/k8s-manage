@@ -11,12 +11,15 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/ai/modes"
 	aitools "github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/ai/types"
+	"github.com/cy77cc/k8s-manage/internal/config"
 )
 
 type HybridAgent struct {
-	classifier  *classifier.IntentClassifier
-	simpleChat  *modes.SimpleChatMode
-	agenticMode *modes.AgenticMode
+	classifier      *classifier.IntentClassifier
+	simpleChat      *modes.SimpleChatMode
+	agenticMode     *modes.AgenticMode
+	multiDomainMode *modes.MultiDomainMode
+	useMultiDomain  bool
 }
 
 func NewHybridAgent(ctx context.Context, chatModel model.ToolCallingChatModel, classifierModel model.ToolCallingChatModel, deps aitools.PlatformDeps, cfg *agent.RunnerConfig) (*HybridAgent, error) {
@@ -28,10 +31,16 @@ func NewHybridAgent(ctx context.Context, chatModel model.ToolCallingChatModel, c
 	if err != nil {
 		return nil, err
 	}
+	useMultiDomain := config.CFG.AI.UseMultiDomainArch
+	if cfg != nil && cfg.UseMultiDomainArch {
+		useMultiDomain = true
+	}
 	return &HybridAgent{
-		classifier:  classifier.NewIntentClassifier(classifierBackend),
-		simpleChat:  modes.NewSimpleChatMode(chatModel),
-		agenticMode: agenticMode,
+		classifier:      classifier.NewIntentClassifier(classifierBackend),
+		simpleChat:      modes.NewSimpleChatMode(chatModel),
+		agenticMode:     agenticMode,
+		multiDomainMode: modes.NewMultiDomainMode(chatModel, deps),
+		useMultiDomain:  useMultiDomain,
 	}, nil
 }
 
@@ -49,6 +58,10 @@ func (a *HybridAgent) Query(ctx context.Context, sessionID, message string) *adk
 
 		switch intent {
 		case classifier.IntentAgentic:
+			if a.useMultiDomain && a.multiDomainMode != nil {
+				a.queryMultiDomain(ctx, sessionID, message, gen)
+				return
+			}
 			a.agenticMode.Execute(ctx, sessionID, message, gen)
 		case classifier.IntentSimple:
 			fallthrough
@@ -58,6 +71,14 @@ func (a *HybridAgent) Query(ctx context.Context, sessionID, message string) *adk
 	}()
 
 	return iter
+}
+
+func (a *HybridAgent) queryMultiDomain(ctx context.Context, sessionID, message string, gen *adk.AsyncGenerator[*types.AgentResult]) {
+	if a == nil || a.multiDomainMode == nil {
+		gen.Send(&types.AgentResult{Type: "error", Content: "multi-domain mode not initialized"})
+		return
+	}
+	a.multiDomainMode.Execute(ctx, sessionID, message, gen)
 }
 
 func (a *HybridAgent) Resume(ctx context.Context, sessionID, askID string, response any) (*types.AgentResult, error) {

@@ -34,3 +34,12 @@ The baseline MUST require formal domain executor boundaries for Host, K8s, Servi
 #### Scenario: domain executor boundaries are part of the baseline
 - **WHEN** maintainers inspect the AI control-plane architecture
 - **THEN** the baseline MUST require Host, K8s, Service, and Monitor executor boundaries as first-class routing targets
+
+### Requirement: AI control plane MUST support rollout toggles for orchestration entry
+The baseline MUST define a configuration toggle for selecting the multi-domain orchestration entrypoint during rollout. The toggle SHALL be exposed as `ai.use_multi_domain_arch`, default to `false`, and allow the existing agentic entrypoint to remain available as a fallback.
+
+#### Scenario: multi-domain orchestration is gated by config
+- **WHEN** operators enable `ai.use_multi_domain_arch`
+- **THEN** agentic requests SHALL enter the multi-domain planning path
+- **AND** simple-chat requests SHALL remain unaffected
+- **AND** disabling the toggle SHALL preserve the legacy agentic path

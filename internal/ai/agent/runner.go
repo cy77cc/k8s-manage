@@ -31,9 +31,10 @@ type PlatformRunner struct {
 }
 
 type RunnerConfig struct {
-	EnableStreaming bool
-	RedisClient     redis.UniversalClient
-	CheckPointStore adk.CheckPointStore
+	EnableStreaming    bool
+	UseMultiDomainArch bool
+	RedisClient        redis.UniversalClient
+	CheckPointStore    adk.CheckPointStore
 }
 
 type ragPromptRetriever interface {

@@ -15,11 +15,28 @@ const (
 )
 
 type ToolRisk = core.ToolRisk
+type ToolDomain = core.ToolDomain
+type ToolCategory = core.ToolCategory
 
 const (
 	ToolRiskLow    = core.ToolRiskLow
 	ToolRiskMedium = core.ToolRiskMedium
 	ToolRiskHigh   = core.ToolRiskHigh
+)
+
+const (
+	DomainGeneral        = core.DomainGeneral
+	DomainInfrastructure = core.DomainInfrastructure
+	DomainService        = core.DomainService
+	DomainCICD           = core.DomainCICD
+	DomainMonitor        = core.DomainMonitor
+	DomainConfig         = core.DomainConfig
+	DomainUser           = core.DomainUser
+)
+
+const (
+	CategoryDiscovery = core.CategoryDiscovery
+	CategoryAction    = core.CategoryAction
 )
 
 type ToolResult = core.ToolResult

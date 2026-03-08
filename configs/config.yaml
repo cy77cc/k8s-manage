@@ -123,6 +123,9 @@ llm:
   temperature: 0.7
   api_key: ${LLM_API_KEY}
 
+ai:
+  use_multi_domain_arch: false
+
 embedder:
   enable: true
   provider: "ollama"

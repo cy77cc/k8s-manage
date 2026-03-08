@@ -15,7 +15,9 @@ import (
 )
 
 type AgenticMode struct {
-	runner *agent.PlatformRunner
+	runner          *agent.PlatformRunner
+	multiDomainMode *MultiDomainMode
+	useMultiDomain  bool
 }
 
 func NewAgenticMode(ctx context.Context, chatModel model.ToolCallingChatModel, deps aitools.PlatformDeps, cfg *agent.RunnerConfig) (*AgenticMode, error) {
@@ -23,7 +25,12 @@ func NewAgenticMode(ctx context.Context, chatModel model.ToolCallingChatModel, d
 	if err != nil {
 		return nil, err
 	}
-	return &AgenticMode{runner: runner}, nil
+	useMultiDomain := cfg != nil && cfg.UseMultiDomainArch
+	return &AgenticMode{
+		runner:          runner,
+		multiDomainMode: NewMultiDomainMode(chatModel, deps),
+		useMultiDomain:  useMultiDomain,
+	}, nil
 }
 
 func (m *AgenticMode) Execute(ctx context.Context, sessionID, message string, gen *adk.AsyncGenerator[*types.AgentResult]) {
@@ -31,7 +38,15 @@ func (m *AgenticMode) Execute(ctx context.Context, sessionID, message string, ge
 		return
 	}
 	if m == nil || m.runner == nil {
+		if m != nil && m.useMultiDomain && m.multiDomainMode != nil {
+			m.multiDomainMode.Execute(ctx, sessionID, message, gen)
+			return
+		}
 		gen.Send(&types.AgentResult{Type: "error", Content: "agentic runner not initialized"})
+		return
+	}
+	if m.useMultiDomain && m.multiDomainMode != nil {
+		m.multiDomainMode.Execute(ctx, sessionID, message, gen)
 		return
 	}
 

@@ -29,6 +29,25 @@ const (
 	ToolRiskHigh   ToolRisk = "high"
 )
 
+type ToolDomain string
+
+const (
+	DomainGeneral        ToolDomain = "general"
+	DomainInfrastructure ToolDomain = "infrastructure"
+	DomainService        ToolDomain = "service"
+	DomainCICD           ToolDomain = "cicd"
+	DomainMonitor        ToolDomain = "monitor"
+	DomainConfig         ToolDomain = "config"
+	DomainUser           ToolDomain = "user"
+)
+
+type ToolCategory string
+
+const (
+	CategoryDiscovery ToolCategory = "discovery"
+	CategoryAction    ToolCategory = "action"
+)
+
 type ToolResult struct {
 	OK        bool   `json:"ok"`
 	ErrorCode string `json:"error_code,omitempty"`
@@ -61,6 +80,8 @@ type ToolMeta struct {
 	ParamHints   map[string]string `json:"param_hints,omitempty"`
 	RelatedTools []string          `json:"related_tools,omitempty"`
 	SceneScope   []string          `json:"scene_scope,omitempty"`
+	Domain       ToolDomain        `json:"domain,omitempty"`
+	Category     ToolCategory      `json:"category,omitempty"`
 }
 
 type ApprovalRequiredError struct {

@@ -8,6 +8,8 @@ import (
 	"github.com/cloudwego/eino/adk/prebuilt/planexecute"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/flow/agent/react"
 )
 
 const platformAgentInstruction = `你是一个专业的智能运维助手，具备以下核心能力：
@@ -50,11 +52,19 @@ const platformAgentInstruction = `你是一个专业的智能运维助手，具�
 - 参数不足时主动澄清。
 - 执行失败时给出清晰原因和下一步建议。`
 
+func NewReactAgent(ctx context.Context, chatModel model.ToolCallingChatModel, allTools []tool.BaseTool) (*react.Agent, error) {
+	return react.NewAgent(ctx, &react.AgentConfig{
+		ToolCallingModel: chatModel,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools: allTools,
+		},
+	})
+}
+
 func newPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel, allTools []tool.BaseTool) (adk.Agent, error) {
 	if chatModel == nil {
 		return nil, fmt.Errorf("chat model is nil")
 	}
-
 	planner, err := NewPlanner(ctx, chatModel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create planner: %w", err)

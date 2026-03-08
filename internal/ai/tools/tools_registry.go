@@ -32,6 +32,55 @@ func addLocalTool[I any](tools *[]RegisteredTool, meta ToolMeta, fn func(ctx con
 	return nil
 }
 
+type Registry struct {
+	byName     map[string]RegisteredTool
+	byDomain   map[ToolDomain][]RegisteredTool
+	byCategory map[ToolCategory][]RegisteredTool
+}
+
+func NewRegistry(registered []RegisteredTool) *Registry {
+	r := &Registry{
+		byName:     make(map[string]RegisteredTool, len(registered)),
+		byDomain:   make(map[ToolDomain][]RegisteredTool),
+		byCategory: make(map[ToolCategory][]RegisteredTool),
+	}
+	for _, item := range registered {
+		item.Meta = normalizeToolMeta(item.Meta)
+		name := NormalizeToolName(item.Meta.Name)
+		if name == "" {
+			continue
+		}
+		r.byName[name] = item
+		r.byDomain[item.Meta.Domain] = append(r.byDomain[item.Meta.Domain], item)
+		r.byCategory[item.Meta.Category] = append(r.byCategory[item.Meta.Category], item)
+	}
+	return r
+}
+
+func (r *Registry) Get(name string) (RegisteredTool, bool) {
+	if r == nil {
+		return RegisteredTool{}, false
+	}
+	item, ok := r.byName[NormalizeToolName(name)]
+	return item, ok
+}
+
+func (r *Registry) ByDomain(domain ToolDomain) []RegisteredTool {
+	if r == nil {
+		return nil
+	}
+	items := r.byDomain[domain]
+	return append([]RegisteredTool(nil), items...)
+}
+
+func (r *Registry) ByCategory(category ToolCategory) []RegisteredTool {
+	if r == nil {
+		return nil
+	}
+	items := r.byCategory[category]
+	return append([]RegisteredTool(nil), items...)
+}
+
 var defaultEnumSourceByField = map[string]string{
 	"host_id":       "host_list_inventory",
 	"cluster_id":    "cluster_list_inventory",
@@ -59,6 +108,12 @@ func normalizeToolMeta(meta ToolMeta) ToolMeta {
 		if mapped := strings.TrimSpace(defaultEnumSourceByField[field]); mapped != "" {
 			meta.EnumSources[field] = mapped
 		}
+	}
+	if meta.Domain == "" {
+		meta.Domain = classifyToolDomain(meta.Name)
+	}
+	if meta.Category == "" {
+		meta.Category = classifyToolCategory(meta)
 	}
 	meta.Description = normalizeToolDescription(meta)
 	return meta
