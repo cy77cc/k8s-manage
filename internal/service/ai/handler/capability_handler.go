@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	coreai "github.com/cy77cc/k8s-manage/internal/ai"
+	airag "github.com/cy77cc/k8s-manage/internal/ai/rag"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
@@ -120,7 +122,7 @@ func (h *AIHandler) createApproval(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	t, err := h.gateway.CreateApproval(uid, req.Tool, req.Params)
+	t, err := h.gateway.CreateApprovalTask(c.Request.Context(), uid, req.Tool, req.Params)
 	if err != nil {
 		switch {
 		case errors.Is(err, coreai.ErrToolNotFound):
@@ -133,6 +135,41 @@ func (h *AIHandler) createApproval(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, t)
+}
+
+func (h *AIHandler) listApprovals(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	items, err := h.gateway.ListApprovalTasks(c.Request.Context(), uid, strings.TrimSpace(c.Query("status")))
+	if err != nil {
+		httpx.Fail(c, xcode.ServerError, err.Error())
+		return
+	}
+	httpx.OK(c, items)
+}
+
+func (h *AIHandler) getApproval(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	item, err := h.gateway.GetApprovalTask(c.Request.Context(), uid, c.Param("id"))
+	if err != nil {
+		switch {
+		case errors.Is(err, coreai.ErrPermissionDenied):
+			httpx.Fail(c, xcode.Forbidden, "permission denied")
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Fail(c, xcode.NotFound, "approval not found")
+		default:
+			httpx.Fail(c, xcode.ServerError, err.Error())
+		}
+		return
+	}
+	httpx.OK(c, item)
 }
 
 func (h *AIHandler) confirmApproval(c *gin.Context) {
@@ -152,7 +189,7 @@ func (h *AIHandler) confirmApproval(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	out, err := h.gateway.ConfirmApproval(uid, c.Param("id"), req.Approve)
+	task, execution, err := h.gateway.ReviewApprovalTask(c.Request.Context(), uid, c.Param("id"), req.Approve, "")
 	if err != nil {
 		switch {
 		case errors.Is(err, coreai.ErrPermissionDenied):
@@ -166,7 +203,78 @@ func (h *AIHandler) confirmApproval(c *gin.Context) {
 		}
 		return
 	}
-	httpx.OK(c, out)
+	httpx.OK(c, gin.H{"task": task, "execution": execution})
+}
+
+func (h *AIHandler) approveApproval(c *gin.Context) {
+	h.reviewApproval(c, true)
+}
+
+func (h *AIHandler) rejectApproval(c *gin.Context) {
+	h.reviewApproval(c, false)
+}
+
+func (h *AIHandler) submitFeedback(c *gin.Context) {
+	var req struct {
+		SessionID   string `json:"session_id"`
+		Namespace   string `json:"namespace"`
+		IsEffective bool   `json:"is_effective"`
+		Comment     string `json:"comment"`
+		Question    string `json:"question"`
+		Answer      string `json:"answer"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BindErr(c, err)
+		return
+	}
+	manager, ok := any(h.ai).(interface {
+		CollectFeedback(ctx context.Context, sessionID, namespace string, feedback airag.Feedback, question, answer string) (*airag.KnowledgeEntry, error)
+	})
+	if !ok {
+		httpx.Fail(c, xcode.ServerError, "feedback collector not initialized")
+		return
+	}
+	entry, err := manager.CollectFeedback(c.Request.Context(), req.SessionID, req.Namespace, airag.Feedback{
+		IsEffective: req.IsEffective,
+		Comment:     strings.TrimSpace(req.Comment),
+	}, req.Question, req.Answer)
+	if err != nil {
+		httpx.Fail(c, xcode.ServerError, err.Error())
+		return
+	}
+	httpx.OK(c, entry)
+}
+
+func (h *AIHandler) reviewApproval(c *gin.Context, approve bool) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			httpx.BindErr(c, err)
+			return
+		}
+	}
+	task, execution, err := h.gateway.ReviewApprovalTask(c.Request.Context(), uid, c.Param("id"), approve, strings.TrimSpace(req.Reason))
+	if err != nil {
+		switch {
+		case errors.Is(err, coreai.ErrPermissionDenied):
+			httpx.Fail(c, xcode.Forbidden, "permission denied")
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Fail(c, xcode.NotFound, "approval not found")
+		case errors.Is(err, coreai.ErrApprovalExpired):
+			httpx.Fail(c, xcode.ParamError, "approval expired")
+		default:
+			httpx.Fail(c, xcode.ServerError, err.Error())
+		}
+		return
+	}
+	httpx.OK(c, gin.H{"task": task, "execution": execution})
 }
 
 func (h *AIHandler) confirmConfirmation(c *gin.Context) {

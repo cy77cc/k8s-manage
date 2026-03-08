@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
+	coreai "github.com/cy77cc/k8s-manage/internal/ai"
 	aitools "github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/events"
-	coreai "github.com/cy77cc/k8s-manage/internal/ai"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
@@ -121,4 +121,65 @@ func (h *AIHandler) handleApprovalResponse(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, payload)
+}
+
+func (h *AIHandler) streamApprovals(c *gin.Context) {
+	uid, ok := uidFromContext(c)
+	if !ok {
+		httpx.Fail(c, xcode.Unauthorized, "unauthorized")
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		httpx.Fail(c, xcode.ServerError, "streaming not supported")
+		return
+	}
+
+	writer := events.NewSSEWriter(c, flusher, "approval-stream")
+	defer writer.Close()
+
+	emit := func(event string, payload gin.H) bool {
+		return writer.Emit(event, payload)
+	}
+
+	ch, unsubscribe := events.DefaultApprovalHub().Subscribe(uid, 16)
+	defer unsubscribe()
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	_ = emit("ready", gin.H{"user_id": uid})
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case update, ok := <-ch:
+			if !ok {
+				return
+			}
+			if !emit("approval_update", gin.H{
+				"id":               update.ID,
+				"approval_token":   update.ApprovalToken,
+				"tool_name":        update.ToolName,
+				"status":           update.Status,
+				"request_user_id":  update.RequestUserID,
+				"approver_user_id": update.ApproverUserID,
+				"execution":        update.Execution,
+				"updated_at":       update.UpdatedAt,
+			}) {
+				return
+			}
+		case <-ticker.C:
+			if !emit("heartbeat", gin.H{"status": "ok"}) {
+				return
+			}
+		}
+	}
 }

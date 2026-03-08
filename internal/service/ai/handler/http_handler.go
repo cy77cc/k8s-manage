@@ -28,7 +28,13 @@ func (h *HTTPHandler) PreviewTool(c *gin.Context)            { h.inner.previewTo
 func (h *HTTPHandler) ExecuteTool(c *gin.Context)            { h.inner.executeTool(c) }
 func (h *HTTPHandler) GetExecution(c *gin.Context)           { h.inner.getExecution(c) }
 func (h *HTTPHandler) CreateApproval(c *gin.Context)         { h.inner.createApproval(c) }
+func (h *HTTPHandler) ListApprovals(c *gin.Context)          { h.inner.listApprovals(c) }
+func (h *HTTPHandler) GetApproval(c *gin.Context)            { h.inner.getApproval(c) }
+func (h *HTTPHandler) StreamApprovals(c *gin.Context)        { h.inner.streamApprovals(c) }
+func (h *HTTPHandler) ApproveApproval(c *gin.Context)        { h.inner.approveApproval(c) }
+func (h *HTTPHandler) RejectApproval(c *gin.Context)         { h.inner.rejectApproval(c) }
 func (h *HTTPHandler) ConfirmApproval(c *gin.Context)        { h.inner.confirmApproval(c) }
+func (h *HTTPHandler) SubmitFeedback(c *gin.Context)         { h.inner.submitFeedback(c) }
 func (h *HTTPHandler) HandleApprovalResponse(c *gin.Context) { h.inner.handleApprovalResponse(c) }
 func (h *HTTPHandler) ResumeADKApproval(c *gin.Context)      { h.inner.resumeADKApproval(c) }
 func (h *HTTPHandler) ConfirmConfirmation(c *gin.Context)    { h.inner.confirmConfirmation(c) }

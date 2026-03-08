@@ -7,8 +7,7 @@ import (
 
 	"github.com/casbin/casbin/v2"
 	"github.com/cloudwego/eino-ext/devops"
-	"github.com/cy77cc/k8s-manage/internal/ai/agent"
-	"github.com/cy77cc/k8s-manage/internal/ai/model"
+	"github.com/cy77cc/k8s-manage/internal/ai"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
 	"github.com/cy77cc/k8s-manage/internal/cache"
 	casbinadapter "github.com/cy77cc/k8s-manage/internal/component/casbin"
@@ -31,7 +30,7 @@ type ServiceContext struct {
 	Rdb            redis.UniversalClient       // Redis 客户端
 	Cache          *expirable.LRU[string, any] // 本地缓存 (LRU)
 	CacheFacade    *cache.Facade               // L1-first cache facade
-	AI             *agent.PlatformRunner       // AI Platform Runner
+	AI             *ai.AIAgent                 // AI Agent runtime
 	CasbinEnforcer *casbin.Enforcer            // Casbin Enforcer
 	Prometheus     prominfra.Client            // Prometheus HTTP API client
 }
@@ -43,7 +42,7 @@ func MustNewServiceContext() *ServiceContext {
 	if err != nil {
 		logger.L().Warn("Failed to initialize devops", logger.Error(err))
 	}
-	chatModel, err := model.NewToolCallingChatModel(ctx)
+	chatModel, err := ai.NewToolCallingChatModel(ctx)
 	if err != nil {
 		logger.L().Warn("Failed to initialize AI chat model",
 			logger.String("provider", config.CFG.LLM.Provider),
@@ -53,7 +52,7 @@ func MustNewServiceContext() *ServiceContext {
 		)
 	}
 	if err == nil {
-		if healthErr := model.CheckModelHealth(ctx, chatModel); healthErr != nil {
+		if healthErr := ai.CheckModelHealth(ctx, chatModel); healthErr != nil {
 			logger.L().Warn("AI chat model health check failed",
 				logger.String("provider", config.CFG.LLM.Provider),
 				logger.String("base_url", aiBaseURL()),
@@ -68,12 +67,12 @@ func MustNewServiceContext() *ServiceContext {
 	db := storage.MustNewDB()
 	rdb := storage.MustNewRdb()
 
-	platformRunner, err := agent.NewPlatformRunner(ctx, chatModel,
+	platformRunner, err := ai.NewAIAgent(ctx, chatModel,
 		tools.PlatformDeps{
 			DB:        db,
 			Clientset: clientset,
 		},
-		&agent.RunnerConfig{
+		&ai.RunnerConfig{
 			EnableStreaming: true,
 			RedisClient:     rdb,
 		},

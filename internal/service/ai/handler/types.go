@@ -4,9 +4,9 @@ package handler
 import (
 	"context"
 
+	"github.com/cloudwego/eino/schema"
 	coreai "github.com/cy77cc/k8s-manage/internal/ai"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
-	"github.com/cloudwego/eino/schema"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
@@ -49,18 +49,22 @@ type aiGatewayRuntime interface {
 	GetExecution(id string) (*logic.ExecutionRecord, bool)
 	CreateApproval(uid uint64, tool string, params map[string]any) (*logic.ApprovalTicket, error)
 	ConfirmApproval(uid uint64, id string, approve bool) (*logic.ApprovalTicket, error)
+	CreateApprovalTask(ctx context.Context, uid uint64, tool string, params map[string]any) (*model.AIApprovalTask, error)
+	ListApprovalTasks(ctx context.Context, uid uint64, status string) ([]model.AIApprovalTask, error)
+	GetApprovalTask(ctx context.Context, uid uint64, id string) (*model.AIApprovalTask, error)
+	ReviewApprovalTask(ctx context.Context, uid uint64, id string, approve bool, reason string) (*model.AIApprovalTask, *logic.ExecutionRecord, error)
 	ConfirmConfirmation(ctx context.Context, uid uint64, id string, approve bool) (*model.ConfirmationRequest, error)
 }
 
 // AIHandler handles AI service HTTP requests
 type AIHandler struct {
-	svcCtx        *svc.ServiceContext
-	ai            aiToolRunner
-	orchestrator  aiOrchestrator
-	control       aiControlPlane
-	gateway       aiGatewayRuntime
-	sessions      *logic.SessionStore
-	runtime       *logic.RuntimeStore
+	svcCtx       *svc.ServiceContext
+	ai           aiToolRunner
+	orchestrator aiOrchestrator
+	control      aiControlPlane
+	gateway      aiGatewayRuntime
+	sessions     *logic.SessionStore
+	runtime      *logic.RuntimeStore
 }
 
 // NewAIHandler creates a new AIHandler instance

@@ -63,6 +63,15 @@ export interface AIInterruptApprovalResult {
   interrupt_error?: string;
 }
 
+export interface AIKnowledgeFeedbackPayload {
+  session_id?: string;
+  namespace?: string;
+  is_effective: boolean;
+  comment?: string;
+  question?: string;
+  answer?: string;
+}
+
 // AI对话请求参数
 export interface AIChatParams {
   sessionId?: string;
@@ -99,6 +108,25 @@ interface SSEMetaEvent {
 interface SSEDeltaEvent {
   contentChunk: string;
   turn_id?: string;
+}
+
+function toContentChunk(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+  const data = payload as Record<string, unknown>;
+  const direct = data.contentChunk ?? data.content ?? data.message;
+  if (typeof direct === 'string') {
+    return direct;
+  }
+  if (direct == null) {
+    return '';
+  }
+  try {
+    return JSON.stringify(direct);
+  } catch {
+    return String(direct);
+  }
 }
 
 interface SSEDoneEvent {
@@ -198,13 +226,32 @@ export interface ToolCallTrace {
 
 export interface ApprovalTicket {
   id: string;
-  tool: string;
-  params: Record<string, any>;
-  risk: RiskLevel;
-  mode: 'readonly' | 'mutating';
-  status: 'pending' | 'approved' | 'rejected' | 'expired';
-  createdAt: string;
-  expiresAt: string;
+  tool?: string;
+  tool_name?: string;
+  params?: Record<string, any>;
+  params_json?: string;
+  risk?: RiskLevel;
+  risk_level?: RiskLevel;
+  mode?: 'readonly' | 'mutating';
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | 'executed' | 'failed';
+  createdAt?: string;
+  created_at?: string;
+  expiresAt?: string;
+  expires_at?: string;
+  approval_token?: string;
+  target_resource_type?: string;
+  target_resource_id?: string;
+  target_resource_name?: string;
+  task_detail_json?: string;
+}
+
+export interface KnowledgeEntry {
+  id: string;
+  source: 'user_input' | 'feedback';
+  namespace: string;
+  question: string;
+  answer: string;
+  created_at?: string;
 }
 
 export interface ConfirmationTicket {
@@ -370,8 +417,14 @@ export const aiApi = {
 
       if (eventType === 'meta') {
         handlers.onMeta?.(payload as SSEMetaEvent);
-      } else if (eventType === 'delta') {
-        handlers.onDelta?.(payload as SSEDeltaEvent);
+      } else if (eventType === 'delta' || eventType === 'message') {
+        const contentChunk = toContentChunk(payload);
+        if (contentChunk) {
+          handlers.onDelta?.({
+            ...(typeof payload === 'object' && payload ? payload as Record<string, unknown> : {}),
+            contentChunk,
+          } as SSEDeltaEvent);
+        }
       } else if (eventType === 'done') {
         handlers.onDone?.(payload as SSEDoneEvent);
         toolPending = false;
@@ -493,6 +546,26 @@ export const aiApi = {
 
   async confirmApproval(id: string, approve: boolean): Promise<ApiResponse<ApprovalTicket>> {
     return apiService.post(`/ai/approvals/${id}/confirm`, { approve });
+  },
+
+  async listApprovals(status?: string): Promise<ApiResponse<ApprovalTicket[]>> {
+    return apiService.get('/ai/approvals', status ? { params: { status } } : undefined);
+  },
+
+  async getApproval(id: string): Promise<ApiResponse<ApprovalTicket>> {
+    return apiService.get(`/ai/approvals/${id}`);
+  },
+
+  async approveApproval(id: string, reason?: string): Promise<ApiResponse<{ task: ApprovalTicket; execution?: AIToolExecution }>> {
+    return apiService.post(`/ai/approvals/${id}/approve`, reason ? { reason } : {});
+  },
+
+  async rejectApproval(id: string, reason?: string): Promise<ApiResponse<{ task: ApprovalTicket; execution?: AIToolExecution }>> {
+    return apiService.post(`/ai/approvals/${id}/reject`, reason ? { reason } : {});
+  },
+
+  async submitFeedback(payload: AIKnowledgeFeedbackPayload): Promise<ApiResponse<KnowledgeEntry | null>> {
+    return apiService.post('/ai/feedback', payload);
   },
 
   async respondApproval(params: AIInterruptApprovalResponse): Promise<ApiResponse<AIInterruptApprovalResult>> {

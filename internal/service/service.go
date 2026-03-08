@@ -8,7 +8,6 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/middleware"
 	"github.com/cy77cc/k8s-manage/internal/service/ai"
-	"github.com/cy77cc/k8s-manage/internal/service/aiops"
 	"github.com/cy77cc/k8s-manage/internal/service/automation"
 	"github.com/cy77cc/k8s-manage/internal/service/cicd"
 	"github.com/cy77cc/k8s-manage/internal/service/cluster"
@@ -53,7 +52,6 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 	topology.RegisterTopologyHandlers(v1, serverCtx)
 	rbac.RegisterRBACHandlers(v1, serverCtx)
 	ai.RegisterAIHandlers(v1, serverCtx)
-	aiops.RegisterAIOPSHandlers(v1, serverCtx)
 	notification.RegisterNotificationHandlers(v1, serverCtx)
 	jobs.RegisterJobsHandlers(v1, serverCtx)
 

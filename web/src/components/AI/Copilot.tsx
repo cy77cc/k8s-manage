@@ -41,6 +41,7 @@ type SSEEventType =
   | 'plan_created'
   | 'step_status'
   | 'delta'
+  | 'message'
   | 'thinking_delta'
   | 'tool_call'
   | 'tool_result'
@@ -127,6 +128,21 @@ function getLastAssistantMessage(session: Record<string, unknown> | undefined): 
     }
   }
   return undefined;
+}
+
+function resolveStreamContent(data: Record<string, unknown>): string {
+  const value = data.contentChunk ?? data.content ?? data.message;
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value == null) {
+    return '';
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 // 发送 SSE 请求
@@ -347,7 +363,8 @@ export const Copilot: React.FC<CopilotProps> = ({
               break;
 
             case 'delta':
-              assistantContent += (data.contentChunk as string) || '';
+            case 'message':
+              assistantContent += resolveStreamContent(data);
               break;
 
             case 'thinking_delta':

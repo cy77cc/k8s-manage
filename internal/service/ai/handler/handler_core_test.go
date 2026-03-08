@@ -9,9 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/eino/schema"
 	coreai "github.com/cy77cc/k8s-manage/internal/ai"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	airag "github.com/cy77cc/k8s-manage/internal/ai/rag"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
 	"github.com/gin-gonic/gin"
 )
@@ -38,12 +40,13 @@ func (f *fakeOrchestrator) ResumePayload(_ context.Context, _ string, _ map[stri
 }
 
 type fakeGatewayRuntime struct {
-	previewCalled      bool
-	previewTool        string
-	executeCalled      bool
-	sessionListCalled  bool
-	confirmCalled      bool
-	executionCalled    bool
+	previewCalled     bool
+	previewTool       string
+	executeCalled     bool
+	sessionListCalled bool
+	confirmCalled     bool
+	executionCalled   bool
+	reviewCalled      bool
 }
 
 func (f *fakeGatewayRuntime) ListSessions(uid uint64, scene string) []*logic.AISession {
@@ -81,6 +84,23 @@ func (f *fakeGatewayRuntime) CreateApproval(uid uint64, tool string, params map[
 }
 func (f *fakeGatewayRuntime) ConfirmApproval(uid uint64, id string, approve bool) (*logic.ApprovalTicket, error) {
 	return &logic.ApprovalTicket{ID: id, Tool: "host_exec", Status: "approved"}, nil
+}
+func (f *fakeGatewayRuntime) CreateApprovalTask(ctx context.Context, uid uint64, tool string, params map[string]any) (*model.AIApprovalTask, error) {
+	return &model.AIApprovalTask{ID: "apv-1", ToolName: tool, Status: "pending"}, nil
+}
+func (f *fakeGatewayRuntime) ListApprovalTasks(ctx context.Context, uid uint64, status string) ([]model.AIApprovalTask, error) {
+	return []model.AIApprovalTask{{ID: "apv-1", ToolName: "host_exec", Status: "pending"}}, nil
+}
+func (f *fakeGatewayRuntime) GetApprovalTask(ctx context.Context, uid uint64, id string) (*model.AIApprovalTask, error) {
+	return &model.AIApprovalTask{ID: id, ToolName: "host_exec", Status: "pending"}, nil
+}
+func (f *fakeGatewayRuntime) ReviewApprovalTask(ctx context.Context, uid uint64, id string, approve bool, reason string) (*model.AIApprovalTask, *logic.ExecutionRecord, error) {
+	f.reviewCalled = true
+	status := "rejected"
+	if approve {
+		status = "executed"
+	}
+	return &model.AIApprovalTask{ID: id, ToolName: "host_exec", Status: status}, &logic.ExecutionRecord{ID: "exe-1", Tool: "host_exec", Status: "succeeded"}, nil
 }
 func (f *fakeGatewayRuntime) ConfirmConfirmation(ctx context.Context, uid uint64, id string, approve bool) (*model.ConfirmationRequest, error) {
 	f.confirmCalled = true
@@ -156,17 +176,19 @@ func TestResumeApprovalDelegatesToAICoreOrchestrator(t *testing.T) {
 
 type fakeControlPlane struct{}
 
-func (f *fakeControlPlane) ToolPolicy(context.Context, tools.ToolMeta, map[string]any) error { return nil }
-func (f *fakeControlPlane) HasPermission(uint64, string) bool                                { return true }
-func (f *fakeControlPlane) IsAdmin(uint64) bool                                              { return false }
-func (f *fakeControlPlane) FindMeta(string) (tools.ToolMeta, bool)                           { return tools.ToolMeta{}, false }
+func (f *fakeControlPlane) ToolPolicy(context.Context, tools.ToolMeta, map[string]any) error {
+	return nil
+}
+func (f *fakeControlPlane) HasPermission(uint64, string) bool      { return true }
+func (f *fakeControlPlane) IsAdmin(uint64) bool                    { return false }
+func (f *fakeControlPlane) FindMeta(string) (tools.ToolMeta, bool) { return tools.ToolMeta{}, false }
 
 func TestPreviewToolDelegatesToGatewayRuntime(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	gateway := &fakeGatewayRuntime{}
 	h := &AIHandler{gateway: gateway, control: &fakeControlPlane{}}
 	ctx, recorder := newTestChatContext(t, map[string]any{
-		"tool": "host_batch_exec_apply",
+		"tool":   "host_batch_exec_apply",
 		"params": map[string]any{"host_id": 1},
 	})
 	h.previewTool(ctx)
@@ -218,12 +240,94 @@ func TestConfirmConfirmationDelegatesToGatewayRuntime(t *testing.T) {
 	}
 }
 
+func TestListApprovalsDelegatesToGatewayRuntime(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gateway := &fakeGatewayRuntime{}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/ai/approvals", nil)
+	ctx.Set("uid", uint64(7))
+	h := &AIHandler{gateway: gateway}
+	h.listApprovals(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+}
+
+func TestApproveApprovalDelegatesToGatewayRuntime(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gateway := &fakeGatewayRuntime{}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	body := bytes.NewReader([]byte(`{}`))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/ai/approvals/apv-1/approve", body)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Params = gin.Params{{Key: "id", Value: "apv-1"}}
+	ctx.Set("uid", uint64(7))
+	h := &AIHandler{gateway: gateway}
+	h.approveApproval(ctx)
+	if !gateway.reviewCalled {
+		t.Fatalf("expected review approval to delegate to gateway runtime")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+}
+
+type fakeKnowledgeAgent struct{}
+
+func (f *fakeKnowledgeAgent) ToolMetas() []tools.ToolMeta { return nil }
+
+func (f *fakeKnowledgeAgent) RunTool(context.Context, string, map[string]any) (tools.ToolResult, error) {
+	return tools.ToolResult{}, nil
+}
+
+func (f *fakeKnowledgeAgent) Generate(context.Context, []*schema.Message) (*schema.Message, error) {
+	return schema.AssistantMessage("ok", nil), nil
+}
+
+func (f *fakeKnowledgeAgent) CollectFeedback(context.Context, string, string, airag.Feedback, string, string) (*airag.KnowledgeEntry, error) {
+	return &airag.KnowledgeEntry{ID: "kb-1", Namespace: "team-a", Question: "restart?", Answer: "use tool"}, nil
+}
+
+func TestSubmitFeedbackIndexesKnowledge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	body := bytes.NewReader([]byte(`{"session_id":"sess-1","namespace":"team-a","is_effective":true,"question":"restart?","answer":"use tool"}`))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/ai/feedback", body)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h := &AIHandler{ai: &fakeKnowledgeAgent{}}
+	h.submitFeedback(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestHandleApprovalResponseResumesInterrupt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	orch := &fakeOrchestrator{resumePayload: map[string]any{"resumed": true}}
+	h := &AIHandler{orchestrator: orch}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	body := bytes.NewReader([]byte(`{"session_id":"sess-1","target":"call-1","approved":true}`))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/ai/approval/respond", body)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.handleApprovalResponse(ctx)
+	if !orch.resumeCalled {
+		t.Fatalf("expected resume to be called")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+}
+
 func TestExecuteToolDelegatesToGatewayRuntime(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	gateway := &fakeGatewayRuntime{}
 	h := &AIHandler{gateway: gateway}
 	ctx, recorder := newTestChatContext(t, map[string]any{
-		"tool": "host_exec_readonly",
+		"tool":   "host_exec_readonly",
 		"params": map[string]any{"host_id": 1, "command": "df -h"},
 	})
 	h.executeTool(ctx)

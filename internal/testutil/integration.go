@@ -110,6 +110,9 @@ func autoMigrateAll(db *gorm.DB) error {
 		// AI
 		&model.AIChatSession{},
 		&model.AIChatMessage{},
+		&model.AIApprovalTask{},
+		&model.ConfirmationRequest{},
+		&model.AICheckPoint{},
 		&model.AICommandExecution{},
 
 		// Jobs

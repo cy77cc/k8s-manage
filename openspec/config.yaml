@@ -17,6 +17,8 @@ context: |
   Delivery conventions:
     - OpenSpec-first: behavior/capability changes must update OpenSpec in same PR
     - Validate before merge: openspec validate --json
+    - Third-party framework usage MUST query documentation via Context7 before implementation or integration
+    - During implementation, prefer evaluating existing proven frameworks/libraries before building custom solutions
 
 rules:
   proposal:
@@ -43,3 +45,8 @@ rules:
     - Group tasks by phase (modeling, implementation, validation, rollout/governance).
     - Include verification tasks (`go test ./...`; if web touched, `cd web && npm run build`).
     - Include OpenSpec sync task: update specs/tasks and run `openspec validate --json`.
+
+  implementation:
+    - For third-party frameworks or libraries, query relevant docs/examples through Context7 before coding against them.
+    - Prefer mature existing frameworks/libraries when they fit the requirement; avoid custom implementation without first checking reusable options.
+    - When introducing a new framework/library, record the selection rationale and expected fit in the related proposal, design, or task notes.

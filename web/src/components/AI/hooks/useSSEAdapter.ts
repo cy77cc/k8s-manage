@@ -80,6 +80,21 @@ export function useSSEAdapter(options: SSEAdapterOptions) {
   /**
    * 处理单个 SSE 事件块
    */
+  const resolveContent = (payload: Record<string, unknown>) => {
+    const value = payload.contentChunk ?? payload.content ?? payload.message;
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (value == null) {
+      return '';
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+
   const dispatchEvent = useCallback(
     (chunk: string) => {
       const lines = chunk.split('\n');
@@ -114,9 +129,15 @@ export function useSSEAdapter(options: SSEAdapterOptions) {
           break;
 
         case 'delta':
+        case 'message':
           // 文本增量
-          contentRef.current += String(payload.contentChunk || '');
-          emitMessage();
+          {
+            const content = resolveContent(payload);
+            if (content) {
+              contentRef.current += content;
+              emitMessage();
+            }
+          }
           break;
 
         case 'thinking_delta':
