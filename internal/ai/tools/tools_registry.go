@@ -7,22 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
-	"gorm.io/gorm"
-	"k8s.io/client-go/kubernetes"
 )
-
-type PlatformDeps struct {
-	DB        *gorm.DB
-	Clientset *kubernetes.Clientset
-}
-
-type RegisteredTool struct {
-	Meta ToolMeta
-	Tool tool.InvokableTool
-}
 
 func addLocalTool[I any](tools *[]RegisteredTool, meta ToolMeta, fn func(ctx context.Context, input I) (ToolResult, error)) error {
 	meta = normalizeToolMeta(meta)

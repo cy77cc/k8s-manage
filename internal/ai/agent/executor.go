@@ -6,16 +6,14 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/prebuilt/planexecute"
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cy77cc/k8s-manage/internal/ai/model"
 )
 
-func NewExecutor(ctx context.Context, tools []tool.BaseTool) (adk.Agent, error) {	// Get travel tools for the executor
-	
-	chatModel, err := model.NewToolCallingChatModel(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create chat model: %w", err)
+func NewExecutor(ctx context.Context, chatModel einomodel.ToolCallingChatModel, tools []tool.BaseTool) (adk.Agent, error) {
+	if chatModel == nil {
+		return nil, fmt.Errorf("chat model is nil")
 	}
 	return planexecute.NewExecutor(ctx, &planexecute.ExecutorConfig{
 		Model: chatModel,

@@ -6,16 +6,14 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/prebuilt/planexecute"
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/prompt"
 	"github.com/cloudwego/eino/schema"
-	"github.com/cy77cc/k8s-manage/internal/ai/model"
 )
 
-func NewPlanner(ctx context.Context) (adk.Agent, error) {
-
-	chatModel, err := model.NewToolCallingChatModel(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create chat model: %w", err)
+func NewPlanner(ctx context.Context, chatModel einomodel.ToolCallingChatModel) (adk.Agent, error) {
+	if chatModel == nil {
+		return nil, fmt.Errorf("chat model is nil")
 	}
 
 	return planexecute.NewPlanner(ctx, &planexecute.PlannerConfig{
@@ -26,10 +24,9 @@ func NewPlanner(ctx context.Context) (adk.Agent, error) {
 var executorPrompt = prompt.FromMessages(schema.FString,
 	schema.SystemMessage(platformAgentInstruction))
 
-func NewReplanAgent(ctx context.Context) (adk.Agent, error) {
-	chatModel, err := model.NewToolCallingChatModel(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create chat model: %w", err)
+func NewReplanAgent(ctx context.Context, chatModel einomodel.ToolCallingChatModel) (adk.Agent, error) {
+	if chatModel == nil {
+		return nil, fmt.Errorf("chat model is nil")
 	}
 	return planexecute.NewReplanner(ctx, &planexecute.ReplannerConfig{
 		ChatModel: chatModel,

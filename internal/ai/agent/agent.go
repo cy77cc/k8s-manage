@@ -55,17 +55,17 @@ func newPlatformAgent(ctx context.Context, chatModel model.ToolCallingChatModel,
 		return nil, fmt.Errorf("chat model is nil")
 	}
 
-	planner, err := NewPlanner(ctx)
+	planner, err := NewPlanner(ctx, chatModel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create planner: %w", err)
 	}
 
-	executor, err := NewExecutor(ctx, allTools)
+	executor, err := NewExecutor(ctx, chatModel, allTools)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create executor: %w", err)
 	}
 
-	replanner, err := NewReplanAgent(ctx)
+	replanner, err := NewReplanAgent(ctx, chatModel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create replanner: %w", err)
 	}
