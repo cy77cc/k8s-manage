@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cy77cc/k8s-manage/internal/config"
 	"github.com/cy77cc/k8s-manage/internal/middleware"
 	"github.com/cy77cc/k8s-manage/internal/service/ai"
 	"github.com/cy77cc/k8s-manage/internal/service/aiops"
@@ -63,6 +64,10 @@ func Init(r *gin.Engine, serverCtx *svc.ServiceContext) {
 }
 
 func registerWebStaticRoutes(r *gin.Engine) {
+	if config.IsDevelopment() {
+		return
+	}
+
 	distFS, err := webui.SubDist()
 	if err != nil {
 		return

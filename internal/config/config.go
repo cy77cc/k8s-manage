@@ -242,3 +242,16 @@ func HostHealthDiagnosticsEnabled() bool {
 func HostMaintenanceModeEnabled() bool {
 	return boolOrDefault(CFG.FeatureFlags.HostMaintenanceMode, true)
 }
+
+func AppEnv() string {
+	return strings.TrimSpace(strings.ToLower(CFG.App.Env))
+}
+
+func IsDevelopment() bool {
+	switch AppEnv() {
+	case "dev", "development", "local":
+		return true
+	default:
+		return false
+	}
+}

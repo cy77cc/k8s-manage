@@ -4,6 +4,12 @@ swag:
 run:
 	go run main.go
 
+dev-backend:
+	APP_ENV=development go run main.go
+
+dev-frontend:
+	cd web && npm run dev
+
 web-build:
 	cd web && npm run build
 
@@ -80,4 +86,3 @@ test-ai:
 
 test-notification:
 	go test ./internal/service/notification/... -v
-

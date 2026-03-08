@@ -28,6 +28,31 @@
                 "maxStructFields": -1
             },
             "buildFlags": "-tags=containers_image_openpgp,exclude_graphdriver_btrfs"
+        },
+        {
+            "name": "server run",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/.",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/config.yaml"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "DEBUG": "true",
+                "ENABLE_SWAGGER": "true"
+            },
+            "asRoot": true,
+            "dlvLoadConfig": {
+                "followPointers": true,
+                "maxVariableRecurse": 3,
+                "maxStringLen": 40000,
+                "maxArrayValues": 400,
+                "maxStructFields": -1
+            },
+            "buildFlags": "-tags=containers_image_openpgp,exclude_graphdriver_btrfs"
         }
     ]
 }

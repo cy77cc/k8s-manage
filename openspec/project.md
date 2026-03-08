@@ -10,7 +10,8 @@ It combines:
 - RBAC and user/auth management
 - AI-assisted operations (chat + tool calling + approval flow)
 
-The backend serves API and embedded frontend assets in one process.
+The backend serves API and embedded frontend assets in one process for production builds.
+During local development, frontend and backend run separately: Vite serves the frontend, and the backend serves API/WebSocket only.
 
 ## Tech Stack
 
@@ -43,7 +44,7 @@ The backend serves API and embedded frontend assets in one process.
 - Single Go service process.
 - API prefix: `/api/v1`.
 - Health endpoint: `/api/health`.
-- Frontend built to `web/dist` and embedded via Go `embed`.
+- Frontend built to `web/dist` and embedded via Go `embed` for production-style builds.
 - Non-`/api/*` routes fallback to SPA `index.html`.
 - Service context wires DB, Redis, K8s clientset, Casbin enforcer, and AI platform agent.
 
@@ -60,6 +61,8 @@ The backend serves API and embedded frontend assets in one process.
 
 ## Development Workflow
 
+- Start backend dev server: `make dev-backend`
+- Start frontend dev server: `make dev-frontend`
 - Build frontend: `make web-build`
 - Build backend: `make build`
 - Build both: `make build-all`
@@ -71,7 +74,8 @@ The backend serves API and embedded frontend assets in one process.
 
 Notes:
 
-- Backend embeds current frontend build output at compile time.
+- Backend embeds current frontend build output at compile time for production builds.
+- In local development, backend does not serve frontend static assets; Vite handles frontend delivery separately.
 - Bootstrap migrations run at startup; `app.auto_migrate` is for explicit dev usage only.
 
 ## Conventions
