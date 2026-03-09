@@ -3,11 +3,11 @@ package handler
 import (
 	"context"
 
-	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/gin-gonic/gin"
 )
 
-func (h *AIHandler) toolPolicy(ctx context.Context, meta tools.ToolMeta, params map[string]any) error {
+func (h *AIHandler) toolPolicy(ctx context.Context, meta core.ToolMeta, params map[string]any) error {
 	return h.control.ToolPolicy(ctx, meta, params)
 }
 

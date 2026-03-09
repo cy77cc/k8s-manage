@@ -8,16 +8,62 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
-	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
+
+// Input types
+
+type CICDPipelineListInput struct {
+	Status  string `json:"status,omitempty" jsonschema_description:"optional status filter"`
+	Keyword string `json:"keyword,omitempty" jsonschema_description:"optional keyword on repo/branch"`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"max pipelines,default=50"`
+}
+
+type CICDPipelineStatusInput struct {
+	PipelineID int `json:"pipeline_id" jsonschema_description:"required,pipeline config id"`
+}
+
+type CICDPipelineTriggerInput struct {
+	PipelineID int               `json:"pipeline_id" jsonschema_description:"required,pipeline config id"`
+	Branch     string            `json:"branch" jsonschema_description:"required,branch to build"`
+	Params     map[string]string `json:"params,omitempty" jsonschema_description:"optional trigger params"`
+}
+
+type JobListInput struct {
+	Status  string `json:"status,omitempty" jsonschema_description:"optional status filter"`
+	Keyword string `json:"keyword,omitempty" jsonschema_description:"optional keyword on name/type"`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"max jobs,default=50"`
+}
+
+type JobExecutionStatusInput struct {
+	JobID       int `json:"job_id" jsonschema_description:"required,job id"`
+	ExecutionID int `json:"execution_id,omitempty" jsonschema_description:"optional execution id"`
+}
+
+type JobRunInput struct {
+	JobID  int            `json:"job_id" jsonschema_description:"required,job id"`
+	Params map[string]any `json:"params,omitempty" jsonschema_description:"optional run params"`
+}
+
+// NewCICDTools returns all CICD tools.
+func NewCICDTools(ctx context.Context, deps core.PlatformDeps) []tool.InvokableTool {
+	return []tool.InvokableTool{
+		CICDPipelineList(ctx, deps),
+		CICDPipelineStatus(ctx, deps),
+		CICDPipelineTrigger(ctx, deps),
+		JobList(ctx, deps),
+		JobExecutionStatus(ctx, deps),
+		JobRun(ctx, deps),
+	}
+}
 
 type CICDPipelineListOutput struct {
 	Total int                         `json:"total"`
 	List  []model.CICDServiceCIConfig `json:"list"`
 }
 
-func CICDPipelineList(ctx context.Context, deps PlatformDeps, input CICDPipelineListInput) tool.InvokableTool {
+func CICDPipelineList(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := utils.InferOptionableTool(
 		"cicd_pipeline_list",
 		"Query CI pipeline configuration list from the CI/CD system. Optional parameters: status filters by pipeline status (active/inactive/queued), keyword searches by repository URL or branch name using fuzzy matching, limit controls max results (default 50, max 200). Returns pipelines with repository info, branch, build configuration, and status. Use pipeline IDs for triggering builds or checking status. Example: {\"status\":\"active\",\"keyword\":\"main\",\"limit\":20}.",
@@ -61,7 +107,7 @@ type CICDPipelineStatusOutput struct {
 	RecentRuns []model.CICDServiceCIRun  `json:"recent_runs"`
 }
 
-func CICDPipelineStatus(ctx context.Context, deps PlatformDeps, input CICDPipelineStatusInput) tool.InvokableTool {
+func CICDPipelineStatus(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := utils.InferOptionableTool(
 		"cicd_pipeline_status",
 		"Query detailed pipeline status including configuration and recent build runs. pipeline_id is required and can be obtained from cicd_pipeline_list. Returns the pipeline configuration (repository URL, branch, build settings) and up to 10 most recent run records with status, duration, and timestamps. Use this to check pipeline health or investigate build failures. Example: {\"pipeline_id\":3}.",
@@ -97,7 +143,7 @@ type CICDPipelineTriggerOutput struct {
 	Status     string `json:"status"`
 }
 
-func CICDPipelineTrigger(ctx context.Context, deps PlatformDeps, input CICDPipelineTriggerInput) tool.InvokableTool {
+func CICDPipelineTrigger(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := utils.InferOptionableTool(
 		"cicd_pipeline_trigger",
 		"Trigger a new build for a CI/CD pipeline. pipeline_id and branch are required parameters. pipeline_id can be obtained from cicd_pipeline_list. The branch parameter specifies which branch to build (e.g., 'main', 'develop', 'feature/xyz'). Optional params can pass additional build parameters as key-value pairs. This is a mutating operation that queues a new build run. Returns the created run ID and initial status (queued). Example: {\"pipeline_id\":3,\"branch\":\"main\"}.",
@@ -145,7 +191,7 @@ type JobListOutput struct {
 	List  []model.Job `json:"list"`
 }
 
-func JobList(ctx context.Context, deps PlatformDeps, input JobListInput) tool.InvokableTool {
+func JobList(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := utils.InferOptionableTool(
 		"job_list",
 		"Query scheduled job list from the job management system. Optional parameters: status filters by job status (running/scheduled/paused/completed/failed), keyword searches by job name or job type using fuzzy matching, limit controls max results (default 50, max 200). Returns jobs with name, type, schedule (cron expression), next run time, and status. Use job IDs for checking execution status or triggering manual runs. Example: {\"status\":\"running\",\"keyword\":\"backup\"}.",
@@ -189,7 +235,7 @@ type JobExecutionStatusOutput struct {
 	List  []model.JobExecution `json:"list"`
 }
 
-func JobExecutionStatus(ctx context.Context, deps PlatformDeps, input JobExecutionStatusInput) tool.InvokableTool {
+func JobExecutionStatus(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := utils.InferOptionableTool(
 		"job_execution_status",
 		"Query execution history and status for a specific scheduled job. job_id is required and can be obtained from job_list. Optional execution_id filters to a specific execution run. Returns up to 20 most recent execution records with start/end time, duration, exit code, output logs, and status (running/success/failed). Use this to investigate job failures or monitor long-running jobs. Example: {\"job_id\":12}.",
@@ -226,7 +272,7 @@ type JobRunOutput struct {
 	Status      string `json:"status"`
 }
 
-func JobRun(ctx context.Context, deps PlatformDeps, input JobRunInput) tool.InvokableTool {
+func JobRun(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := utils.InferOptionableTool(
 		"job_run",
 		"Manually trigger a scheduled job to run immediately, bypassing its normal schedule. job_id is required and can be obtained from job_list. Optional params can override default job parameters as key-value pairs. This is a mutating operation that creates a new execution run with 'running' status. Returns the created execution ID and initial status. Use this for on-demand job execution or testing. Example: {\"job_id\":12}.",

@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	airag "github.com/cy77cc/k8s-manage/internal/ai/rag"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 )
 
 func TestActionGraphInvoke_NoToolCall(t *testing.T) {
@@ -50,8 +51,8 @@ func TestActionGraphInvoke_ToolExecution(t *testing.T) {
 				},
 			}}),
 		},
-		Tools: []tools.RegisteredTool{{
-			Meta: tools.ToolMeta{
+		Tools: []core.RegisteredTool{{
+			Meta: core.ToolMeta{
 				Name:        "service_echo",
 				Description: "Echoes a message.",
 				Required:    []string{"message"},
@@ -90,8 +91,8 @@ func TestActionGraphInvoke_ValidationFailure(t *testing.T) {
 				},
 			}}),
 		},
-		Tools: []tools.RegisteredTool{{
-			Meta: tools.ToolMeta{
+		Tools: []core.RegisteredTool{{
+			Meta: core.ToolMeta{
 				Name:        "k8s_apply_manifest",
 				Description: "Apply a manifest.",
 				Domain:      tools.DomainInfrastructure,

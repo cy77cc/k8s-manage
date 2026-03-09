@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	airag "github.com/cy77cc/k8s-manage/internal/ai/rag"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 )
 
 const (
@@ -32,7 +33,7 @@ type ActionGraph struct {
 
 type ActionGraphConfig struct {
 	ChatModel       einomodel.ToolCallingChatModel
-	Tools           []tools.RegisteredTool
+	Tools           []core.RegisteredTool
 	Validator       Validator
 	CheckPointStore compose.CheckPointStore
 	Retriever       airag.Retriever
@@ -242,7 +243,7 @@ func (g *ActionGraph) toolInfos(ctx context.Context) ([]*schema.ToolInfo, error)
 	return out, nil
 }
 
-func newToolsNode(ctx context.Context, registered []tools.RegisteredTool) (*compose.ToolsNode, error) {
+func newToolsNode(ctx context.Context, registered []core.RegisteredTool) (*compose.ToolsNode, error) {
 	if len(registered) == 0 {
 		return nil, nil
 	}

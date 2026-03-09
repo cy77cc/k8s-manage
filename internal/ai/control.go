@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
 	"gorm.io/gorm"
@@ -43,7 +44,7 @@ func NewControlPlane(db *gorm.DB, runtime *logic.RuntimeStore, ai *AIAgent) *Con
 //
 // 返回:
 //   - error: 权限错误（如 ErrPermissionDenied）或 nil。
-func (c *ControlPlane) ToolPolicy(ctx context.Context, meta tools.ToolMeta, params map[string]any) error {
+func (c *ControlPlane) ToolPolicy(ctx context.Context, meta core.ToolMeta, params map[string]any) error {
 	uid, _ := tools.ToolUserFromContext(ctx)
 	if meta.Permission == "" || uid == 0 || c.db == nil {
 		return nil
@@ -90,11 +91,11 @@ func (c *ControlPlane) IsAdmin(uid uint64) bool {
 //   - name: 工具名称。
 //
 // 返回:
-//   - tools.ToolMeta: 工具元信息。
+//   - core.ToolMeta: 工具元信息。
 //   - bool: 是否找到。
-func (c *ControlPlane) FindMeta(name string) (tools.ToolMeta, bool) {
+func (c *ControlPlane) FindMeta(name string) (core.ToolMeta, bool) {
 	if c == nil || c.ai == nil {
-		return tools.ToolMeta{}, false
+		return core.ToolMeta{}, false
 	}
 	return c.ai.FindMeta(name)
 }

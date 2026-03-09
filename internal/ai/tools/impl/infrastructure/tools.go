@@ -7,16 +7,55 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	einoutils "github.com/cloudwego/eino/components/tool/utils"
-	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
+
+// Input types
+
+type CredentialListInput struct {
+	Type    string `json:"type,omitempty" jsonschema_description:"credential type or runtime type"`
+	Keyword string `json:"keyword,omitempty" jsonschema_description:"optional keyword on name/endpoint"`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"max credentials,default=50"`
+}
+
+type CredentialTestInput struct {
+	CredentialID int `json:"credential_id" jsonschema_description:"required,credential id"`
+}
+
+// NewInfrastructureTools returns all infrastructure tools.
+func NewInfrastructureTools(ctx context.Context, deps core.PlatformDeps) []tool.InvokableTool {
+	return []tool.InvokableTool{
+		CredentialList(ctx, deps),
+		CredentialTest(ctx, deps),
+	}
+}
+
+// Register returns all infrastructure tools as RegisteredTool slice.
+func Register(ctx context.Context, deps core.PlatformDeps) []core.RegisteredTool {
+	tools := NewInfrastructureTools(ctx, deps)
+	registered := make([]core.RegisteredTool, len(tools))
+	for i, t := range tools {
+		registered[i] = core.RegisteredTool{
+			Meta: core.ToolMeta{
+				Name:     fmt.Sprintf("infrastructure_tool_%d", i),
+				Mode:     core.ToolModeReadonly,
+				Risk:     core.ToolRiskLow,
+				Domain:   core.DomainInfrastructure,
+				Category: core.CategoryDiscovery,
+			},
+			Tool: t,
+		}
+	}
+	return registered
+}
 
 type CredentialListOutput struct {
 	Total int              `json:"total"`
 	List  []map[string]any `json:"list"`
 }
 
-func CredentialList(ctx context.Context, deps PlatformDeps, input CredentialListInput) tool.InvokableTool {
+func CredentialList(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"credential_list",
 		"Query cluster credential list for accessing Kubernetes clusters or other infrastructure. Optional parameters: type filters by runtime type or source (k8s/helm/compose), keyword searches by name or endpoint, limit controls max results (default 50, max 200). Returns credentials with id, name, runtime type, endpoint, status, and last test result. Use credential IDs for deployment target configuration. Example: {\"type\":\"k8s\",\"limit\":20}.",
@@ -78,7 +117,7 @@ type CredentialTestOutput struct {
 	LastTestMessage string `json:"last_test_message"`
 }
 
-func CredentialTest(ctx context.Context, deps PlatformDeps, input CredentialTestInput) tool.InvokableTool {
+func CredentialTest(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"credential_test",
 		"Get credential connectivity test result. credential_id is required. Returns the last test result including test timestamp, status (success/failed), and any error message. Use this to verify if a credential is valid before using it for deployment. Example: {\"credential_id\":5}.",

@@ -12,8 +12,8 @@ import (
 func TestSecurityAspectPermissionDenied(t *testing.T) {
 	t.Parallel()
 
-	aspect := NewSecurityAspect([]tools.RegisteredTool{{
-		Meta: tools.ToolMeta{
+	aspect := NewSecurityAspect([]core.RegisteredTool{{
+		Meta: core.ToolMeta{
 			Name:       "service_restart",
 			Permission: "service:write",
 			Risk:       tools.ToolRiskLow,
@@ -36,8 +36,8 @@ func TestSecurityAspectPermissionDenied(t *testing.T) {
 func TestSecurityAspectInterruptsRiskyTool(t *testing.T) {
 	t.Parallel()
 
-	aspect := NewSecurityAspect([]tools.RegisteredTool{{
-		Meta: tools.ToolMeta{
+	aspect := NewSecurityAspect([]core.RegisteredTool{{
+		Meta: core.ToolMeta{
 			Name:       "cluster_delete",
 			Permission: "cluster:write",
 			Risk:       tools.ToolRiskHigh,
@@ -61,8 +61,8 @@ func TestSecurityAspectAllowsSafeTool(t *testing.T) {
 	t.Parallel()
 
 	logger := &memoryAuditLogger{}
-	aspect := NewSecurityAspect([]tools.RegisteredTool{{
-		Meta: tools.ToolMeta{
+	aspect := NewSecurityAspect([]core.RegisteredTool{{
+		Meta: core.ToolMeta{
 			Name:       "service_status",
 			Permission: "service:read",
 			Risk:       tools.ToolRiskLow,
@@ -94,7 +94,7 @@ func (s staticPermissionChecker) HasPermission(context.Context, string) (bool, e
 
 type staticInterruptHandler struct{}
 
-func (staticInterruptHandler) BuildInterrupt(_ context.Context, meta tools.ToolMeta, _ map[string]any) (*tools.ApprovalInfo, error) {
+func (staticInterruptHandler) BuildInterrupt(_ context.Context, meta core.ToolMeta, _ map[string]any) (*tools.ApprovalInfo, error) {
 	return &tools.ApprovalInfo{
 		ToolName: meta.Name,
 		Preview:  map[string]any{"mode": "review"},

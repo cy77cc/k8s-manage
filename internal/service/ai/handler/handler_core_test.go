@@ -13,6 +13,7 @@ import (
 	coreai "github.com/cy77cc/k8s-manage/internal/ai"
 	airag "github.com/cy77cc/k8s-manage/internal/ai/rag"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
 	"github.com/gin-gonic/gin"
@@ -176,12 +177,12 @@ func TestResumeApprovalDelegatesToAICoreOrchestrator(t *testing.T) {
 
 type fakeControlPlane struct{}
 
-func (f *fakeControlPlane) ToolPolicy(context.Context, tools.ToolMeta, map[string]any) error {
+func (f *fakeControlPlane) ToolPolicy(context.Context, core.ToolMeta, map[string]any) error {
 	return nil
 }
 func (f *fakeControlPlane) HasPermission(uint64, string) bool      { return true }
 func (f *fakeControlPlane) IsAdmin(uint64) bool                    { return false }
-func (f *fakeControlPlane) FindMeta(string) (tools.ToolMeta, bool) { return tools.ToolMeta{}, false }
+func (f *fakeControlPlane) FindMeta(string) (core.ToolMeta, bool) { return core.ToolMeta{}, false }
 
 func TestPreviewToolDelegatesToGatewayRuntime(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -276,10 +277,10 @@ func TestApproveApprovalDelegatesToGatewayRuntime(t *testing.T) {
 
 type fakeKnowledgeAgent struct{}
 
-func (f *fakeKnowledgeAgent) ToolMetas() []tools.ToolMeta { return nil }
+func (f *fakeKnowledgeAgent) ToolMetas() []core.ToolMeta { return nil }
 
-func (f *fakeKnowledgeAgent) RunTool(context.Context, string, map[string]any) (tools.ToolResult, error) {
-	return tools.ToolResult{}, nil
+func (f *fakeKnowledgeAgent) RunTool(context.Context, string, map[string]any) (core.ToolResult, error) {
+	return core.ToolResult{}, nil
 }
 
 func (f *fakeKnowledgeAgent) Generate(context.Context, []*schema.Message) (*schema.Message, error) {

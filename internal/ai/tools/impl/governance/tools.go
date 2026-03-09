@@ -8,16 +8,78 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	einoutils "github.com/cloudwego/eino/components/tool/utils"
-	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
+
+// Input types
+
+type UserListInput struct {
+	Keyword string `json:"keyword,omitempty" jsonschema_description:"optional username/email keyword"`
+	Status  int    `json:"status,omitempty" jsonschema_description:"optional status filter"`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"max users,default=50"`
+}
+
+type RoleListInput struct {
+	Keyword string `json:"keyword,omitempty" jsonschema_description:"optional role keyword"`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"max roles,default=50"`
+}
+
+type PermissionCheckInput struct {
+	UserID   int    `json:"user_id" jsonschema_description:"required,user id"`
+	Resource string `json:"resource" jsonschema_description:"required,resource name"`
+	Action   string `json:"action" jsonschema_description:"required,action name"`
+}
+
+type TopologyGetInput struct {
+	ServiceID int `json:"service_id,omitempty" jsonschema_description:"optional service id"`
+	Depth     int `json:"depth,omitempty" jsonschema_description:"max depth,default=2"`
+}
+
+type AuditLogSearchInput struct {
+	TimeRange    string `json:"time_range,omitempty" jsonschema_description:"time range,default=24h"`
+	ResourceType string `json:"resource_type,omitempty" jsonschema_description:"optional resource type"`
+	Action       string `json:"action,omitempty" jsonschema_description:"optional action type"`
+	UserID       int    `json:"user_id,omitempty" jsonschema_description:"optional actor user id"`
+	Limit        int    `json:"limit,omitempty" jsonschema_description:"max logs,default=50"`
+}
+
+// NewGovernanceTools returns all governance tools.
+func NewGovernanceTools(ctx context.Context, deps core.PlatformDeps) []tool.InvokableTool {
+	return []tool.InvokableTool{
+		UserList(ctx, deps),
+		RoleList(ctx, deps),
+		PermissionCheck(ctx, deps),
+		TopologyGet(ctx, deps),
+		AuditLogSearch(ctx, deps),
+	}
+}
+
+// Register returns all governance tools as RegisteredTool slice.
+func Register(ctx context.Context, deps core.PlatformDeps) []core.RegisteredTool {
+	tools := NewGovernanceTools(ctx, deps)
+	registered := make([]core.RegisteredTool, len(tools))
+	for i, t := range tools {
+		registered[i] = core.RegisteredTool{
+			Meta: core.ToolMeta{
+				Name:     fmt.Sprintf("governance_tool_%d", i),
+				Mode:     core.ToolModeReadonly,
+				Risk:     core.ToolRiskLow,
+				Domain:   core.DomainUser,
+				Category: core.CategoryDiscovery,
+			},
+			Tool: t,
+		}
+	}
+	return registered
+}
 
 type UserListOutput struct {
 	Total int          `json:"total"`
 	List  []model.User `json:"list"`
 }
 
-func UserList(ctx context.Context, deps PlatformDeps, input UserListInput) tool.InvokableTool {
+func UserList(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"user_list",
 		"Query the list of users in the platform. Optional parameters: keyword searches by username or email, status filters by user status (0=disabled, 1=enabled), limit controls max results (default 50, max 200). Returns users with id, username, email, role information, and status. Use this to find user IDs for permission checks. Example: {\"keyword\":\"admin\",\"status\":1}.",
@@ -61,7 +123,7 @@ type RoleListOutput struct {
 	List  []model.Role `json:"list"`
 }
 
-func RoleList(ctx context.Context, deps PlatformDeps, input RoleListInput) tool.InvokableTool {
+func RoleList(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"role_list",
 		"Query the list of roles in the platform. Optional parameters: keyword searches by role name or code, limit controls max results (default 50, max 200). Returns roles with id, name, code, description, and permission count. Use this to understand available roles for user assignment. Example: {\"keyword\":\"admin\"}.",
@@ -104,7 +166,7 @@ type PermissionCheckOutput struct {
 	Checked            map[string]any     `json:"checked"`
 }
 
-func PermissionCheck(ctx context.Context, deps PlatformDeps, input PermissionCheckInput) tool.InvokableTool {
+func PermissionCheck(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"permission_check",
 		"Check if a user has a specific permission. user_id, resource, and action are required. Returns whether the permission is granted, matched permissions if any, and the checked parameters. Use this to verify user access before performing sensitive operations. Example: {\"user_id\":1,\"resource\":\"service\",\"action\":\"delete\"}.",
@@ -175,7 +237,7 @@ type TopologyGetOutput struct {
 	Depth int              `json:"depth"`
 }
 
-func TopologyGet(ctx context.Context, deps PlatformDeps, input TopologyGetInput) tool.InvokableTool {
+func TopologyGet(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"topology_get",
 		"Query service topology showing relationships between services and deployment targets. Optional parameters: service_id focuses topology on a specific service, depth controls how many levels of relationships to explore (default 2, max 5). Returns nodes (services/targets) and edges (deployment relationships). Use this to understand service dependencies. Example: {\"service_id\":12,\"depth\":3}.",
@@ -224,7 +286,7 @@ type AuditLogSearchOutput struct {
 	List  []model.AuditLog `json:"list"`
 }
 
-func AuditLogSearch(ctx context.Context, deps PlatformDeps, input AuditLogSearchInput) tool.InvokableTool {
+func AuditLogSearch(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"audit_log_search",
 		"Search audit logs for platform activities. Optional parameters: time_range filters logs within a duration (default 24h, accepts values like 1h, 6h, 24h, 7d), resource_type filters by resource kind (service/cluster/host), action filters by action type (create/update/delete), user_id filters by actor, limit controls max results (default 50, max 200). Returns audit entries with timestamps and details. Example: {\"time_range\":\"24h\",\"resource_type\":\"service\"}.",

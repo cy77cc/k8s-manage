@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -92,7 +92,7 @@ func (c *ApprovalConfig) Validate() error {
 	return nil
 }
 
-func (c *ApprovalConfig) Decide(meta tools.ToolMeta) ApprovalDecision {
+func (c *ApprovalConfig) Decide(meta core.ToolMeta) ApprovalDecision {
 	risk := strings.ToLower(strings.TrimSpace(string(meta.Risk)))
 	if !isRiskLevel(risk) {
 		risk = strings.ToLower(strings.TrimSpace(c.Defaults.RiskLevel))

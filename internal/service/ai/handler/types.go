@@ -6,7 +6,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 	coreai "github.com/cy77cc/k8s-manage/internal/ai"
-	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
 	"github.com/cy77cc/k8s-manage/internal/svc"
@@ -20,8 +20,8 @@ type ChatRequest struct {
 }
 
 type aiToolRunner interface {
-	ToolMetas() []tools.ToolMeta
-	RunTool(ctx context.Context, toolName string, params map[string]any) (tools.ToolResult, error)
+	ToolMetas() []core.ToolMeta
+	RunTool(ctx context.Context, toolName string, params map[string]any) (core.ToolResult, error)
 	Generate(ctx context.Context, messages []*schema.Message) (*schema.Message, error)
 }
 
@@ -31,10 +31,10 @@ type aiOrchestrator interface {
 }
 
 type aiControlPlane interface {
-	ToolPolicy(ctx context.Context, meta tools.ToolMeta, params map[string]any) error
+	ToolPolicy(ctx context.Context, meta core.ToolMeta, params map[string]any) error
 	HasPermission(uid uint64, code string) bool
 	IsAdmin(uid uint64) bool
-	FindMeta(name string) (tools.ToolMeta, bool)
+	FindMeta(name string) (core.ToolMeta, bool)
 }
 
 type aiGatewayRuntime interface {

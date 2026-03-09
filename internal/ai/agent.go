@@ -20,6 +20,7 @@ import (
 	"github.com/cy77cc/k8s-manage/internal/ai/aspect"
 	airag "github.com/cy77cc/k8s-manage/internal/ai/rag"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -47,7 +48,7 @@ type AIAgent struct {
 	// model 是支持工具调用的聊天模型。
 	model einomodel.ToolCallingChatModel
 	// registered 存储所有已注册的工具。
-	registered []tools.RegisteredTool
+	registered []core.RegisteredTool
 	// registry 提供按名称/领域/类别查找工具的能力。
 	registry *tools.Registry
 	// agent 是底层的 ReAct Agent 实现。
@@ -77,7 +78,7 @@ type AIAgent struct {
 // 返回:
 //   - *AIAgent: 创建的 Agent 实例。
 //   - error: 初始化过程中的错误。
-func NewAIAgent(ctx context.Context, model einomodel.ToolCallingChatModel, deps tools.PlatformDeps, cfg *RunnerConfig) (*AIAgent, error) {
+func NewAIAgent(ctx context.Context, model einomodel.ToolCallingChatModel, deps core.PlatformDeps, cfg *RunnerConfig) (*AIAgent, error) {
 	registered, err := tools.BuildRegisteredTools(deps)
 	if err != nil {
 		return nil, err
@@ -157,7 +158,7 @@ func NewAIAgent(ctx context.Context, model einomodel.ToolCallingChatModel, deps 
 // 返回:
 //   - *AIAgent: 创建的 Agent 实例。
 //   - error: 初始化错误。
-func NewPlatformRunner(ctx context.Context, model einomodel.ToolCallingChatModel, deps tools.PlatformDeps, cfg *RunnerConfig) (*AIAgent, error) {
+func NewPlatformRunner(ctx context.Context, model einomodel.ToolCallingChatModel, deps core.PlatformDeps, cfg *RunnerConfig) (*AIAgent, error) {
 	return NewAIAgent(ctx, model, deps, cfg)
 }
 
@@ -165,9 +166,9 @@ func NewPlatformRunner(ctx context.Context, model einomodel.ToolCallingChatModel
 // 结果按工具名称排序。
 //
 // 返回:
-//   - []tools.ToolMeta: 工具元信息列表。
-func (a *AIAgent) ToolMetas() []tools.ToolMeta {
-	out := make([]tools.ToolMeta, 0, len(a.registered))
+//   - []core.ToolMeta: 工具元信息列表。
+func (a *AIAgent) ToolMetas() []core.ToolMeta {
+	out := make([]core.ToolMeta, 0, len(a.registered))
 	for _, item := range a.registered {
 		out = append(out, item.Meta)
 	}
@@ -200,24 +201,24 @@ func (a *AIAgent) Generate(ctx context.Context, messages []*schema.Message) (*sc
 //   - params: 工具参数。
 //
 // 返回:
-//   - tools.ToolResult: 工具执行结果。
+//   - core.ToolResult: 工具执行结果。
 //   - error: 执行错误。
-func (a *AIAgent) RunTool(ctx context.Context, toolName string, params map[string]any) (tools.ToolResult, error) {
+func (a *AIAgent) RunTool(ctx context.Context, toolName string, params map[string]any) (core.ToolResult, error) {
 	item, ok := a.registry.Get(toolName)
 	if !ok {
-		return tools.ToolResult{}, ErrToolNotFound
+		return core.ToolResult{}, ErrToolNotFound
 	}
 	raw, err := json.Marshal(params)
 	if err != nil {
-		return tools.ToolResult{}, err
+		return core.ToolResult{}, err
 	}
 	content, err := item.Tool.InvokableRun(ctx, string(raw))
 	if err != nil {
-		return tools.ToolResult{OK: false, Error: err.Error(), Source: "tool"}, err
+		return core.ToolResult{OK: false, Error: err.Error(), Source: "tool"}, err
 	}
 
 	// 尝试解析为标准 ToolResult 格式
-	var result tools.ToolResult
+	var result core.ToolResult
 	if json.Unmarshal([]byte(content), &result) == nil && (result.OK || result.Error != "" || result.Source != "") {
 		return result, nil
 	}
@@ -226,7 +227,7 @@ func (a *AIAgent) RunTool(ctx context.Context, toolName string, params map[strin
 	// Output 结构体通常是 {field1: value1, ...} 格式
 	var outputData map[string]any
 	if json.Unmarshal([]byte(content), &outputData) == nil {
-		return tools.ToolResult{
+		return core.ToolResult{
 			OK:     true,
 			Data:   outputData,
 			Source: item.Meta.Provider,
@@ -234,7 +235,7 @@ func (a *AIAgent) RunTool(ctx context.Context, toolName string, params map[strin
 	}
 
 	// 兜底：原始字符串
-	return tools.ToolResult{
+	return core.ToolResult{
 		OK:     true,
 		Data:   map[string]any{"content": content},
 		Source: item.Meta.Provider,
@@ -532,12 +533,12 @@ func (a *AIAgent) Resume(ctx context.Context, checkpointID string, approval any,
 //   - name: 工具名称。
 //
 // 返回:
-//   - tools.ToolMeta: 工具元信息。
+//   - core.ToolMeta: 工具元信息。
 //   - bool: 是否找到。
-func (a *AIAgent) FindMeta(name string) (tools.ToolMeta, bool) {
+func (a *AIAgent) FindMeta(name string) (core.ToolMeta, bool) {
 	item, ok := a.registry.Get(name)
 	if !ok {
-		return tools.ToolMeta{}, false
+		return core.ToolMeta{}, false
 	}
 	return item.Meta, true
 }

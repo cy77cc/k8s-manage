@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -79,7 +79,7 @@ func sceneMetaByKey(scene string) (sceneMeta, bool) {
 	return meta, ok
 }
 
-func (h *AIHandler) sceneRecommendedTools(scene string) []tools.ToolMeta {
+func (h *AIHandler) sceneRecommendedTools(scene string) []core.ToolMeta {
 	if h == nil || h.ai == nil {
 		return nil
 	}
@@ -88,11 +88,11 @@ func (h *AIHandler) sceneRecommendedTools(scene string) []tools.ToolMeta {
 		return nil
 	}
 	all := h.ai.ToolMetas()
-	metaByName := make(map[string]tools.ToolMeta, len(all))
+	metaByName := make(map[string]core.ToolMeta, len(all))
 	for _, item := range all {
 		metaByName[item.Name] = item
 	}
-	out := make([]tools.ToolMeta, 0, len(meta.Tools))
+	out := make([]core.ToolMeta, 0, len(meta.Tools))
 	for _, name := range meta.Tools {
 		if item, exists := metaByName[name]; exists {
 			out = append(out, item)

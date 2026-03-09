@@ -8,7 +8,7 @@ import (
 
 	coreai "github.com/cy77cc/k8s-manage/internal/ai"
 	airag "github.com/cy77cc/k8s-manage/internal/ai/rag"
-	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/httpx"
 	"github.com/cy77cc/k8s-manage/internal/service/ai/logic"
 	"github.com/cy77cc/k8s-manage/internal/xcode"
@@ -27,7 +27,7 @@ func (h *AIHandler) capabilities(c *gin.Context) {
 		return
 	}
 	all := h.ai.ToolMetas()
-	out := make([]tools.ToolMeta, 0, len(all))
+	out := make([]core.ToolMeta, 0, len(all))
 	for _, item := range all {
 		if h.hasPermission(uid, item.Permission) {
 			out = append(out, item)
@@ -312,7 +312,7 @@ func (h *AIHandler) confirmConfirmation(c *gin.Context) {
 	httpx.OK(c, out)
 }
 
-func (h *AIHandler) findMeta(name string) (tools.ToolMeta, bool) {
+func (h *AIHandler) findMeta(name string) (core.ToolMeta, bool) {
 	return h.control.FindMeta(name)
 }
 
@@ -336,6 +336,6 @@ func (h *AIHandler) toolParamHints(c *gin.Context) {
 		httpx.Fail(c, xcode.Forbidden, "permission denied")
 		return
 	}
-	resp := tools.ResolveToolParamHints(c.Request.Context(), tools.PlatformDeps{DB: h.svcCtx.DB}, meta)
+	resp := core.ResolveToolParamHints(c.Request.Context(), core.PlatformDeps{DB: h.svcCtx.DB}, meta)
 	httpx.OK(c, resp)
 }

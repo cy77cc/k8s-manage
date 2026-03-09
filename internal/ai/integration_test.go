@@ -38,8 +38,8 @@ func TestRouterGraphExecutionWorkflow(t *testing.T) {
 				},
 			}}),
 		},
-		Tools: []aitools.RegisteredTool{{
-			Meta: aitools.ToolMeta{
+		Tools: []aicore.RegisteredTool{{
+			Meta: aicore.ToolMeta{
 				Name:        "service_echo",
 				Description: "Echo tool",
 				Domain:      aitools.DomainService,

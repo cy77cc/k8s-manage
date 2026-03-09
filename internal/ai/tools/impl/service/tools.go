@@ -8,15 +8,85 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	einoutils "github.com/cloudwego/eino/components/tool/utils"
-	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
+
+// Input types
+
+type ServiceDetailInput struct {
+	ServiceID int `json:"service_id" jsonschema_description:"required,service id"`
+}
+
+type ServiceDeployPreviewInput struct {
+	ServiceID int `json:"service_id" jsonschema_description:"required,service id"`
+	ClusterID int `json:"cluster_id" jsonschema_description:"required,cluster id"`
+}
+
+type ServiceDeployApplyInput struct {
+	ServiceID int `json:"service_id" jsonschema_description:"required,service id"`
+	ClusterID int `json:"cluster_id" jsonschema_description:"required,cluster id"`
+}
+
+type ServiceDeployInput struct {
+	ServiceID int  `json:"service_id" jsonschema_description:"required,service id"`
+	ClusterID int  `json:"cluster_id" jsonschema_description:"required,cluster id"`
+	Preview   bool `json:"preview,omitempty" jsonschema_description:"preview deploy without apply"`
+	Apply     bool `json:"apply,omitempty" jsonschema_description:"apply deploy after approval"`
+}
+
+type ServiceStatusInput struct {
+	ServiceID int `json:"service_id" jsonschema_description:"required,service id"`
+}
+
+type ServiceCatalogListInput struct {
+	Keyword    string `json:"keyword,omitempty" jsonschema_description:"optional keyword on service name/owner"`
+	CategoryID int    `json:"category_id,omitempty" jsonschema_description:"optional category id: 1 middleware, 2 business"`
+	Limit      int    `json:"limit,omitempty" jsonschema_description:"max services,default=50"`
+}
+
+type ServiceVisibilityCheckInput struct {
+	ServiceID int `json:"service_id" jsonschema_description:"required,service id"`
+}
+
+// NewServiceTools returns all service tools.
+func NewServiceTools(ctx context.Context, deps core.PlatformDeps) []tool.InvokableTool {
+	return []tool.InvokableTool{
+		ServiceGetDetail(ctx, deps),
+		ServiceStatus(ctx, deps),
+		ServiceDeployPreview(ctx, deps),
+		ServiceDeployApply(ctx, deps),
+		ServiceDeploy(ctx, deps),
+		ServiceCatalogList(ctx, deps),
+		ServiceCategoryTree(ctx, deps),
+		ServiceVisibilityCheck(ctx, deps),
+	}
+}
+
+// Register returns all service tools as RegisteredTool slice.
+func Register(ctx context.Context, deps core.PlatformDeps) []core.RegisteredTool {
+	tools := NewServiceTools(ctx, deps)
+	registered := make([]core.RegisteredTool, len(tools))
+	for i, t := range tools {
+		registered[i] = core.RegisteredTool{
+			Meta: core.ToolMeta{
+				Name:     fmt.Sprintf("service_tool_%d", i),
+				Mode:     core.ToolModeReadonly,
+				Risk:     core.ToolRiskLow,
+				Domain:   core.DomainService,
+				Category: core.CategoryDiscovery,
+			},
+			Tool: t,
+		}
+	}
+	return registered
+}
 
 type ServiceGetDetailOutput struct {
 	Service model.Service `json:"service"`
 }
 
-func ServiceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetailInput) tool.InvokableTool {
+func ServiceGetDetail(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"service_get_detail",
 		"Get detailed information about a specific service including configuration, deployment settings, runtime type, and metadata. service_id is required. Returns complete service object with all fields. Use this when you need comprehensive service information. Example: {\"service_id\":123}.",
@@ -49,7 +119,7 @@ type ServiceStatusOutput struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-func ServiceStatus(ctx context.Context, deps PlatformDeps, input ServiceStatusInput) tool.InvokableTool {
+func ServiceStatus(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"service_status",
 		"Get current status and basic runtime information of a service. service_id is required. Returns service name, status, environment, runtime type (k8s/compose/helm), container image, replica count, and last update time. Use this for quick status checks. Example: {\"service_id\":123}.",
@@ -88,7 +158,7 @@ type ServiceDeployPreviewOutput struct {
 	Replicas  int32  `json:"replicas"`
 }
 
-func ServiceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceDeployPreviewInput) tool.InvokableTool {
+func ServiceDeployPreview(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"service_deploy_preview",
 		"Preview a service deployment without actually applying changes. service_id and cluster_id are required. Returns the deployment plan including service name, container image, and replica count. Use this to verify deployment configuration before executing with service_deploy_apply. Example: {\"service_id\":123,\"cluster_id\":456}.",
@@ -127,7 +197,7 @@ type ServiceDeployApplyOutput struct {
 	Image     string `json:"image"`
 }
 
-func ServiceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDeployApplyInput) tool.InvokableTool {
+func ServiceDeployApply(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"service_deploy_apply",
 		"Execute a service deployment to a target cluster. service_id and cluster_id are required. This is a mutating operation that will create/update the deployment. Ensure you have previewed the deployment with service_deploy_preview first. Returns deployment status and applied configuration. Example: {\"service_id\":123,\"cluster_id\":456}.",
@@ -169,7 +239,7 @@ type ServiceDeployOutput struct {
 	Data      interface{} `json:"data,omitempty"`
 }
 
-func ServiceDeploy(ctx context.Context, deps PlatformDeps, input ServiceDeployInput) tool.InvokableTool {
+func ServiceDeploy(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"service_deploy",
 		"Unified service deployment tool supporting both preview and apply modes. service_id and cluster_id are required. Set preview=true (default) to see the deployment plan without applying. Set apply=true to execute the deployment. This operation deploys the service container image to the specified cluster. Example: {\"service_id\":123,\"cluster_id\":456,\"preview\":true}.",
@@ -225,7 +295,7 @@ type ServiceCatalogListOutput struct {
 	FiltersApplied map[string]any   `json:"filters_applied"`
 }
 
-func ServiceCatalogList(ctx context.Context, deps PlatformDeps, input ServiceCatalogListInput) tool.InvokableTool {
+func ServiceCatalogList(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"service_catalog_list",
 		"Query the service catalog with filtering options. Optional parameters: keyword searches by service name or owner, category_id filters by service kind (1=middleware, 2=business), limit controls max results (default 50, max 200). Returns services with id, name, owner, environment, service_kind, visibility, and deployment count. Example: {\"keyword\":\"payment\",\"category_id\":2,\"limit\":20}.",
@@ -289,7 +359,7 @@ type ServiceCategoryTreeOutput struct {
 	Tree []map[string]any `json:"tree"`
 }
 
-func ServiceCategoryTree(ctx context.Context, deps PlatformDeps) tool.InvokableTool {
+func ServiceCategoryTree(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"service_category_tree",
 		"Get the service category tree structure showing middleware and business service categories with counts. Returns an array of categories, each with id, key (middleware/business), label, and count of services. Use this to understand the service distribution across categories. Example: {}.",
@@ -340,7 +410,7 @@ type ServiceVisibilityCheckOutput struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
-func ServiceVisibilityCheck(ctx context.Context, deps PlatformDeps, input ServiceVisibilityCheckInput) tool.InvokableTool {
+func ServiceVisibilityCheck(ctx context.Context, deps core.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"service_visibility_check",
 		"Check the visibility configuration of a service including access control settings. service_id is required. Returns visibility level (public/private/team), granted team IDs that can access the service, owner user ID, and owner team ID. Use this to understand who can access a service. Example: {\"service_id\":123}.",

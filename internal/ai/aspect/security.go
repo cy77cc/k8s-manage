@@ -11,6 +11,7 @@ import (
 	cbtool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools"
+	"github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 )
 
 type DecisionAction string
@@ -32,7 +33,7 @@ type PermissionChecker interface {
 }
 
 type InterruptHandler interface {
-	BuildInterrupt(ctx context.Context, meta tools.ToolMeta, args map[string]any) (*tools.ApprovalInfo, error)
+	BuildInterrupt(ctx context.Context, meta core.ToolMeta, args map[string]any) (*tools.ApprovalInfo, error)
 }
 
 type AuditLogger interface {
@@ -56,7 +57,7 @@ type SecurityAspect struct {
 	auditLogger       AuditLogger
 }
 
-func NewSecurityAspect(registered []tools.RegisteredTool, checker PermissionChecker, handler InterruptHandler, logger AuditLogger) *SecurityAspect {
+func NewSecurityAspect(registered []core.RegisteredTool, checker PermissionChecker, handler InterruptHandler, logger AuditLogger) *SecurityAspect {
 	return &SecurityAspect{
 		registry:          tools.NewRegistry(registered),
 		permissionChecker: checker,
@@ -149,7 +150,7 @@ func (a *SecurityAspect) CallbackHandler() callbacks.Handler {
 				return ctx
 			}
 			toolName, _ := cb.Extra["tool_name"].(string)
-			a.log(ctx, tools.ToolMeta{Name: toolName}, true, "callback_start", cb.ArgumentsInJSON)
+			a.log(ctx, core.ToolMeta{Name: toolName}, true, "callback_start", cb.ArgumentsInJSON)
 			return ctx
 		}).
 		OnEndFn(func(ctx context.Context, _ *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
@@ -158,35 +159,35 @@ func (a *SecurityAspect) CallbackHandler() callbacks.Handler {
 				return ctx
 			}
 			toolName, _ := cb.Extra["tool_name"].(string)
-			a.log(ctx, tools.ToolMeta{Name: toolName}, true, "callback_end", cb.Response)
+			a.log(ctx, core.ToolMeta{Name: toolName}, true, "callback_end", cb.Response)
 			return ctx
 		}).
 		OnErrorFn(func(ctx context.Context, _ *callbacks.RunInfo, err error) context.Context {
-			a.log(ctx, tools.ToolMeta{}, false, err.Error(), "")
+			a.log(ctx, core.ToolMeta{}, false, err.Error(), "")
 			return ctx
 		}).
 		Build()
 }
 
-func (a *SecurityAspect) lookupMeta(name string) (tools.ToolMeta, bool) {
+func (a *SecurityAspect) lookupMeta(name string) (core.ToolMeta, bool) {
 	if a == nil || a.registry == nil {
-		return tools.ToolMeta{}, false
+		return core.ToolMeta{}, false
 	}
 	item, ok := a.registry.Get(name)
 	if !ok {
-		return tools.ToolMeta{}, false
+		return core.ToolMeta{}, false
 	}
 	return item.Meta, true
 }
 
-func (a *SecurityAspect) checkPermission(ctx context.Context, meta tools.ToolMeta) (bool, error) {
+func (a *SecurityAspect) checkPermission(ctx context.Context, meta core.ToolMeta) (bool, error) {
 	if a == nil || a.permissionChecker == nil || strings.TrimSpace(meta.Permission) == "" {
 		return true, nil
 	}
 	return a.permissionChecker.HasPermission(ctx, meta.Permission)
 }
 
-func (a *SecurityAspect) log(ctx context.Context, meta tools.ToolMeta, allowed bool, reason, arguments string) {
+func (a *SecurityAspect) log(ctx context.Context, meta core.ToolMeta, allowed bool, reason, arguments string) {
 	if a == nil || a.auditLogger == nil {
 		return
 	}
