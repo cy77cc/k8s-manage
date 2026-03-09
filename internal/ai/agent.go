@@ -213,13 +213,32 @@ func (a *AIAgent) RunTool(ctx context.Context, toolName string, params map[strin
 	}
 	content, err := item.Tool.InvokableRun(ctx, string(raw))
 	if err != nil {
-		return tools.ToolResult{}, err
+		return tools.ToolResult{OK: false, Error: err.Error(), Source: "tool"}, err
 	}
+
+	// 尝试解析为标准 ToolResult 格式
 	var result tools.ToolResult
 	if json.Unmarshal([]byte(content), &result) == nil && (result.OK || result.Error != "" || result.Source != "") {
 		return result, nil
 	}
-	return tools.ToolResult{OK: true, Data: map[string]any{"content": content}, Source: "tool"}, nil
+
+	// 新格式：将 Output 结构体包装为 ToolResult
+	// Output 结构体通常是 {field1: value1, ...} 格式
+	var outputData map[string]any
+	if json.Unmarshal([]byte(content), &outputData) == nil {
+		return tools.ToolResult{
+			OK:     true,
+			Data:   outputData,
+			Source: item.Meta.Provider,
+		}, nil
+	}
+
+	// 兜底：原始字符串
+	return tools.ToolResult{
+		OK:     true,
+		Data:   map[string]any{"content": content},
+		Source: item.Meta.Provider,
+	}, nil
 }
 
 // Query 执行简单查询（非流式），返回结果字符串。
