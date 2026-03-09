@@ -2,43 +2,43 @@ package kubernetes
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/cloudwego/eino/components/tool"
+	einoutils "github.com/cloudwego/eino/components/tool/utils"
 	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func K8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "k8s_query",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in K8sQueryInput) (any, string, error) {
-			if strings.TrimSpace(in.Resource) == "" {
-				return nil, "validation", NewMissingParam("resource", "resource is required")
+type K8sQueryOutput struct {
+	Items []map[string]any `json:"items"`
+}
+
+func K8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"k8s_query",
+		"Query Kubernetes resources with filtering options. resource is required and specifies the resource type (pods/services/deployments/nodes). Optional parameters: cluster_id targets a specific cluster, namespace limits scope (default: all namespaces), name filters by exact name, label uses label selector, limit caps results (default 50). Returns resource details with status and metadata. Example: {\"resource\":\"pods\",\"namespace\":\"default\",\"label\":\"app=nginx\"}.",
+		func(ctx context.Context, input *K8sQueryInput, opts ...tool.Option) (*K8sQueryOutput, error) {
+			if strings.TrimSpace(input.Resource) == "" {
+				return nil, fmt.Errorf("resource is required")
 			}
-			cli, source, err := ResolveK8sClient(deps, StructToMap(in))
+			cli, _, err := ResolveK8sClient(deps, StructToMap(input))
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			ns := strings.TrimSpace(in.Namespace)
+			ns := strings.TrimSpace(input.Namespace)
 			if ns == "" {
 				ns = corev1.NamespaceAll
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
-			name := strings.TrimSpace(in.Name)
-			label := strings.TrimSpace(in.Label)
-			resource := strings.ToLower(strings.TrimSpace(in.Resource))
+			name := strings.TrimSpace(input.Name)
+			label := strings.TrimSpace(input.Label)
+			resource := strings.ToLower(strings.TrimSpace(input.Resource))
 			listOpts := metav1.ListOptions{}
 			if label != "" {
 				listOpts.LabelSelector = label
@@ -48,7 +48,7 @@ func K8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) (Tool
 			case "pods":
 				list, err := cli.CoreV1().Pods(ns).List(ctx, listOpts)
 				if err != nil {
-					return nil, source, err
+					return nil, err
 				}
 				out := make([]map[string]any, 0, len(list.Items))
 				for _, p := range list.Items {
@@ -66,11 +66,11 @@ func K8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) (Tool
 						break
 					}
 				}
-				return out, source, nil
+				return &K8sQueryOutput{Items: out}, nil
 			case "services":
 				list, err := cli.CoreV1().Services(ns).List(ctx, listOpts)
 				if err != nil {
-					return nil, source, err
+					return nil, err
 				}
 				out := make([]map[string]any, 0, len(list.Items))
 				for _, s := range list.Items {
@@ -88,11 +88,11 @@ func K8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) (Tool
 						break
 					}
 				}
-				return out, source, nil
+				return &K8sQueryOutput{Items: out}, nil
 			case "deployments":
 				list, err := cli.AppsV1().Deployments(ns).List(ctx, listOpts)
 				if err != nil {
-					return nil, source, err
+					return nil, err
 				}
 				out := make([]map[string]any, 0, len(list.Items))
 				for _, d := range list.Items {
@@ -111,11 +111,11 @@ func K8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) (Tool
 						break
 					}
 				}
-				return out, source, nil
+				return &K8sQueryOutput{Items: out}, nil
 			case "nodes":
 				list, err := cli.CoreV1().Nodes().List(ctx, listOpts)
 				if err != nil {
-					return nil, source, err
+					return nil, err
 				}
 				out := make([]map[string]any, 0, len(list.Items))
 				for _, n := range list.Items {
@@ -130,38 +130,40 @@ func K8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) (Tool
 						break
 					}
 				}
-				return out, source, nil
+				return &K8sQueryOutput{Items: out}, nil
 			default:
-				return nil, source, NewInvalidParam("resource", "unsupported resource")
+				return nil, fmt.Errorf("unsupported resource type: %s", resource)
 			}
-		})
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func K8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "k8s_list_resources",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in K8sListInput) (any, string, error) {
-			if strings.TrimSpace(in.Resource) == "" {
-				return nil, "validation", NewMissingParam("resource", "resource is required")
+type K8sListResourcesOutput struct {
+	Items []map[string]any `json:"items"`
+}
+
+func K8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"k8s_list_resources",
+		"List Kubernetes resources of a specific type. resource is required and must be one of: pods, services, deployments, nodes. Optional parameters: cluster_id targets a specific cluster, namespace limits scope (default: all namespaces), limit caps results (default 50). Returns a simplified list of resources with basic information. Example: {\"resource\":\"pods\",\"namespace\":\"kube-system\",\"limit\":20}.",
+		func(ctx context.Context, input *K8sListInput, opts ...tool.Option) (*K8sListResourcesOutput, error) {
+			if strings.TrimSpace(input.Resource) == "" {
+				return nil, fmt.Errorf("resource is required")
 			}
-			cli, source, err := ResolveK8sClient(deps, StructToMap(in))
+			cli, _, err := ResolveK8sClient(deps, StructToMap(input))
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			ns := strings.TrimSpace(in.Namespace)
+			ns := strings.TrimSpace(input.Namespace)
 			if ns == "" {
 				ns = corev1.NamespaceAll
 			}
-			resource := strings.ToLower(strings.TrimSpace(in.Resource))
-			limit := in.Limit
+			resource := strings.ToLower(strings.TrimSpace(input.Resource))
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -169,7 +171,7 @@ func K8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput
 			case "pods":
 				list, err := cli.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
 				if err != nil {
-					return nil, source, err
+					return nil, err
 				}
 				out := make([]map[string]any, 0, len(list.Items))
 				for i, p := range list.Items {
@@ -178,11 +180,11 @@ func K8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput
 					}
 					out = append(out, map[string]any{"name": p.Name, "namespace": p.Namespace, "phase": p.Status.Phase})
 				}
-				return out, source, nil
+				return &K8sListResourcesOutput{Items: out}, nil
 			case "services":
 				list, err := cli.CoreV1().Services(ns).List(ctx, metav1.ListOptions{})
 				if err != nil {
-					return nil, source, err
+					return nil, err
 				}
 				out := make([]map[string]any, 0, len(list.Items))
 				for i, s := range list.Items {
@@ -191,11 +193,11 @@ func K8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput
 					}
 					out = append(out, map[string]any{"name": s.Name, "namespace": s.Namespace, "type": s.Spec.Type})
 				}
-				return out, source, nil
+				return &K8sListResourcesOutput{Items: out}, nil
 			case "deployments":
 				list, err := cli.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{})
 				if err != nil {
-					return nil, source, err
+					return nil, err
 				}
 				out := make([]map[string]any, 0, len(list.Items))
 				for i, d := range list.Items {
@@ -204,11 +206,11 @@ func K8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput
 					}
 					out = append(out, map[string]any{"name": d.Name, "namespace": d.Namespace, "ready": d.Status.ReadyReplicas, "replicas": d.Status.Replicas})
 				}
-				return out, source, nil
+				return &K8sListResourcesOutput{Items: out}, nil
 			case "nodes":
 				list, err := cli.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 				if err != nil {
-					return nil, source, err
+					return nil, err
 				}
 				out := make([]map[string]any, 0, len(list.Items))
 				for i, n := range list.Items {
@@ -217,42 +219,44 @@ func K8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput
 					}
 					out = append(out, map[string]any{"name": n.Name, "labels": n.Labels})
 				}
-				return out, source, nil
+				return &K8sListResourcesOutput{Items: out}, nil
 			default:
-				return nil, source, NewInvalidParam("resource", "unsupported resource")
+				return nil, fmt.Errorf("unsupported resource type: %s", resource)
 			}
-		})
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func K8sEvents(ctx context.Context, deps PlatformDeps, input K8sEventsQueryInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "k8s_events",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in K8sEventsQueryInput) (any, string, error) {
-			cli, source, err := ResolveK8sClient(deps, StructToMap(in))
+type K8sEventsOutput struct {
+	Items []map[string]any `json:"items"`
+}
+
+func K8sEvents(ctx context.Context, deps PlatformDeps, input K8sEventsQueryInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"k8s_events",
+		"Query Kubernetes events with optional filtering. Optional parameters: cluster_id targets a specific cluster, namespace limits scope (default: all namespaces), kind filters by involved object kind (Pod/Deployment/Service/Node), name filters by object name, limit caps results (default 50). Returns events with type, reason, message, and involved object info. Example: {\"namespace\":\"default\",\"kind\":\"Pod\",\"limit\":20}.",
+		func(ctx context.Context, input *K8sEventsQueryInput, opts ...tool.Option) (*K8sEventsOutput, error) {
+			cli, _, err := ResolveK8sClient(deps, StructToMap(input))
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			ns := strings.TrimSpace(in.Namespace)
+			ns := strings.TrimSpace(input.Namespace)
 			if ns == "" {
 				ns = corev1.NamespaceAll
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
-			kind := strings.TrimSpace(in.Kind)
-			name := strings.TrimSpace(in.Name)
+			kind := strings.TrimSpace(input.Kind)
+			name := strings.TrimSpace(input.Name)
 			list, err := cli.CoreV1().Events(ns).List(ctx, metav1.ListOptions{})
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
 			out := make([]map[string]any, 0, len(list.Items))
 			for _, e := range list.Items {
@@ -274,37 +278,39 @@ func K8sEvents(ctx context.Context, deps PlatformDeps, input K8sEventsQueryInput
 					break
 				}
 			}
-			return out, source, nil
-		})
+			return &K8sEventsOutput{Items: out}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func K8sGetEvents(ctx context.Context, deps PlatformDeps, input K8sEventsInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "k8s_get_events",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in K8sEventsInput) (any, string, error) {
-			cli, source, err := ResolveK8sClient(deps, StructToMap(in))
+type K8sGetEventsOutput struct {
+	Items []map[string]any `json:"items"`
+}
+
+func K8sGetEvents(ctx context.Context, deps PlatformDeps, input K8sEventsInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"k8s_get_events",
+		"Get Kubernetes events from a namespace. Optional parameters: cluster_id targets a specific cluster, namespace limits scope (default: all namespaces), limit caps results (default 50). Returns events with type, reason, and message. Use this for a quick event overview. Example: {\"namespace\":\"default\",\"limit\":30}.",
+		func(ctx context.Context, input *K8sEventsInput, opts ...tool.Option) (*K8sGetEventsOutput, error) {
+			cli, _, err := ResolveK8sClient(deps, StructToMap(input))
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			ns := strings.TrimSpace(in.Namespace)
+			ns := strings.TrimSpace(input.Namespace)
 			if ns == "" {
 				ns = corev1.NamespaceAll
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
 			list, err := cli.CoreV1().Events(ns).List(ctx, metav1.ListOptions{})
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
 			out := make([]map[string]any, 0, len(list.Items))
 			for i, e := range list.Items {
@@ -313,85 +319,103 @@ func K8sGetEvents(ctx context.Context, deps PlatformDeps, input K8sEventsInput) 
 				}
 				out = append(out, map[string]any{"type": e.Type, "reason": e.Reason, "message": e.Message})
 			}
-			return out, source, nil
-		})
+			return &K8sGetEventsOutput{Items: out}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func K8sLogs(ctx context.Context, deps PlatformDeps, input K8sLogsInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "k8s_logs",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskMedium,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in K8sLogsInput) (any, string, error) {
-			cli, source, err := ResolveK8sClient(deps, StructToMap(in))
+type K8sLogsOutput struct {
+	Namespace string `json:"namespace"`
+	Pod       string `json:"pod"`
+	Container string `json:"container"`
+	Logs      string `json:"logs"`
+}
+
+func K8sLogs(ctx context.Context, deps PlatformDeps, input K8sLogsInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"k8s_logs",
+		"Get logs from a Kubernetes pod. pod is required. Optional parameters: cluster_id targets a specific cluster, namespace (default: default), container specifies which container in a multi-container pod, tail_lines limits log lines (default 200). Returns pod logs as a string. Example: {\"namespace\":\"default\",\"pod\":\"nginx-abc123\",\"tail_lines\":100}.",
+		func(ctx context.Context, input *K8sLogsInput, opts ...tool.Option) (*K8sLogsOutput, error) {
+			cli, _, err := ResolveK8sClient(deps, StructToMap(input))
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			ns := strings.TrimSpace(in.Namespace)
+			ns := strings.TrimSpace(input.Namespace)
 			if ns == "" {
 				ns = "default"
 			}
-			pod := strings.TrimSpace(in.Pod)
+			pod := strings.TrimSpace(input.Pod)
 			if pod == "" {
-				return nil, source, NewMissingParam("pod", "pod is required")
+				return nil, fmt.Errorf("pod is required")
 			}
-			tailLines := int64(in.TailLines)
+			tailLines := int64(input.TailLines)
 			if tailLines <= 0 {
 				tailLines = 200
 			}
-			opt := &corev1.PodLogOptions{Container: strings.TrimSpace(in.Container), TailLines: &tailLines}
+			opt := &corev1.PodLogOptions{Container: strings.TrimSpace(input.Container), TailLines: &tailLines}
 			raw, err := cli.CoreV1().Pods(ns).GetLogs(pod, opt).DoRaw(ctx)
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			return map[string]any{
-				"namespace": ns,
-				"pod":       pod,
-				"container": strings.TrimSpace(in.Container),
-				"logs":      string(raw),
-			}, source, nil
-		})
+			return &K8sLogsOutput{
+				Namespace: ns,
+				Pod:       pod,
+				Container: strings.TrimSpace(input.Container),
+				Logs:      string(raw),
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func K8sGetPodLogs(ctx context.Context, deps PlatformDeps, input K8sPodLogsInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "k8s_get_pod_logs",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskMedium,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in K8sPodLogsInput) (any, string, error) {
-			cli, source, err := ResolveK8sClient(deps, StructToMap(in))
+type K8sGetPodLogsOutput struct {
+	Namespace string `json:"namespace"`
+	Pod       string `json:"pod"`
+	Logs      string `json:"logs"`
+}
+
+func K8sGetPodLogs(ctx context.Context, deps PlatformDeps, input K8sPodLogsInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"k8s_get_pod_logs",
+		"Get logs from a specific Kubernetes pod. pod is required. Optional parameters: cluster_id targets a specific cluster, namespace (default: default), container for multi-container pods, tail_lines limits output (default 200). Returns pod logs for debugging and troubleshooting. Example: {\"namespace\":\"production\",\"pod\":\"api-server-xyz789\",\"tail_lines\":500}.",
+		func(ctx context.Context, input *K8sPodLogsInput, opts ...tool.Option) (*K8sGetPodLogsOutput, error) {
+			cli, _, err := ResolveK8sClient(deps, StructToMap(input))
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			ns := strings.TrimSpace(in.Namespace)
+			ns := strings.TrimSpace(input.Namespace)
 			if ns == "" {
 				ns = "default"
 			}
-			pod := strings.TrimSpace(in.Pod)
+			pod := strings.TrimSpace(input.Pod)
 			if pod == "" {
-				return nil, source, NewMissingParam("pod", "pod is required")
+				return nil, fmt.Errorf("pod is required")
 			}
-			tailLines := int64(in.TailLines)
+			tailLines := int64(input.TailLines)
 			if tailLines <= 0 {
 				tailLines = 200
 			}
-			opt := &corev1.PodLogOptions{Container: strings.TrimSpace(in.Container), TailLines: &tailLines}
+			opt := &corev1.PodLogOptions{Container: strings.TrimSpace(input.Container), TailLines: &tailLines}
 			raw, err := cli.CoreV1().Pods(ns).GetLogs(pod, opt).DoRaw(ctx)
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			return map[string]any{"namespace": ns, "pod": pod, "logs": string(raw)}, source, nil
-		})
+			return &K8sGetPodLogsOutput{
+				Namespace: ns,
+				Pod:       pod,
+				Logs:      string(raw),
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }

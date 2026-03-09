@@ -6,195 +6,234 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cloudwego/eino/components/tool"
+	einoutils "github.com/cloudwego/eino/components/tool/utils"
 	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
 
-func ServiceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetailInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "service_get_detail",
-			Description: "读取服务详情。默认 service_id=0。示例: {\"service_id\":123}",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"service_id": 0},
-		},
-		input,
-		func(in ServiceDetailInput) (any, string, error) {
-			sid := in.ServiceID
+type ServiceGetDetailOutput struct {
+	Service model.Service `json:"service"`
+}
+
+func ServiceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetailInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"service_get_detail",
+		"Get detailed information about a specific service including configuration, deployment settings, runtime type, and metadata. service_id is required. Returns complete service object with all fields. Use this when you need comprehensive service information. Example: {\"service_id\":123}.",
+		func(ctx context.Context, input *ServiceDetailInput, opts ...tool.Option) (*ServiceGetDetailOutput, error) {
+			sid := input.ServiceID
 			if sid <= 0 {
-				return nil, "validation", NewMissingParam("service_id", "service_id is required")
+				return nil, fmt.Errorf("service_id is required")
 			}
 			var s model.Service
 			if err := deps.DB.First(&s, sid).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return s, "db", nil
-		})
+			return &ServiceGetDetailOutput{Service: s}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ServiceStatus(ctx context.Context, deps PlatformDeps, input ServiceStatusInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "service_status",
-			Description: "读取服务当前状态与基础信息。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"service_id": 0},
-		},
-		input,
-		func(in ServiceStatusInput) (any, string, error) {
-			if in.ServiceID <= 0 {
-				return nil, "validation", NewMissingParam("service_id", "service_id is required")
+type ServiceStatusOutput struct {
+	ServiceID   uint   `json:"service_id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Env         string `json:"env"`
+	RuntimeType string `json:"runtime_type"`
+	Image       string `json:"image"`
+	Replicas    int32  `json:"replicas"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+func ServiceStatus(ctx context.Context, deps PlatformDeps, input ServiceStatusInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"service_status",
+		"Get current status and basic runtime information of a service. service_id is required. Returns service name, status, environment, runtime type (k8s/compose/helm), container image, replica count, and last update time. Use this for quick status checks. Example: {\"service_id\":123}.",
+		func(ctx context.Context, input *ServiceStatusInput, opts ...tool.Option) (*ServiceStatusOutput, error) {
+			if input.ServiceID <= 0 {
+				return nil, fmt.Errorf("service_id is required")
 			}
 			var svc model.Service
-			if err := deps.DB.First(&svc, in.ServiceID).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.First(&svc, input.ServiceID).Error; err != nil {
+				return nil, err
 			}
-			return map[string]any{
-				"service_id":   svc.ID,
-				"name":         svc.Name,
-				"status":       svc.Status,
-				"env":          svc.Env,
-				"runtime_type": svc.RuntimeType,
-				"image":        svc.Image,
-				"replicas":     svc.Replicas,
-				"updated_at":   svc.UpdatedAt,
-			}, "db", nil
-		})
-}
-
-func serviceDeployPreviewData(deps PlatformDeps, sid, cid int) (any, string, error) {
-	if sid <= 0 {
-		return nil, "preview", NewMissingParam("service_id", "service_id is required")
-	}
-	if cid <= 0 {
-		return nil, "preview", NewMissingParam("cluster_id", "cluster_id is required")
-	}
-	var s model.Service
-	if err := deps.DB.First(&s, sid).Error; err != nil {
-		return nil, "db", err
-	}
-	return map[string]any{
-		"preview":    true,
-		"service_id": sid,
-		"cluster_id": cid,
-		"name":       s.Name,
-		"image":      s.Image,
-		"replicas":   s.Replicas,
-	}, "preview", nil
-}
-
-func ServiceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceDeployPreviewInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "service_deploy_preview",
-			Description: "部署服务预览。默认 service_id=0, cluster_id=0。示例: {\"service_id\":123, \"cluster_id\":456}",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"service_id": 0, "cluster_id": 0},
+			return &ServiceStatusOutput{
+				ServiceID:   svc.ID,
+				Name:        svc.Name,
+				Status:      svc.Status,
+				Env:         svc.Env,
+				RuntimeType: svc.RuntimeType,
+				Image:       svc.Image,
+				Replicas:    svc.Replicas,
+				UpdatedAt:   svc.UpdatedAt.Format("2006-01-02 15:04:05"),
+			}, nil
 		},
-		input,
-		func(in ServiceDeployPreviewInput) (any, string, error) {
-			return serviceDeployPreviewData(deps, in.ServiceID, in.ClusterID)
-		})
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func serviceDeployApplyData(deps PlatformDeps, sid, cid int) (any, string, error) {
-	if sid <= 0 {
-		return nil, "deploy", NewMissingParam("service_id", "service_id is required")
-	}
-	if cid <= 0 {
-		return nil, "deploy", NewMissingParam("cluster_id", "cluster_id is required")
-	}
-	var svc model.Service
-	if err := deps.DB.First(&svc, sid).Error; err != nil {
-		return nil, "db", err
-	}
-	var cluster model.Cluster
-	if err := deps.DB.First(&cluster, cid).Error; err != nil {
-		return nil, "db", err
-	}
-	_ = cluster
-	return map[string]any{
-		"applied":    true,
-		"service_id": sid,
-		"cluster_id": cid,
-		"message":    "deploy apply executed in MVP mode",
-		"image":      svc.Image,
-	}, "deploy", nil
+type ServiceDeployPreviewOutput struct {
+	Preview   bool   `json:"preview"`
+	ServiceID int    `json:"service_id"`
+	ClusterID int    `json:"cluster_id"`
+	Name      string `json:"name"`
+	Image     string `json:"image"`
+	Replicas  int32  `json:"replicas"`
 }
 
-func ServiceDeploy(ctx context.Context, deps PlatformDeps, input ServiceDeployInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "service_deploy",
-			Description: "统一服务部署工具，支持 preview/apply。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskHigh,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			DefaultHint: map[string]any{"preview": true, "apply": false},
-		},
-		input,
-		func(in ServiceDeployInput) (any, string, error) {
-			if in.Apply {
-				return serviceDeployApplyData(deps, in.ServiceID, in.ClusterID)
+func ServiceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceDeployPreviewInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"service_deploy_preview",
+		"Preview a service deployment without actually applying changes. service_id and cluster_id are required. Returns the deployment plan including service name, container image, and replica count. Use this to verify deployment configuration before executing with service_deploy_apply. Example: {\"service_id\":123,\"cluster_id\":456}.",
+		func(ctx context.Context, input *ServiceDeployPreviewInput, opts ...tool.Option) (*ServiceDeployPreviewOutput, error) {
+			if input.ServiceID <= 0 {
+				return nil, fmt.Errorf("service_id is required")
 			}
-			return serviceDeployPreviewData(deps, in.ServiceID, in.ClusterID)
-		})
-}
-func ServiceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDeployApplyInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "service_deploy_apply",
-			Description: "部署服务应用。默认 service_id=0, cluster_id=0。示例: {\"service_id\":123, \"cluster_id\":456}",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskHigh,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			DefaultHint: map[string]any{"service_id": 0, "cluster_id": 0},
+			if input.ClusterID <= 0 {
+				return nil, fmt.Errorf("cluster_id is required")
+			}
+			var s model.Service
+			if err := deps.DB.First(&s, input.ServiceID).Error; err != nil {
+				return nil, err
+			}
+			return &ServiceDeployPreviewOutput{
+				Preview:   true,
+				ServiceID: input.ServiceID,
+				ClusterID: input.ClusterID,
+				Name:      s.Name,
+				Image:     s.Image,
+				Replicas:  s.Replicas,
+			}, nil
 		},
-		input,
-		func(in ServiceDeployApplyInput) (any, string, error) {
-			return serviceDeployApplyData(deps, in.ServiceID, in.ClusterID)
-		})
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ServiceCatalogList(ctx context.Context, deps PlatformDeps, input ServiceCatalogListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "service_catalog_list",
-			Description: "查询服务目录列表。可选参数 keyword/category_id/limit。示例: {\"keyword\":\"payment\",\"category_id\":2,\"limit\":20}。category_id 可选 1(中间件)/2(业务)。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			ParamHints: map[string]string{
-				"category_id": "1=middleware, 2=business",
-				"keyword":     "按名称或负责人模糊匹配",
-			},
-			SceneScope: []string{"services:list", "services:catalog"},
+type ServiceDeployApplyOutput struct {
+	Applied   bool   `json:"applied"`
+	ServiceID int    `json:"service_id"`
+	ClusterID int    `json:"cluster_id"`
+	Message   string `json:"message"`
+	Image     string `json:"image"`
+}
+
+func ServiceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDeployApplyInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"service_deploy_apply",
+		"Execute a service deployment to a target cluster. service_id and cluster_id are required. This is a mutating operation that will create/update the deployment. Ensure you have previewed the deployment with service_deploy_preview first. Returns deployment status and applied configuration. Example: {\"service_id\":123,\"cluster_id\":456}.",
+		func(ctx context.Context, input *ServiceDeployApplyInput, opts ...tool.Option) (*ServiceDeployApplyOutput, error) {
+			if input.ServiceID <= 0 {
+				return nil, fmt.Errorf("service_id is required")
+			}
+			if input.ClusterID <= 0 {
+				return nil, fmt.Errorf("cluster_id is required")
+			}
+			var svc model.Service
+			if err := deps.DB.First(&svc, input.ServiceID).Error; err != nil {
+				return nil, err
+			}
+			var cluster model.Cluster
+			if err := deps.DB.First(&cluster, input.ClusterID).Error; err != nil {
+				return nil, err
+			}
+			return &ServiceDeployApplyOutput{
+				Applied:   true,
+				ServiceID: input.ServiceID,
+				ClusterID: input.ClusterID,
+				Message:   "deploy apply executed in MVP mode",
+				Image:     svc.Image,
+			}, nil
 		},
-		input,
-		func(in ServiceCatalogListInput) (any, string, error) {
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+type ServiceDeployOutput struct {
+	Preview   bool        `json:"preview"`
+	Applied   bool        `json:"applied"`
+	ServiceID int         `json:"service_id"`
+	ClusterID int         `json:"cluster_id"`
+	Data      interface{} `json:"data,omitempty"`
+}
+
+func ServiceDeploy(ctx context.Context, deps PlatformDeps, input ServiceDeployInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"service_deploy",
+		"Unified service deployment tool supporting both preview and apply modes. service_id and cluster_id are required. Set preview=true (default) to see the deployment plan without applying. Set apply=true to execute the deployment. This operation deploys the service container image to the specified cluster. Example: {\"service_id\":123,\"cluster_id\":456,\"preview\":true}.",
+		func(ctx context.Context, input *ServiceDeployInput, opts ...tool.Option) (*ServiceDeployOutput, error) {
+			if input.ServiceID <= 0 {
+				return nil, fmt.Errorf("service_id is required")
+			}
+			if input.ClusterID <= 0 {
+				return nil, fmt.Errorf("cluster_id is required")
+			}
+			var svc model.Service
+			if err := deps.DB.First(&svc, input.ServiceID).Error; err != nil {
+				return nil, err
+			}
+			if input.Apply {
+				var cluster model.Cluster
+				if err := deps.DB.First(&cluster, input.ClusterID).Error; err != nil {
+					return nil, err
+				}
+				return &ServiceDeployOutput{
+					Preview:   false,
+					Applied:   true,
+					ServiceID: input.ServiceID,
+					ClusterID: input.ClusterID,
+					Data: map[string]any{
+						"message": "deploy apply executed in MVP mode",
+						"image":   svc.Image,
+					},
+				}, nil
+			}
+			return &ServiceDeployOutput{
+				Preview:   true,
+				Applied:   false,
+				ServiceID: input.ServiceID,
+				ClusterID: input.ClusterID,
+				Data: map[string]any{
+					"name":     svc.Name,
+					"image":    svc.Image,
+					"replicas": svc.Replicas,
+				},
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+type ServiceCatalogListOutput struct {
+	Total          int              `json:"total"`
+	List           []map[string]any `json:"list"`
+	FiltersApplied map[string]any   `json:"filters_applied"`
+}
+
+func ServiceCatalogList(ctx context.Context, deps PlatformDeps, input ServiceCatalogListInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"service_catalog_list",
+		"Query the service catalog with filtering options. Optional parameters: keyword searches by service name or owner, category_id filters by service kind (1=middleware, 2=business), limit controls max results (default 50, max 200). Returns services with id, name, owner, environment, service_kind, visibility, and deployment count. Example: {\"keyword\":\"payment\",\"category_id\":2,\"limit\":20}.",
+		func(ctx context.Context, input *ServiceCatalogListInput, opts ...tool.Option) (*ServiceCatalogListOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -202,11 +241,11 @@ func ServiceCatalogList(ctx context.Context, deps PlatformDeps, input ServiceCat
 				limit = 200
 			}
 			query := deps.DB.Model(&model.Service{})
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR owner LIKE ?", pattern, pattern)
 			}
-			switch in.CategoryID {
+			switch input.CategoryID {
 			case 1:
 				query = query.Where("service_kind = ?", "middleware")
 			case 2:
@@ -214,7 +253,7 @@ func ServiceCatalogList(ctx context.Context, deps PlatformDeps, input ServiceCat
 			}
 			var rows []model.Service
 			if err := query.Order("id desc").Limit(limit).Find(&rows).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			list := make([]map[string]any, 0, len(rows))
 			for _, item := range rows {
@@ -229,35 +268,34 @@ func ServiceCatalogList(ctx context.Context, deps PlatformDeps, input ServiceCat
 					"icon":         item.Icon,
 				})
 			}
-			return map[string]any{
-				"total": len(list),
-				"list":  list,
-				"filters_applied": map[string]any{
-					"keyword":     strings.TrimSpace(in.Keyword),
-					"category_id": in.CategoryID,
+			return &ServiceCatalogListOutput{
+				Total: len(list),
+				List:  list,
+				FiltersApplied: map[string]any{
+					"keyword":     strings.TrimSpace(input.Keyword),
+					"category_id": input.CategoryID,
 					"limit":       limit,
 				},
-			}, "db", nil
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ServiceCategoryTree(ctx context.Context, deps PlatformDeps) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "service_category_tree",
-			Description: "查询服务分类树。当前分类来自服务类型聚合。示例: {}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			SceneScope:  []string{"services:list", "services:catalog"},
-		},
-		struct{}{},
-		func(_ struct{}) (any, string, error) {
+type ServiceCategoryTreeOutput struct {
+	Tree []map[string]any `json:"tree"`
+}
+
+func ServiceCategoryTree(ctx context.Context, deps PlatformDeps) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"service_category_tree",
+		"Get the service category tree structure showing middleware and business service categories with counts. Returns an array of categories, each with id, key (middleware/business), label, and count of services. Use this to understand the service distribution across categories. Example: {}.",
+		func(ctx context.Context, _ struct{}, opts ...tool.Option) (*ServiceCategoryTreeOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
 			type countRow struct {
 				ServiceKind string
@@ -268,11 +306,11 @@ func ServiceCategoryTree(ctx context.Context, deps PlatformDeps) (ToolResult, er
 				Select("service_kind, COUNT(1) AS count").
 				Group("service_kind").
 				Scan(&rows).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			tree := []map[string]any{
-				{"id": 1, "key": "middleware", "label": "中间件服务", "count": int64(0)},
-				{"id": 2, "key": "business", "label": "业务服务", "count": int64(0)},
+				{"id": 1, "key": "middleware", "label": "Middleware Services", "count": int64(0)},
+				{"id": 2, "key": "business", "label": "Business Services", "count": int64(0)},
 			}
 			for _, row := range rows {
 				switch strings.TrimSpace(row.ServiceKind) {
@@ -282,52 +320,59 @@ func ServiceCategoryTree(ctx context.Context, deps PlatformDeps) (ToolResult, er
 					tree[1]["count"] = row.Count
 				}
 			}
-			return map[string]any{"tree": tree}, "db", nil
+			return &ServiceCategoryTreeOutput{Tree: tree}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ServiceVisibilityCheck(ctx context.Context, deps PlatformDeps, input ServiceVisibilityCheckInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "service_visibility_check",
-			Description: "查询服务可见性配置。service_id 必填。示例: {\"service_id\":123}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"service_id"},
-			EnumSources: map[string]string{"service_id": "service_list_inventory"},
-			ParamHints:  map[string]string{"service_id": "可从 service_list_inventory 获取"},
-			SceneScope:  []string{"services:detail", "services:catalog"},
-		},
-		input,
-		func(in ServiceVisibilityCheckInput) (any, string, error) {
+type ServiceVisibilityCheckOutput struct {
+	ServiceID    uint   `json:"service_id"`
+	ServiceName  string `json:"service_name"`
+	ServiceKind  string `json:"service_kind"`
+	Visibility   string `json:"visibility"`
+	GrantedTeams []uint `json:"granted_teams"`
+	OwnerUserID  uint   `json:"owner_user_id"`
+	OwnerTeamID  uint   `json:"owner_team_id"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+func ServiceVisibilityCheck(ctx context.Context, deps PlatformDeps, input ServiceVisibilityCheckInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"service_visibility_check",
+		"Check the visibility configuration of a service including access control settings. service_id is required. Returns visibility level (public/private/team), granted team IDs that can access the service, owner user ID, and owner team ID. Use this to understand who can access a service. Example: {\"service_id\":123}.",
+		func(ctx context.Context, input *ServiceVisibilityCheckInput, opts ...tool.Option) (*ServiceVisibilityCheckOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.ServiceID <= 0 {
-				return nil, "validation", NewMissingParam("service_id", "service_id is required")
+			if input.ServiceID <= 0 {
+				return nil, fmt.Errorf("service_id is required")
 			}
 			var svc model.Service
-			if err := deps.DB.First(&svc, in.ServiceID).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.First(&svc, input.ServiceID).Error; err != nil {
+				return nil, err
 			}
 			granted := []uint{}
 			if strings.TrimSpace(svc.GrantedTeams) != "" {
 				_ = json.Unmarshal([]byte(svc.GrantedTeams), &granted)
 			}
-			return map[string]any{
-				"service_id":    svc.ID,
-				"service_name":  svc.Name,
-				"service_kind":  svc.ServiceKind,
-				"visibility":    svc.Visibility,
-				"granted_teams": granted,
-				"owner_user_id": svc.OwnerUserID,
-				"owner_team_id": svc.TeamID,
-				"updated_at":    svc.UpdatedAt,
-			}, "db", nil
+			return &ServiceVisibilityCheckOutput{
+				ServiceID:    svc.ID,
+				ServiceName:  svc.Name,
+				ServiceKind:  svc.ServiceKind,
+				Visibility:   svc.Visibility,
+				GrantedTeams: granted,
+				OwnerUserID:  svc.OwnerUserID,
+				OwnerTeamID:  svc.TeamID,
+				UpdatedAt:    svc.UpdatedAt.Format("2006-01-02 15:04:05"),
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }

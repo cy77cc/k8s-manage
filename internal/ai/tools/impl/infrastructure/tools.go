@@ -5,29 +5,26 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cloudwego/eino/components/tool"
+	einoutils "github.com/cloudwego/eino/components/tool/utils"
 	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
 
-func CredentialList(ctx context.Context, deps PlatformDeps, input CredentialListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "credential_list",
-			Description: "查询凭证列表。可选参数 type/keyword/limit。示例: {\"type\":\"k8s\",\"limit\":20}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"deployment:credentials"},
-		},
-		input,
-		func(in CredentialListInput) (any, string, error) {
+type CredentialListOutput struct {
+	Total int              `json:"total"`
+	List  []map[string]any `json:"list"`
+}
+
+func CredentialList(ctx context.Context, deps PlatformDeps, input CredentialListInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"credential_list",
+		"Query cluster credential list for accessing Kubernetes clusters or other infrastructure. Optional parameters: type filters by runtime type or source (k8s/helm/compose), keyword searches by name or endpoint, limit controls max results (default 50, max 200). Returns credentials with id, name, runtime type, endpoint, status, and last test result. Use credential IDs for deployment target configuration. Example: {\"type\":\"k8s\",\"limit\":20}.",
+		func(ctx context.Context, input *CredentialListInput, opts ...tool.Option) (*CredentialListOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -35,16 +32,16 @@ func CredentialList(ctx context.Context, deps PlatformDeps, input CredentialList
 				limit = 200
 			}
 			query := deps.DB.Model(&model.ClusterCredential{})
-			if t := strings.TrimSpace(in.Type); t != "" {
+			if t := strings.TrimSpace(input.Type); t != "" {
 				query = query.Where("runtime_type = ? OR source = ?", t, t)
 			}
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR endpoint LIKE ?", pattern, pattern)
 			}
 			var rows []model.ClusterCredential
 			if err := query.Order("id desc").Limit(limit).Find(&rows).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			list := make([]map[string]any, 0, len(rows))
 			for _, item := range rows {
@@ -60,45 +57,54 @@ func CredentialList(ctx context.Context, deps PlatformDeps, input CredentialList
 					"last_test_message": item.LastTestMessage,
 				})
 			}
-			return map[string]any{"total": len(list), "list": list}, "db", nil
+			return &CredentialListOutput{
+				Total: len(list),
+				List:  list,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func CredentialTest(ctx context.Context, deps PlatformDeps, input CredentialTestInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "credential_test",
-			Description: "查询凭证连通性测试结果。credential_id 必填。示例: {\"credential_id\":5}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"credential_id"},
-			EnumSources: map[string]string{"credential_id": "credential_list"},
-			SceneScope:  []string{"deployment:credentials"},
-		},
-		input,
-		func(in CredentialTestInput) (any, string, error) {
+type CredentialTestOutput struct {
+	CredentialID    uint   `json:"credential_id"`
+	Name            string `json:"name"`
+	Status          string `json:"status"`
+	LastTestAt      string `json:"last_test_at"`
+	LastTestStatus  string `json:"last_test_status"`
+	LastTestMessage string `json:"last_test_message"`
+}
+
+func CredentialTest(ctx context.Context, deps PlatformDeps, input CredentialTestInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"credential_test",
+		"Get credential connectivity test result. credential_id is required. Returns the last test result including test timestamp, status (success/failed), and any error message. Use this to verify if a credential is valid before using it for deployment. Example: {\"credential_id\":5}.",
+		func(ctx context.Context, input *CredentialTestInput, opts ...tool.Option) (*CredentialTestOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.CredentialID <= 0 {
-				return nil, "validation", NewMissingParam("credential_id", "credential_id is required")
+			if input.CredentialID <= 0 {
+				return nil, fmt.Errorf("credential_id is required")
 			}
 			var cred model.ClusterCredential
-			if err := deps.DB.First(&cred, in.CredentialID).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.First(&cred, input.CredentialID).Error; err != nil {
+				return nil, err
 			}
-			return map[string]any{
-				"credential_id":     cred.ID,
-				"name":              cred.Name,
-				"status":            cred.Status,
-				"last_test_at":      cred.LastTestAt,
-				"last_test_status":  cred.LastTestStatus,
-				"last_test_message": cred.LastTestMessage,
-			}, "db", nil
+			return &CredentialTestOutput{
+				CredentialID:    cred.ID,
+				Name:            cred.Name,
+				Status:          cred.Status,
+				LastTestAt:      cred.LastTestAt.Format("2006-01-02 15:04:05"),
+				LastTestStatus:  cred.LastTestStatus,
+				LastTestMessage: cred.LastTestMessage,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }

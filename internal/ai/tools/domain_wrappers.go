@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools/impl/cicd"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools/impl/deployment"
 	"github.com/cy77cc/k8s-manage/internal/ai/tools/impl/governance"
@@ -13,214 +14,214 @@ import (
 	serviceimpl "github.com/cy77cc/k8s-manage/internal/ai/tools/impl/service"
 )
 
-func osGetCPUMem(ctx context.Context, deps PlatformDeps, input OSCPUMemInput) (ToolResult, error) {
+func osGetCPUMem(ctx context.Context, deps PlatformDeps, input OSCPUMemInput) tool.InvokableTool {
 	return hostimpl.OSGetCPUMem(ctx, deps, input)
 }
 
-func osGetDiskFS(ctx context.Context, deps PlatformDeps, input OSDiskInput) (ToolResult, error) {
+func osGetDiskFS(ctx context.Context, deps PlatformDeps, input OSDiskInput) tool.InvokableTool {
 	return hostimpl.OSGetDiskFS(ctx, deps, input)
 }
 
-func osGetNetStat(ctx context.Context, deps PlatformDeps, input OSNetInput) (ToolResult, error) {
+func osGetNetStat(ctx context.Context, deps PlatformDeps, input OSNetInput) tool.InvokableTool {
 	return hostimpl.OSGetNetStat(ctx, deps, input)
 }
 
-func osGetProcessTop(ctx context.Context, deps PlatformDeps, input OSProcessTopInput) (ToolResult, error) {
+func osGetProcessTop(ctx context.Context, deps PlatformDeps, input OSProcessTopInput) tool.InvokableTool {
 	return hostimpl.OSGetProcessTop(ctx, deps, input)
 }
 
-func osGetJournalTail(ctx context.Context, deps PlatformDeps, input OSJournalInput) (ToolResult, error) {
+func osGetJournalTail(ctx context.Context, deps PlatformDeps, input OSJournalInput) tool.InvokableTool {
 	return hostimpl.OSGetJournalTail(ctx, deps, input)
 }
 
-func osGetContainerRuntime(ctx context.Context, deps PlatformDeps, input OSContainerRuntimeInput) (ToolResult, error) {
+func osGetContainerRuntime(ctx context.Context, deps PlatformDeps, input OSContainerRuntimeInput) tool.InvokableTool {
 	return hostimpl.OSGetContainerRuntime(ctx, deps, input)
 }
 
-func hostSSHReadonly(ctx context.Context, deps PlatformDeps, input HostSSHReadonlyInput) (ToolResult, error) {
+func hostSSHReadonly(ctx context.Context, deps PlatformDeps, input HostSSHReadonlyInput) tool.InvokableTool {
 	return hostimpl.HostSSHReadonly(ctx, deps, input)
 }
 
-func hostExec(ctx context.Context, deps PlatformDeps, input HostExecInput) (ToolResult, error) {
+func hostExec(ctx context.Context, deps PlatformDeps, input HostExecInput) tool.InvokableTool {
 	return hostimpl.HostExec(ctx, deps, input)
 }
 
-func hostListInventory(ctx context.Context, deps PlatformDeps, input HostInventoryInput) (ToolResult, error) {
+func hostListInventory(ctx context.Context, deps PlatformDeps, input HostInventoryInput) tool.InvokableTool {
 	return hostimpl.HostListInventory(ctx, deps, input)
 }
 
-func hostBatch(ctx context.Context, deps PlatformDeps, input HostBatchInput) (ToolResult, error) {
+func hostBatch(ctx context.Context, deps PlatformDeps, input HostBatchInput) tool.InvokableTool {
 	return hostimpl.HostBatch(ctx, deps, input)
 }
 
-func hostBatchExecPreview(ctx context.Context, deps PlatformDeps, input HostBatchExecPreviewInput) (ToolResult, error) {
+func hostBatchExecPreview(ctx context.Context, deps PlatformDeps, input HostBatchExecPreviewInput) tool.InvokableTool {
 	return hostimpl.HostBatchExecPreview(ctx, deps, input)
 }
 
-func hostBatchExecApply(ctx context.Context, deps PlatformDeps, input HostBatchExecApplyInput) (ToolResult, error) {
+func hostBatchExecApply(ctx context.Context, deps PlatformDeps, input HostBatchExecApplyInput) tool.InvokableTool {
 	return hostimpl.HostBatchExecApply(ctx, deps, input)
 }
 
-func hostBatchStatusUpdate(ctx context.Context, deps PlatformDeps, input HostBatchStatusInput) (ToolResult, error) {
+func hostBatchStatusUpdate(ctx context.Context, deps PlatformDeps, input HostBatchStatusInput) tool.InvokableTool {
 	return hostimpl.HostBatchStatusUpdate(ctx, deps, input)
 }
 
-func k8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) (ToolResult, error) {
+func k8sQuery(ctx context.Context, deps PlatformDeps, input K8sQueryInput) tool.InvokableTool {
 	return kubernetes.K8sQuery(ctx, deps, input)
 }
 
-func k8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput) (ToolResult, error) {
+func k8sListResources(ctx context.Context, deps PlatformDeps, input K8sListInput) tool.InvokableTool {
 	return kubernetes.K8sListResources(ctx, deps, input)
 }
 
-func k8sEvents(ctx context.Context, deps PlatformDeps, input K8sEventsQueryInput) (ToolResult, error) {
+func k8sEvents(ctx context.Context, deps PlatformDeps, input K8sEventsQueryInput) tool.InvokableTool {
 	return kubernetes.K8sEvents(ctx, deps, input)
 }
 
-func k8sGetEvents(ctx context.Context, deps PlatformDeps, input K8sEventsInput) (ToolResult, error) {
+func k8sGetEvents(ctx context.Context, deps PlatformDeps, input K8sEventsInput) tool.InvokableTool {
 	return kubernetes.K8sGetEvents(ctx, deps, input)
 }
 
-func k8sLogs(ctx context.Context, deps PlatformDeps, input K8sLogsInput) (ToolResult, error) {
+func k8sLogs(ctx context.Context, deps PlatformDeps, input K8sLogsInput) tool.InvokableTool {
 	return kubernetes.K8sLogs(ctx, deps, input)
 }
 
-func k8sGetPodLogs(ctx context.Context, deps PlatformDeps, input K8sPodLogsInput) (ToolResult, error) {
+func k8sGetPodLogs(ctx context.Context, deps PlatformDeps, input K8sPodLogsInput) tool.InvokableTool {
 	return kubernetes.K8sGetPodLogs(ctx, deps, input)
 }
 
-func serviceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetailInput) (ToolResult, error) {
+func serviceGetDetail(ctx context.Context, deps PlatformDeps, input ServiceDetailInput) tool.InvokableTool {
 	return serviceimpl.ServiceGetDetail(ctx, deps, input)
 }
 
-func serviceStatus(ctx context.Context, deps PlatformDeps, input ServiceStatusInput) (ToolResult, error) {
+func serviceStatus(ctx context.Context, deps PlatformDeps, input ServiceStatusInput) tool.InvokableTool {
 	return serviceimpl.ServiceStatus(ctx, deps, input)
 }
 
-func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceDeployPreviewInput) (ToolResult, error) {
+func serviceDeployPreview(ctx context.Context, deps PlatformDeps, input ServiceDeployPreviewInput) tool.InvokableTool {
 	return serviceimpl.ServiceDeployPreview(ctx, deps, input)
 }
 
-func serviceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDeployApplyInput) (ToolResult, error) {
+func serviceDeployApply(ctx context.Context, deps PlatformDeps, input ServiceDeployApplyInput) tool.InvokableTool {
 	return serviceimpl.ServiceDeployApply(ctx, deps, input)
 }
 
-func serviceDeploy(ctx context.Context, deps PlatformDeps, input ServiceDeployInput) (ToolResult, error) {
+func serviceDeploy(ctx context.Context, deps PlatformDeps, input ServiceDeployInput) tool.InvokableTool {
 	return serviceimpl.ServiceDeploy(ctx, deps, input)
 }
 
-func serviceCatalogList(ctx context.Context, deps PlatformDeps, input ServiceCatalogListInput) (ToolResult, error) {
+func serviceCatalogList(ctx context.Context, deps PlatformDeps, input ServiceCatalogListInput) tool.InvokableTool {
 	return serviceimpl.ServiceCatalogList(ctx, deps, input)
 }
 
-func serviceVisibilityCheck(ctx context.Context, deps PlatformDeps, input ServiceVisibilityCheckInput) (ToolResult, error) {
+func serviceVisibilityCheck(ctx context.Context, deps PlatformDeps, input ServiceVisibilityCheckInput) tool.InvokableTool {
 	return serviceimpl.ServiceVisibilityCheck(ctx, deps, input)
 }
 
-func serviceCategoryTree(ctx context.Context, deps PlatformDeps) (ToolResult, error) {
+func serviceCategoryTree(ctx context.Context, deps PlatformDeps) tool.InvokableTool {
 	return serviceimpl.ServiceCategoryTree(ctx, deps)
 }
 
-func monitorAlertRuleList(ctx context.Context, deps PlatformDeps, input MonitorAlertRuleListInput) (ToolResult, error) {
+func monitorAlertRuleList(ctx context.Context, deps PlatformDeps, input MonitorAlertRuleListInput) tool.InvokableTool {
 	return monitor.MonitorAlertRuleList(ctx, deps, input)
 }
 
-func monitorAlert(ctx context.Context, deps PlatformDeps, input MonitorAlertInput) (ToolResult, error) {
+func monitorAlert(ctx context.Context, deps PlatformDeps, input MonitorAlertInput) tool.InvokableTool {
 	return monitor.MonitorAlert(ctx, deps, input)
 }
 
-func monitorAlertActive(ctx context.Context, deps PlatformDeps, input MonitorAlertActiveInput) (ToolResult, error) {
+func monitorAlertActive(ctx context.Context, deps PlatformDeps, input MonitorAlertActiveInput) tool.InvokableTool {
 	return monitor.MonitorAlertActive(ctx, deps, input)
 }
 
-func monitorMetric(ctx context.Context, deps PlatformDeps, input MonitorMetricInput) (ToolResult, error) {
+func monitorMetric(ctx context.Context, deps PlatformDeps, input MonitorMetricInput) tool.InvokableTool {
 	return monitor.MonitorMetric(ctx, deps, input)
 }
 
-func monitorMetricQuery(ctx context.Context, deps PlatformDeps, input MonitorMetricQueryInput) (ToolResult, error) {
+func monitorMetricQuery(ctx context.Context, deps PlatformDeps, input MonitorMetricQueryInput) tool.InvokableTool {
 	return monitor.MonitorMetricQuery(ctx, deps, input)
 }
 
-func cicdPipelineList(ctx context.Context, deps PlatformDeps, input CICDPipelineListInput) (ToolResult, error) {
+func cicdPipelineList(ctx context.Context, deps PlatformDeps, input CICDPipelineListInput) tool.InvokableTool {
 	return cicd.CICDPipelineList(ctx, deps, input)
 }
 
-func cicdPipelineStatus(ctx context.Context, deps PlatformDeps, input CICDPipelineStatusInput) (ToolResult, error) {
+func cicdPipelineStatus(ctx context.Context, deps PlatformDeps, input CICDPipelineStatusInput) tool.InvokableTool {
 	return cicd.CICDPipelineStatus(ctx, deps, input)
 }
 
-func cicdPipelineTrigger(ctx context.Context, deps PlatformDeps, input CICDPipelineTriggerInput) (ToolResult, error) {
+func cicdPipelineTrigger(ctx context.Context, deps PlatformDeps, input CICDPipelineTriggerInput) tool.InvokableTool {
 	return cicd.CICDPipelineTrigger(ctx, deps, input)
 }
 
-func jobList(ctx context.Context, deps PlatformDeps, input JobListInput) (ToolResult, error) {
+func jobList(ctx context.Context, deps PlatformDeps, input JobListInput) tool.InvokableTool {
 	return cicd.JobList(ctx, deps, input)
 }
 
-func jobExecutionStatus(ctx context.Context, deps PlatformDeps, input JobExecutionStatusInput) (ToolResult, error) {
+func jobExecutionStatus(ctx context.Context, deps PlatformDeps, input JobExecutionStatusInput) tool.InvokableTool {
 	return cicd.JobExecutionStatus(ctx, deps, input)
 }
 
-func jobRun(ctx context.Context, deps PlatformDeps, input JobRunInput) (ToolResult, error) {
+func jobRun(ctx context.Context, deps PlatformDeps, input JobRunInput) tool.InvokableTool {
 	return cicd.JobRun(ctx, deps, input)
 }
 
-func deploymentTargetList(ctx context.Context, deps PlatformDeps, input DeploymentTargetListInput) (ToolResult, error) {
+func deploymentTargetList(ctx context.Context, deps PlatformDeps, input DeploymentTargetListInput) tool.InvokableTool {
 	return deployment.DeploymentTargetList(ctx, deps, input)
 }
 
-func deploymentTargetDetail(ctx context.Context, deps PlatformDeps, input DeploymentTargetDetailInput) (ToolResult, error) {
+func deploymentTargetDetail(ctx context.Context, deps PlatformDeps, input DeploymentTargetDetailInput) tool.InvokableTool {
 	return deployment.DeploymentTargetDetail(ctx, deps, input)
 }
 
-func deploymentBootstrapStatus(ctx context.Context, deps PlatformDeps, input DeploymentBootstrapStatusInput) (ToolResult, error) {
+func deploymentBootstrapStatus(ctx context.Context, deps PlatformDeps, input DeploymentBootstrapStatusInput) tool.InvokableTool {
 	return deployment.DeploymentBootstrapStatus(ctx, deps, input)
 }
 
-func configAppList(ctx context.Context, deps PlatformDeps, input ConfigAppListInput) (ToolResult, error) {
+func configAppList(ctx context.Context, deps PlatformDeps, input ConfigAppListInput) tool.InvokableTool {
 	return deployment.ConfigAppList(ctx, deps, input)
 }
 
-func configItemGet(ctx context.Context, deps PlatformDeps, input ConfigItemGetInput) (ToolResult, error) {
+func configItemGet(ctx context.Context, deps PlatformDeps, input ConfigItemGetInput) tool.InvokableTool {
 	return deployment.ConfigItemGet(ctx, deps, input)
 }
 
-func configDiff(ctx context.Context, deps PlatformDeps, input ConfigDiffInput) (ToolResult, error) {
+func configDiff(ctx context.Context, deps PlatformDeps, input ConfigDiffInput) tool.InvokableTool {
 	return deployment.ConfigDiff(ctx, deps, input)
 }
 
-func clusterListInventory(ctx context.Context, deps PlatformDeps, input ClusterInventoryInput) (ToolResult, error) {
+func clusterListInventory(ctx context.Context, deps PlatformDeps, input ClusterInventoryInput) tool.InvokableTool {
 	return deployment.ClusterListInventory(ctx, deps, input)
 }
 
-func serviceListInventory(ctx context.Context, deps PlatformDeps, input ServiceInventoryInput) (ToolResult, error) {
+func serviceListInventory(ctx context.Context, deps PlatformDeps, input ServiceInventoryInput) tool.InvokableTool {
 	return deployment.ServiceListInventory(ctx, deps, input)
 }
 
-func userList(ctx context.Context, deps PlatformDeps, input UserListInput) (ToolResult, error) {
+func userList(ctx context.Context, deps PlatformDeps, input UserListInput) tool.InvokableTool {
 	return governance.UserList(ctx, deps, input)
 }
 
-func roleList(ctx context.Context, deps PlatformDeps, input RoleListInput) (ToolResult, error) {
+func roleList(ctx context.Context, deps PlatformDeps, input RoleListInput) tool.InvokableTool {
 	return governance.RoleList(ctx, deps, input)
 }
 
-func permissionCheck(ctx context.Context, deps PlatformDeps, input PermissionCheckInput) (ToolResult, error) {
+func permissionCheck(ctx context.Context, deps PlatformDeps, input PermissionCheckInput) tool.InvokableTool {
 	return governance.PermissionCheck(ctx, deps, input)
 }
 
-func topologyGet(ctx context.Context, deps PlatformDeps, input TopologyGetInput) (ToolResult, error) {
+func topologyGet(ctx context.Context, deps PlatformDeps, input TopologyGetInput) tool.InvokableTool {
 	return governance.TopologyGet(ctx, deps, input)
 }
 
-func auditLogSearch(ctx context.Context, deps PlatformDeps, input AuditLogSearchInput) (ToolResult, error) {
+func auditLogSearch(ctx context.Context, deps PlatformDeps, input AuditLogSearchInput) tool.InvokableTool {
 	return governance.AuditLogSearch(ctx, deps, input)
 }
 
-func credentialList(ctx context.Context, deps PlatformDeps, input CredentialListInput) (ToolResult, error) {
+func credentialList(ctx context.Context, deps PlatformDeps, input CredentialListInput) tool.InvokableTool {
 	return infrastructure.CredentialList(ctx, deps, input)
 }
 
-func credentialTest(ctx context.Context, deps PlatformDeps, input CredentialTestInput) (ToolResult, error) {
+func credentialTest(ctx context.Context, deps PlatformDeps, input CredentialTestInput) tool.InvokableTool {
 	return infrastructure.CredentialTest(ctx, deps, input)
 }

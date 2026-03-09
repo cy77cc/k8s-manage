@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cloudwego/eino/components/tool"
+	einoutils "github.com/cloudwego/eino/components/tool/utils"
 	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
 	"github.com/cy77cc/k8s-manage/internal/config"
@@ -17,104 +19,112 @@ import (
 
 var serviceUnitRegexp = regexp.MustCompile(`^[a-zA-Z0-9_.@-]+$`)
 
-func HostSSHReadonly(ctx context.Context, deps PlatformDeps, input HostSSHReadonlyInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "host_ssh_exec_readonly",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskMedium,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in HostSSHReadonlyInput) (any, string, error) {
-			hostID := in.HostID
-			cmd := strings.TrimSpace(in.Command)
+type HostSSHReadonlyOutput struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
+}
+
+func HostSSHReadonly(ctx context.Context, deps PlatformDeps, input HostSSHReadonlyInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"host_ssh_exec_readonly",
+		"Execute a readonly SSH command on a host. host_id and command are required. Only predefined safe readonly commands are allowed such as: hostname, uptime, df -h, free -m, ps aux --sort=-%cpu. Example: {\"host_id\":1,\"command\":\"uptime\"}.",
+		func(ctx context.Context, input *HostSSHReadonlyInput, opts ...tool.Option) (*HostSSHReadonlyOutput, error) {
+			hostID := input.HostID
+			cmd := strings.TrimSpace(input.Command)
 			if hostID <= 0 {
-				return nil, "host_ssh", NewMissingParam("host_id", "host_id is required")
+				return nil, fmt.Errorf("host_id is required")
 			}
 			if cmd == "" {
-				return nil, "host_ssh", NewMissingParam("command", "command is required")
+				return nil, fmt.Errorf("command is required")
 			}
 			if !isReadonlyHostCommand(cmd) {
-				return nil, "host_ssh", NewInvalidParam("command", "command not allowed")
+				return nil, fmt.Errorf("command not allowed: only readonly commands are permitted")
 			}
 			var node model.Node
 			if err := deps.DB.First(&node, hostID).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			out, err := executeHostCommand(deps, &node, cmd)
 			if err != nil {
-				return map[string]any{"stdout": out, "stderr": err.Error(), "exit_code": 1}, "host_ssh", nil
+				return &HostSSHReadonlyOutput{Stdout: out, Stderr: err.Error(), ExitCode: 1}, nil
 			}
-			return map[string]any{"stdout": out, "stderr": "", "exit_code": 0}, "host_ssh", nil
-		})
+			return &HostSSHReadonlyOutput{Stdout: out, Stderr: "", ExitCode: 0}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func HostExec(ctx context.Context, deps PlatformDeps, input HostExecInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "host_exec",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskMedium,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in HostExecInput) (any, string, error) {
-			hostID := in.HostID
-			cmd := strings.TrimSpace(in.Command)
+type HostExecOutput struct {
+	HostID   int    `json:"host_id"`
+	Command  string `json:"command"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
+}
+
+func HostExec(ctx context.Context, deps PlatformDeps, input HostExecInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"host_exec",
+		"Execute a readonly command on a single host via SSH. host_id and command are required. Only safe readonly commands are allowed. Returns stdout, stderr and exit code. Example: {\"host_id\":1,\"command\":\"df -h\"}.",
+		func(ctx context.Context, input *HostExecInput, opts ...tool.Option) (*HostExecOutput, error) {
+			hostID := input.HostID
+			cmd := strings.TrimSpace(input.Command)
 			if hostID <= 0 {
-				return nil, "host_exec", NewMissingParam("host_id", "host_id is required")
+				return nil, fmt.Errorf("host_id is required")
 			}
 			if cmd == "" {
-				return nil, "host_exec", NewMissingParam("command", "command is required")
+				return nil, fmt.Errorf("command is required")
 			}
 			if !isReadonlyHostCommand(cmd) {
-				return nil, "host_exec", NewInvalidParam("command", "command not allowed")
+				return nil, fmt.Errorf("command not allowed: only readonly commands are permitted")
 			}
 			var node model.Node
 			if err := deps.DB.First(&node, hostID).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			out, err := executeHostCommand(deps, &node, cmd)
 			if err != nil {
-				return map[string]any{
-					"host_id":   hostID,
-					"command":   cmd,
-					"stdout":    out,
-					"stderr":    err.Error(),
-					"exit_code": 1,
-				}, "host_exec", nil
+				return &HostExecOutput{
+					HostID:   hostID,
+					Command:  cmd,
+					Stdout:   out,
+					Stderr:   err.Error(),
+					ExitCode: 1,
+				}, nil
 			}
-			return map[string]any{
-				"host_id":   hostID,
-				"command":   cmd,
-				"stdout":    out,
-				"stderr":    "",
-				"exit_code": 0,
-			}, "host_exec", nil
-		})
+			return &HostExecOutput{
+				HostID:   hostID,
+				Command:  cmd,
+				Stdout:   out,
+				Stderr:   "",
+				ExitCode: 0,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func HostListInventory(ctx context.Context, deps PlatformDeps, input HostInventoryInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "host_list_inventory",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in HostInventoryInput) (any, string, error) {
+type HostListInventoryOutput struct {
+	Total int              `json:"total"`
+	List  []map[string]any `json:"list"`
+}
+
+func HostListInventory(ctx context.Context, deps PlatformDeps, input HostInventoryInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"host_list_inventory",
+		"Query host inventory list with detailed information including CPU, memory, disk, SSH configuration, and status. Optional parameters: status filters by host status (online/offline/maintenance), keyword searches by name/IP/hostname, limit controls max results (default 50, max 200). Example: {\"status\":\"online\",\"keyword\":\"web\",\"limit\":20}.",
+		func(ctx context.Context, input *HostInventoryInput, opts ...tool.Option) (*HostListInventoryOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -122,18 +132,17 @@ func HostListInventory(ctx context.Context, deps PlatformDeps, input HostInvento
 				limit = 200
 			}
 			query := deps.DB.Model(&model.Node{})
-			if status := strings.TrimSpace(in.Status); status != "" {
+			if status := strings.TrimSpace(input.Status); status != "" {
 				query = query.Where("status = ?", status)
 			}
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR ip LIKE ? OR hostname LIKE ?", pattern, pattern, pattern)
 			}
 			var nodes []model.Node
 			if err := query.Order("id desc").Limit(limit).Find(&nodes).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-
 			items := make([]map[string]any, 0, len(nodes))
 			for _, node := range nodes {
 				items = append(items, map[string]any{
@@ -152,45 +161,51 @@ func HostListInventory(ctx context.Context, deps PlatformDeps, input HostInvento
 					"updated_at": node.UpdatedAt,
 				})
 			}
-
-			return map[string]any{
-				"total": len(items),
-				"list":  items,
-			}, "db", nil
-		})
+			return &HostListInventoryOutput{
+				Total: len(items),
+				List:  items,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func HostBatch(ctx context.Context, deps PlatformDeps, input HostBatchInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "host_batch",
-			Mode:       ToolModeMutating,
-			Risk:       ToolRiskHigh,
-			Provider:   "local",
-			Permission: "ai:tool:execute",
-		},
-		input,
-		func(in HostBatchInput) (any, string, error) {
-			hostIDs, err := normalizeHostIDs(in.HostIDs)
-			if err != nil {
-				return nil, "host_batch", err
-			}
-			cmd := strings.TrimSpace(in.Command)
-			if cmd == "" {
-				return nil, "host_batch", NewMissingParam("command", "command is required")
-			}
+type HostBatchOutput struct {
+	Reason         string         `json:"reason"`
+	Command        string         `json:"command"`
+	CommandClass   string         `json:"command_class"`
+	Risk           string         `json:"risk"`
+	TargetCount    int            `json:"target_count"`
+	MissingHostIDs []uint64       `json:"missing_host_ids"`
+	Succeeded      int            `json:"succeeded"`
+	Failed         int            `json:"failed"`
+	Results        map[string]any `json:"results"`
+}
 
+func HostBatch(ctx context.Context, deps PlatformDeps, input HostBatchInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"host_batch",
+		"Execute a command on multiple hosts in batch. host_ids (array of integers) and command are required. Dangerous commands like 'rm -rf /', 'mkfs', 'shutdown' are blocked. Returns execution results for each host including stdout, stderr, and exit code. Example: {\"host_ids\":[1,2,3],\"command\":\"uptime\",\"reason\":\"health check\"}.",
+		func(ctx context.Context, input *HostBatchInput, opts ...tool.Option) (*HostBatchOutput, error) {
+			hostIDs, err := normalizeHostIDs(input.HostIDs)
+			if err != nil {
+				return nil, err
+			}
+			cmd := strings.TrimSpace(input.Command)
+			if cmd == "" {
+				return nil, fmt.Errorf("command is required")
+			}
 			class, risk, blocked := classifyHostCommand(cmd)
 			if blocked {
-				return nil, "host_batch", NewInvalidParam("command", "dangerous command is blocked")
+				return nil, fmt.Errorf("dangerous command is blocked")
 			}
-
 			nodesByID, missing, err := loadHostNodesMap(deps, hostIDs)
 			if err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-
 			results := map[string]any{}
 			succeeded := 0
 			failed := 0
@@ -211,98 +226,111 @@ func HostBatch(ctx context.Context, deps PlatformDeps, input HostBatchInput) (To
 				results[key] = map[string]any{"stdout": out, "stderr": "", "exit_code": 0}
 				succeeded++
 			}
-
-			return map[string]any{
-				"reason":           strings.TrimSpace(in.Reason),
-				"command":          cmd,
-				"command_class":    class,
-				"risk":             risk,
-				"target_count":     len(hostIDs),
-				"missing_host_ids": missing,
-				"succeeded":        succeeded,
-				"failed":           failed,
-				"results":          results,
-			}, "host_batch", nil
-		})
+			return &HostBatchOutput{
+				Reason:         strings.TrimSpace(input.Reason),
+				Command:        cmd,
+				CommandClass:   class,
+				Risk:           risk,
+				TargetCount:    len(hostIDs),
+				MissingHostIDs: missing,
+				Succeeded:      succeeded,
+				Failed:         failed,
+				Results:        results,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func HostBatchExecPreview(ctx context.Context, deps PlatformDeps, input HostBatchExecPreviewInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "host_batch_exec_preview",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskMedium,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in HostBatchExecPreviewInput) (any, string, error) {
-			hostIDs, err := normalizeHostIDs(in.HostIDs)
-			if err != nil {
-				return nil, "host_batch_preview", err
-			}
-			cmd := strings.TrimSpace(in.Command)
-			if cmd == "" {
-				return nil, "host_batch_preview", NewMissingParam("command", "command is required")
-			}
+type HostBatchExecPreviewOutput struct {
+	Command        string           `json:"command"`
+	Reason         string           `json:"reason"`
+	CommandClass   string           `json:"command_class"`
+	Risk           string           `json:"risk"`
+	Blocked        bool             `json:"blocked"`
+	TargetCount    int              `json:"target_count"`
+	ResolvedCount  int              `json:"resolved_count"`
+	MissingHostIDs []uint64         `json:"missing_host_ids"`
+	Targets        []map[string]any `json:"targets"`
+}
 
+func HostBatchExecPreview(ctx context.Context, deps PlatformDeps, input HostBatchExecPreviewInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"host_batch_exec_preview",
+		"Preview batch command execution before actually running it. host_ids (array) and command are required. Returns resolved target hosts, command classification (readonly/mutating/dangerous), risk level, and whether the command is blocked. Use this to verify the impact before executing with host_batch_exec_apply. Example: {\"host_ids\":[1,2],\"command\":\"systemctl status nginx\"}.",
+		func(ctx context.Context, input *HostBatchExecPreviewInput, opts ...tool.Option) (*HostBatchExecPreviewOutput, error) {
+			hostIDs, err := normalizeHostIDs(input.HostIDs)
+			if err != nil {
+				return nil, err
+			}
+			cmd := strings.TrimSpace(input.Command)
+			if cmd == "" {
+				return nil, fmt.Errorf("command is required")
+			}
 			class, risk, blocked := classifyHostCommand(cmd)
 			targets, missing, err := loadHostBatchTargets(deps, hostIDs)
 			if err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{
-				"command":        cmd,
-				"reason":         strings.TrimSpace(in.Reason),
-				"command_class":  class,
-				"risk":           risk,
-				"blocked":        blocked,
-				"target_count":   len(hostIDs),
-				"resolved_count": len(targets),
-				"missing_host_ids": func() []uint64 {
-					out := make([]uint64, 0, len(missing))
-					for _, id := range missing {
-						out = append(out, uint64(id))
-					}
-					return out
-				}(),
-				"targets": targets,
-			}, "host_batch_preview", nil
-		})
+			missingIDs := make([]uint64, 0, len(missing))
+			for _, id := range missing {
+				missingIDs = append(missingIDs, uint64(id))
+			}
+			return &HostBatchExecPreviewOutput{
+				Command:        cmd,
+				Reason:         strings.TrimSpace(input.Reason),
+				CommandClass:   class,
+				Risk:           risk,
+				Blocked:        blocked,
+				TargetCount:    len(hostIDs),
+				ResolvedCount:  len(targets),
+				MissingHostIDs: missingIDs,
+				Targets:        targets,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func HostBatchExecApply(ctx context.Context, deps PlatformDeps, input HostBatchExecApplyInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "host_batch_exec_apply",
-			Mode:       ToolModeMutating,
-			Risk:       ToolRiskHigh,
-			Provider:   "local",
-			Permission: "ai:tool:execute",
-		},
-		input,
-		func(in HostBatchExecApplyInput) (any, string, error) {
-			hostIDs, err := normalizeHostIDs(in.HostIDs)
-			if err != nil {
-				return nil, "host_batch_exec", err
-			}
-			cmd := strings.TrimSpace(in.Command)
-			if cmd == "" {
-				return nil, "host_batch_exec", NewMissingParam("command", "command is required")
-			}
+type HostBatchExecApplyOutput struct {
+	Reason         string         `json:"reason"`
+	Command        string         `json:"command"`
+	CommandClass   string         `json:"command_class"`
+	Risk           string         `json:"risk"`
+	TargetCount    int            `json:"target_count"`
+	MissingHostIDs []uint64       `json:"missing_host_ids"`
+	Succeeded      int            `json:"succeeded"`
+	Failed         int            `json:"failed"`
+	Results        map[string]any `json:"results"`
+}
 
+func HostBatchExecApply(ctx context.Context, deps PlatformDeps, input HostBatchExecApplyInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"host_batch_exec_apply",
+		"Execute a command on multiple hosts after preview confirmation. host_ids (array) and command are required. Dangerous commands are blocked. Returns execution results for each host. This is a mutating operation - ensure you have previewed with host_batch_exec_preview first. Example: {\"host_ids\":[1,2],\"command\":\"systemctl restart nginx\",\"reason\":\"restart nginx service\"}.",
+		func(ctx context.Context, input *HostBatchExecApplyInput, opts ...tool.Option) (*HostBatchExecApplyOutput, error) {
+			hostIDs, err := normalizeHostIDs(input.HostIDs)
+			if err != nil {
+				return nil, err
+			}
+			cmd := strings.TrimSpace(input.Command)
+			if cmd == "" {
+				return nil, fmt.Errorf("command is required")
+			}
 			class, risk, blocked := classifyHostCommand(cmd)
 			if blocked {
-				return nil, "host_batch_exec", NewInvalidParam("command", "dangerous command is blocked")
+				return nil, fmt.Errorf("dangerous command is blocked")
 			}
-
 			nodesByID, missing, err := loadHostNodesMap(deps, hostIDs)
 			if err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-
 			results := map[string]any{}
 			succeeded := 0
 			failed := 0
@@ -323,140 +351,163 @@ func HostBatchExecApply(ctx context.Context, deps PlatformDeps, input HostBatchE
 				results[key] = map[string]any{"stdout": out, "stderr": "", "exit_code": 0}
 				succeeded++
 			}
-
-			return map[string]any{
-				"reason":           strings.TrimSpace(in.Reason),
-				"command":          cmd,
-				"command_class":    class,
-				"risk":             risk,
-				"target_count":     len(hostIDs),
-				"missing_host_ids": missing,
-				"succeeded":        succeeded,
-				"failed":           failed,
-				"results":          results,
-			}, "host_batch_exec", nil
-		})
+			return &HostBatchExecApplyOutput{
+				Reason:         strings.TrimSpace(input.Reason),
+				Command:        cmd,
+				CommandClass:   class,
+				Risk:           risk,
+				TargetCount:    len(hostIDs),
+				MissingHostIDs: missing,
+				Succeeded:      succeeded,
+				Failed:         failed,
+				Results:        results,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func HostBatchStatusUpdate(ctx context.Context, deps PlatformDeps, input HostBatchStatusInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "host_batch_status_update",
-			Mode:       ToolModeMutating,
-			Risk:       ToolRiskMedium,
-			Provider:   "local",
-			Permission: "ai:tool:execute",
-		},
-		input,
-		func(in HostBatchStatusInput) (any, string, error) {
-			hostIDs, err := normalizeHostIDs(in.HostIDs)
+type HostBatchStatusUpdateOutput struct {
+	Action       string `json:"action"`
+	Reason       string `json:"reason"`
+	TargetCount  int    `json:"target_count"`
+	UpdatedCount int64  `json:"updated_count"`
+}
+
+func HostBatchStatusUpdate(ctx context.Context, deps PlatformDeps, input HostBatchStatusInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"host_batch_status_update",
+		"Batch update host status to online, offline, or maintenance. host_ids (array) and action are required. Action must be one of: online, offline, maintenance. Use this to change the operational status of multiple hosts at once. Example: {\"host_ids\":[1,2,3],\"action\":\"maintenance\",\"reason\":\"scheduled maintenance\"}.",
+		func(ctx context.Context, input *HostBatchStatusInput, opts ...tool.Option) (*HostBatchStatusUpdateOutput, error) {
+			hostIDs, err := normalizeHostIDs(input.HostIDs)
 			if err != nil {
-				return nil, "host_batch_status", err
+				return nil, err
 			}
-			action := strings.ToLower(strings.TrimSpace(in.Action))
+			action := strings.ToLower(strings.TrimSpace(input.Action))
 			if action == "" {
-				return nil, "host_batch_status", NewMissingParam("action", "action is required")
+				return nil, fmt.Errorf("action is required")
 			}
 			if action != "online" && action != "offline" && action != "maintenance" {
-				return nil, "host_batch_status", NewInvalidParam("action", "action must be online/offline/maintenance")
+				return nil, fmt.Errorf("action must be online/offline/maintenance")
 			}
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
 			res := deps.DB.Model(&model.Node{}).Where("id IN ?", hostIDs).Update("status", action)
 			if res.Error != nil {
-				return nil, "db", res.Error
+				return nil, res.Error
 			}
-			return map[string]any{
-				"action":        action,
-				"reason":        strings.TrimSpace(in.Reason),
-				"target_count":  len(hostIDs),
-				"updated_count": res.RowsAffected,
-			}, "host_batch_status", nil
-		})
+			return &HostBatchStatusUpdateOutput{
+				Action:       action,
+				Reason:       strings.TrimSpace(input.Reason),
+				TargetCount:  len(hostIDs),
+				UpdatedCount: res.RowsAffected,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func OSGetCPUMem(ctx context.Context, deps PlatformDeps, input OSCPUMemInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "os_get_cpu_mem",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in OSCPUMemInput) (any, string, error) {
-			target := strings.TrimSpace(in.Target)
+type OSGetCPUMemOutput struct {
+	Loadavg string `json:"loadavg"`
+	Meminfo string `json:"meminfo"`
+	Uptime  string `json:"uptime"`
+}
+
+func OSGetCPUMem(ctx context.Context, deps PlatformDeps, input OSCPUMemInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"os_get_cpu_mem",
+		"Get CPU, memory and load average information from a target host. Returns loadavg from /proc/loadavg, meminfo from /proc/meminfo, and uptime output. Target can be host ID, IP address, hostname, or 'localhost' (default) for local execution. Example: {\"target\":\"10.0.0.5\"}.",
+		func(ctx context.Context, input *OSCPUMemInput, opts ...tool.Option) (*OSGetCPUMemOutput, error) {
+			target := strings.TrimSpace(input.Target)
 			loadavg, _, _ := runOnTarget(ctx, deps, target, "cat", []string{"/proc/loadavg"}, "cat /proc/loadavg")
-			mem, source, err := runOnTarget(ctx, deps, target, "cat", []string{"/proc/meminfo"}, "cat /proc/meminfo")
+			mem, _, err := runOnTarget(ctx, deps, target, "cat", []string{"/proc/meminfo"}, "cat /proc/meminfo")
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
 			uptime, _, _ := runOnTarget(ctx, deps, target, "uptime", nil, "uptime")
-			return map[string]any{"loadavg": loadavg, "meminfo": mem, "uptime": uptime}, source, nil
-		})
+			return &OSGetCPUMemOutput{
+				Loadavg: loadavg,
+				Meminfo: mem,
+				Uptime:  uptime,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func OSGetDiskFS(ctx context.Context, deps PlatformDeps, input OSDiskInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "os_get_disk_fs",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in OSDiskInput) (any, string, error) {
-			target := strings.TrimSpace(in.Target)
-			out, source, err := runOnTarget(ctx, deps, target, "df", []string{"-h"}, "df -h")
+type OSGetDiskFSOutput struct {
+	Filesystem string `json:"filesystem"`
+}
+
+func OSGetDiskFS(ctx context.Context, deps PlatformDeps, input OSDiskInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"os_get_disk_fs",
+		"Get disk and filesystem usage information using 'df -h' command. Shows mounted filesystems, total size, used space, available space, and mount points. Target can be host ID, IP address, hostname, or 'localhost' (default). Example: {\"target\":\"web-server-01\"}.",
+		func(ctx context.Context, input *OSDiskInput, opts ...tool.Option) (*OSGetDiskFSOutput, error) {
+			target := strings.TrimSpace(input.Target)
+			out, _, err := runOnTarget(ctx, deps, target, "df", []string{"-h"}, "df -h")
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			return map[string]any{"filesystem": out}, source, nil
-		})
+			return &OSGetDiskFSOutput{Filesystem: out}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func OSGetNetStat(ctx context.Context, deps PlatformDeps, input OSNetInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "os_get_net_stat",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in OSNetInput) (any, string, error) {
-			target := strings.TrimSpace(in.Target)
-			dev, source, err := runOnTarget(ctx, deps, target, "cat", []string{"/proc/net/dev"}, "cat /proc/net/dev")
+type OSGetNetStatOutput struct {
+	NetDev         string `json:"net_dev"`
+	ListeningPorts string `json:"listening_ports"`
+}
+
+func OSGetNetStat(ctx context.Context, deps PlatformDeps, input OSNetInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"os_get_net_stat",
+		"Get network statistics including network device traffic from /proc/net/dev and listening TCP ports using 'ss -ltn'. Shows bytes sent/received per interface and all listening ports. Target can be host ID, IP address, hostname, or 'localhost' (default). Example: {\"target\":\"192.168.1.10\"}.",
+		func(ctx context.Context, input *OSNetInput, opts ...tool.Option) (*OSGetNetStatOutput, error) {
+			target := strings.TrimSpace(input.Target)
+			dev, _, err := runOnTarget(ctx, deps, target, "cat", []string{"/proc/net/dev"}, "cat /proc/net/dev")
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
 			listen, _, _ := runOnTarget(ctx, deps, target, "ss", []string{"-ltn"}, "ss -ltn")
-			return map[string]any{"net_dev": dev, "listening_ports": listen}, source, nil
-		})
+			return &OSGetNetStatOutput{
+				NetDev:         dev,
+				ListeningPorts: listen,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func OSGetProcessTop(ctx context.Context, deps PlatformDeps, input OSProcessTopInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "os_get_process_top",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in OSProcessTopInput) (any, string, error) {
-			target := strings.TrimSpace(in.Target)
-			limit := in.Limit
+type OSGetProcessTopOutput struct {
+	TopProcesses string `json:"top_processes"`
+	Limit        int    `json:"limit"`
+}
+
+func OSGetProcessTop(ctx context.Context, deps PlatformDeps, input OSProcessTopInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"os_get_process_top",
+		"Get top processes sorted by CPU usage using 'ps aux --sort=-%cpu'. Returns the most CPU-intensive processes. Limit parameter controls how many processes to show (default 10, max 50). Target can be host ID, IP address, hostname, or 'localhost' (default). Example: {\"target\":\"localhost\",\"limit\":20}.",
+		func(ctx context.Context, input *OSProcessTopInput, opts ...tool.Option) (*OSGetProcessTopOutput, error) {
+			target := strings.TrimSpace(input.Target)
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 10
 			}
@@ -464,35 +515,42 @@ func OSGetProcessTop(ctx context.Context, deps PlatformDeps, input OSProcessTopI
 				limit = 50
 			}
 			cmd := fmt.Sprintf("ps aux --sort=-%%cpu | head -n %d", limit+1)
-			out, source, err := runOnTarget(ctx, deps, target, "ps", []string{"aux", "--sort=-%cpu"}, cmd)
+			out, _, err := runOnTarget(ctx, deps, target, "ps", []string{"aux", "--sort=-%cpu"}, cmd)
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			return map[string]any{"top_processes": out, "limit": limit}, source, nil
-		})
+			return &OSGetProcessTopOutput{
+				TopProcesses: out,
+				Limit:        limit,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func OSGetJournalTail(ctx context.Context, deps PlatformDeps, input OSJournalInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "os_get_journal_tail",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskMedium,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in OSJournalInput) (any, string, error) {
-			target := strings.TrimSpace(in.Target)
-			service := strings.TrimSpace(in.Service)
+type OSGetJournalTailOutput struct {
+	Service string `json:"service"`
+	Lines   int    `json:"lines"`
+	Logs    string `json:"logs"`
+}
+
+func OSGetJournalTail(ctx context.Context, deps PlatformDeps, input OSJournalInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"os_get_journal_tail",
+		"Get systemd journal logs for a specific service using 'journalctl -u <service> -n <lines>'. Service name is required. Lines parameter controls how many log lines to retrieve (default 200, max 500). Target can be host ID, IP address, hostname, or 'localhost' (default). Example: {\"target\":\"10.0.0.1\",\"service\":\"nginx\",\"lines\":100}.",
+		func(ctx context.Context, input *OSJournalInput, opts ...tool.Option) (*OSGetJournalTailOutput, error) {
+			target := strings.TrimSpace(input.Target)
+			service := strings.TrimSpace(input.Service)
 			if service == "" {
-				return nil, "validation", NewMissingParam("service", "service is required")
+				return nil, fmt.Errorf("service is required")
 			}
 			if !serviceUnitRegexp.MatchString(service) {
-				return nil, "validation", NewInvalidParam("service", "invalid service name")
+				return nil, fmt.Errorf("invalid service name")
 			}
-			lines := in.Lines
+			lines := input.Lines
 			if lines <= 0 {
 				lines = 200
 			}
@@ -501,37 +559,55 @@ func OSGetJournalTail(ctx context.Context, deps PlatformDeps, input OSJournalInp
 			}
 			localArgs := []string{"-u", service, "-n", strconv.Itoa(lines), "--no-pager"}
 			remoteCmd := fmt.Sprintf("journalctl -u %s -n %d --no-pager", service, lines)
-			out, source, err := runOnTarget(ctx, deps, target, "journalctl", localArgs, remoteCmd)
+			out, _, err := runOnTarget(ctx, deps, target, "journalctl", localArgs, remoteCmd)
 			if err != nil {
-				return nil, source, err
+				return nil, err
 			}
-			return map[string]any{"service": service, "lines": lines, "logs": out}, source, nil
-		})
+			return &OSGetJournalTailOutput{
+				Service: service,
+				Lines:   lines,
+				Logs:    out,
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func OSGetContainerRuntime(ctx context.Context, deps PlatformDeps, input OSContainerRuntimeInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "os_get_container_runtime",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in OSContainerRuntimeInput) (any, string, error) {
-			target := strings.TrimSpace(in.Target)
-			out, source, err := runOnTarget(ctx, deps, target, "docker", []string{"ps", "--format", "{{.ID}} {{.Image}} {{.Status}}"}, "docker ps --format '{{.ID}} {{.Image}} {{.Status}}'")
+type OSGetContainerRuntimeOutput struct {
+	Runtime    string `json:"runtime"`
+	Containers string `json:"containers"`
+}
+
+func OSGetContainerRuntime(ctx context.Context, deps PlatformDeps, input OSContainerRuntimeInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"os_get_container_runtime",
+		"Get container runtime information and running containers. Detects Docker or containerd. For Docker, runs 'docker ps' to show container ID, image, and status. For containerd, runs 'ctr -n k8s.io containers list'. Target can be host ID, IP address, hostname, or 'localhost' (default). Example: {\"target\":\"node-01\"}.",
+		func(ctx context.Context, input *OSContainerRuntimeInput, opts ...tool.Option) (*OSGetContainerRuntimeOutput, error) {
+			target := strings.TrimSpace(input.Target)
+			out, _, err := runOnTarget(ctx, deps, target, "docker", []string{"ps", "--format", "{{.ID}} {{.Image}} {{.Status}}"}, "docker ps --format '{{.ID}} {{.Image}} {{.Status}}'")
 			if err == nil {
-				return map[string]any{"runtime": "docker", "containers": out}, source, nil
+				return &OSGetContainerRuntimeOutput{
+					Runtime:    "docker",
+					Containers: out,
+				}, nil
 			}
-			out2, source2, err2 := runOnTarget(ctx, deps, target, "ctr", []string{"-n", "k8s.io", "containers", "list"}, "ctr -n k8s.io containers list")
+			out2, _, err2 := runOnTarget(ctx, deps, target, "ctr", []string{"-n", "k8s.io", "containers", "list"}, "ctr -n k8s.io containers list")
 			if err2 == nil {
-				return map[string]any{"runtime": "containerd", "containers": out2}, source2, nil
+				return &OSGetContainerRuntimeOutput{
+					Runtime:    "containerd",
+					Containers: out2,
+				}, nil
 			}
-			return nil, source2, fmt.Errorf("docker/containerd unavailable: %v / %v", err, err2)
-		})
+			return nil, fmt.Errorf("docker/containerd unavailable: %v / %v", err, err2)
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 func executeHostCommand(deps PlatformDeps, node *model.Node, command string) (string, error) {
@@ -573,7 +649,7 @@ func loadNodePrivateKey(deps PlatformDeps, node *model.Node) (string, string, er
 
 func normalizeHostIDs(raw []int) ([]uint64, error) {
 	if len(raw) == 0 {
-		return nil, NewMissingParam("host_ids", "host_ids is required")
+		return nil, fmt.Errorf("host_ids is required")
 	}
 	uniq := map[uint64]struct{}{}
 	out := make([]uint64, 0, len(raw))
@@ -589,7 +665,7 @@ func normalizeHostIDs(raw []int) ([]uint64, error) {
 		out = append(out, uid)
 	}
 	if len(out) == 0 {
-		return nil, NewInvalidParam("host_ids", "host_ids must contain at least one positive id")
+		return nil, fmt.Errorf("host_ids must contain at least one positive id")
 	}
 	return out, nil
 }
@@ -642,7 +718,7 @@ func loadHostBatchTargets(deps PlatformDeps, hostIDs []uint64) ([]map[string]any
 func classifyHostCommand(cmd string) (class string, risk string, blocked bool) {
 	trimmed := strings.ToLower(strings.TrimSpace(cmd))
 	if isReadonlyHostCommand(cmd) {
-		return "readonly", string(ToolRiskLow), false
+		return "readonly", "low", false
 	}
 	dangerous := []string{
 		"rm -rf /", "mkfs", "shutdown", "poweroff", "reboot", "init 0",
@@ -650,10 +726,10 @@ func classifyHostCommand(cmd string) (class string, risk string, blocked bool) {
 	}
 	for _, keyword := range dangerous {
 		if strings.Contains(trimmed, keyword) {
-			return "dangerous", string(ToolRiskHigh), true
+			return "dangerous", "high", true
 		}
 	}
-	return "mutating", string(ToolRiskMedium), false
+	return "mutating", "medium", false
 }
 
 func parseHostLabels(raw string) []string {

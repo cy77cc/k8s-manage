@@ -2,35 +2,9 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"sort"
-	"strings"
 
-	"github.com/cloudwego/eino/components/tool/utils"
-	"github.com/cloudwego/eino/schema"
+	"github.com/cloudwego/eino/components/tool"
 )
-
-func addLocalTool[I any](tools *[]RegisteredTool, meta ToolMeta, fn func(ctx context.Context, input I) (ToolResult, error)) error {
-	meta = normalizeToolMeta(meta)
-	// 从函数参数中推断 ToolInfo
-	info, err := utils.GoStruct2ToolInfo[I](meta.Name, meta.Description)
-	if err != nil {
-		return err
-	}
-	schemaMap, required := toolInfoSchema(info)
-	meta.Schema = schemaMap
-	if len(meta.Required) == 0 {
-		meta.Required = required
-	}
-	meta = normalizeToolMeta(meta)
-	t := utils.NewTool(info, fn)
-	if t == nil {
-		return fmt.Errorf("create tool %s failed", meta.Name)
-	}
-	*tools = append(*tools, RegisteredTool{Meta: meta, Tool: t})
-	return nil
-}
 
 type Registry struct {
 	byName     map[string]RegisteredTool
@@ -81,964 +55,509 @@ func (r *Registry) ByCategory(category ToolCategory) []RegisteredTool {
 	return append([]RegisteredTool(nil), items...)
 }
 
-var defaultEnumSourceByField = map[string]string{
-	"host_id":       "host_list_inventory",
-	"cluster_id":    "cluster_list_inventory",
-	"service_id":    "service_list_inventory",
-	"target_id":     "deployment_target_list",
-	"credential_id": "credential_list",
-	"pipeline_id":   "cicd_pipeline_list",
-	"job_id":        "job_list",
-	"user_id":       "user_list",
-	"app_id":        "config_app_list",
+func registerTool(tools *[]RegisteredTool, meta ToolMeta, t tool.InvokableTool) {
+	meta = normalizeToolMeta(meta)
+	*tools = append(*tools, RegisteredTool{Meta: meta, Tool: t})
+}
+
+func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
+	tools := make([]RegisteredTool, 0, 60)
+	ctx := context.Background()
+
+	// OS and Host tools
+	registerTool(&tools, ToolMeta{
+		Name:        "os_get_cpu_mem",
+		Description: "Get CPU, memory and load average information from a target host.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, osGetCPUMem(ctx, deps, OSCPUMemInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "os_get_disk_fs",
+		Description: "Get disk and filesystem usage information using 'df -h' command.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, osGetDiskFS(ctx, deps, OSDiskInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "os_get_net_stat",
+		Description: "Get network statistics including device traffic and listening ports.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, osGetNetStat(ctx, deps, OSNetInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "os_get_process_top",
+		Description: "Get top processes sorted by CPU usage.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, osGetProcessTop(ctx, deps, OSProcessTopInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "os_get_journal_tail",
+		Description: "Get systemd journal logs for a specific service.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, osGetJournalTail(ctx, deps, OSJournalInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "os_get_container_runtime",
+		Description: "Get container runtime information and running containers.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, osGetContainerRuntime(ctx, deps, OSContainerRuntimeInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "host_ssh_exec_readonly",
+		Description: "Execute a readonly SSH command on a host.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, hostSSHReadonly(ctx, deps, HostSSHReadonlyInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "host_exec",
+		Description: "Execute a readonly command on a single host via SSH.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, hostExec(ctx, deps, HostExecInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "host_list_inventory",
+		Description: "Query host inventory list with detailed information.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, hostListInventory(ctx, deps, HostInventoryInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "host_batch",
+		Description: "Execute a command on multiple hosts in batch.",
+		Mode:        ToolModeMutating,
+		Risk:        ToolRiskHigh,
+		Provider:    "local",
+		Permission:  "ai:tool:execute",
+	}, hostBatch(ctx, deps, HostBatchInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "host_batch_exec_preview",
+		Description: "Preview batch command execution before running.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, hostBatchExecPreview(ctx, deps, HostBatchExecPreviewInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "host_batch_exec_apply",
+		Description: "Execute a command on multiple hosts after preview.",
+		Mode:        ToolModeMutating,
+		Risk:        ToolRiskHigh,
+		Provider:    "local",
+		Permission:  "ai:tool:execute",
+	}, hostBatchExecApply(ctx, deps, HostBatchExecApplyInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "host_batch_status_update",
+		Description: "Batch update host status to online/offline/maintenance.",
+		Mode:        ToolModeMutating,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:execute",
+	}, hostBatchStatusUpdate(ctx, deps, HostBatchStatusInput{}))
+
+	// Kubernetes tools
+	registerTool(&tools, ToolMeta{
+		Name:        "k8s_query",
+		Description: "Query Kubernetes resources with filtering options.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, k8sQuery(ctx, deps, K8sQueryInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "k8s_list_resources",
+		Description: "List Kubernetes resources of a specific type.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, k8sListResources(ctx, deps, K8sListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "k8s_events",
+		Description: "Query Kubernetes events with optional filtering.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, k8sEvents(ctx, deps, K8sEventsQueryInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "k8s_get_events",
+		Description: "Get Kubernetes events from a namespace.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, k8sGetEvents(ctx, deps, K8sEventsInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "k8s_logs",
+		Description: "Get logs from a Kubernetes pod.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, k8sLogs(ctx, deps, K8sLogsInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "k8s_get_pod_logs",
+		Description: "Get logs from a specific Kubernetes pod.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, k8sGetPodLogs(ctx, deps, K8sPodLogsInput{}))
+
+	// Service tools
+	registerTool(&tools, ToolMeta{
+		Name:        "service_get_detail",
+		Description: "Get detailed information about a specific service.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, serviceGetDetail(ctx, deps, ServiceDetailInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "service_status",
+		Description: "Get current status and basic runtime information of a service.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, serviceStatus(ctx, deps, ServiceStatusInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "service_deploy_preview",
+		Description: "Preview a service deployment without applying changes.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, serviceDeployPreview(ctx, deps, ServiceDeployPreviewInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "service_deploy_apply",
+		Description: "Execute a service deployment to a target cluster.",
+		Mode:        ToolModeMutating,
+		Risk:        ToolRiskHigh,
+		Provider:    "local",
+		Permission:  "ai:tool:execute",
+	}, serviceDeployApply(ctx, deps, ServiceDeployApplyInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "service_deploy",
+		Description: "Unified service deployment tool supporting both preview and apply modes.",
+		Mode:        ToolModeMutating,
+		Risk:        ToolRiskHigh,
+		Provider:    "local",
+		Permission:  "ai:tool:execute",
+	}, serviceDeploy(ctx, deps, ServiceDeployInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "service_catalog_list",
+		Description: "Query the service catalog with filtering options.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, serviceCatalogList(ctx, deps, ServiceCatalogListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "service_category_tree",
+		Description: "Get the service category tree structure.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, serviceCategoryTree(ctx, deps))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "service_visibility_check",
+		Description: "Check the visibility configuration of a service.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, serviceVisibilityCheck(ctx, deps, ServiceVisibilityCheckInput{}))
+
+	// Monitor tools
+	registerTool(&tools, ToolMeta{
+		Name:        "monitor_alert_rule_list",
+		Description: "Query the list of alert rules configured in the monitoring system.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, monitorAlertRuleList(ctx, deps, MonitorAlertRuleListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "monitor_alert",
+		Description: "Query active/firing alert events from the monitoring system.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, monitorAlert(ctx, deps, MonitorAlertInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "monitor_alert_active",
+		Description: "Query all active/firing alerts currently affecting the system.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, monitorAlertActive(ctx, deps, MonitorAlertActiveInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "monitor_metric",
+		Description: "Query time-series metric data from the monitoring system.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, monitorMetric(ctx, deps, MonitorMetricInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "monitor_metric_query",
+		Description: "Query metric data points over a time range for analysis.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, monitorMetricQuery(ctx, deps, MonitorMetricQueryInput{}))
+
+	// CICD tools
+	registerTool(&tools, ToolMeta{
+		Name:        "cicd_pipeline_list",
+		Description: "Query CI pipeline list with filtering options.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, cicdPipelineList(ctx, deps, CICDPipelineListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "cicd_pipeline_status",
+		Description: "Query pipeline status with recent runs.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, cicdPipelineStatus(ctx, deps, CICDPipelineStatusInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "cicd_pipeline_trigger",
+		Description: "Trigger pipeline build.",
+		Mode:        ToolModeMutating,
+		Risk:        ToolRiskHigh,
+		Provider:    "local",
+		Permission:  "ai:tool:execute",
+	}, cicdPipelineTrigger(ctx, deps, CICDPipelineTriggerInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "job_list",
+		Description: "Query job list with filtering options.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, jobList(ctx, deps, JobListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "job_execution_status",
+		Description: "Query job execution status.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, jobExecutionStatus(ctx, deps, JobExecutionStatusInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "job_run",
+		Description: "Manually trigger job execution.",
+		Mode:        ToolModeMutating,
+		Risk:        ToolRiskMedium,
+		Provider:    "local",
+		Permission:  "ai:tool:execute",
+	}, jobRun(ctx, deps, JobRunInput{}))
+
+	// Deployment tools
+	registerTool(&tools, ToolMeta{
+		Name:        "deployment_target_list",
+		Description: "Query deployment target list with filtering options.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, deploymentTargetList(ctx, deps, DeploymentTargetListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "deployment_target_detail",
+		Description: "Query deployment target detail.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, deploymentTargetDetail(ctx, deps, DeploymentTargetDetailInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "deployment_bootstrap_status",
+		Description: "Query deployment target bootstrap status.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, deploymentBootstrapStatus(ctx, deps, DeploymentBootstrapStatusInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "config_app_list",
+		Description: "Query config app list with filtering options.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, configAppList(ctx, deps, ConfigAppListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "config_item_get",
+		Description: "Query config item value.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, configItemGet(ctx, deps, ConfigItemGetInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "config_diff",
+		Description: "Compare config difference between environments.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, configDiff(ctx, deps, ConfigDiffInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "cluster_list_inventory",
+		Description: "Query cluster inventory list with filtering options.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, clusterListInventory(ctx, deps, ClusterInventoryInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "service_list_inventory",
+		Description: "Query service inventory list with filtering options.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, serviceListInventory(ctx, deps, ServiceInventoryInput{}))
+
+	// Governance tools
+	registerTool(&tools, ToolMeta{
+		Name:        "user_list",
+		Description: "Query the list of users in the platform.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, userList(ctx, deps, UserListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "role_list",
+		Description: "Query the list of roles in the platform.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, roleList(ctx, deps, RoleListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "permission_check",
+		Description: "Check if a user has a specific permission.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, permissionCheck(ctx, deps, PermissionCheckInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "topology_get",
+		Description: "Query service topology showing relationships.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, topologyGet(ctx, deps, TopologyGetInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "audit_log_search",
+		Description: "Search audit logs for platform activities.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, auditLogSearch(ctx, deps, AuditLogSearchInput{}))
+
+	// Infrastructure tools
+	registerTool(&tools, ToolMeta{
+		Name:        "credential_list",
+		Description: "Query cluster credential list for accessing Kubernetes clusters.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, credentialList(ctx, deps, CredentialListInput{}))
+
+	registerTool(&tools, ToolMeta{
+		Name:        "credential_test",
+		Description: "Get credential connectivity test result.",
+		Mode:        ToolModeReadonly,
+		Risk:        ToolRiskLow,
+		Provider:    "local",
+		Permission:  "ai:tool:read",
+	}, credentialTest(ctx, deps, CredentialTestInput{}))
+
+	return tools, nil
 }
 
 func normalizeToolMeta(meta ToolMeta) ToolMeta {
-	if meta.EnumSources == nil {
-		meta.EnumSources = map[string]string{}
-	}
-	if meta.ParamHints == nil {
-		meta.ParamHints = map[string]string{}
-	}
-	for _, field := range meta.Required {
-		source, exists := meta.EnumSources[field]
-		if exists && strings.TrimSpace(source) != "" {
-			continue
-		}
-		if mapped := strings.TrimSpace(defaultEnumSourceByField[field]); mapped != "" {
-			meta.EnumSources[field] = mapped
-		}
-	}
 	if meta.Domain == "" {
 		meta.Domain = classifyToolDomain(meta.Name)
 	}
 	if meta.Category == "" {
 		meta.Category = classifyToolCategory(meta)
 	}
-	meta.Description = normalizeToolDescription(meta)
 	return meta
-}
-
-func normalizeToolDescription(meta ToolMeta) string {
-	base := strings.TrimSpace(meta.Description)
-	if base == "" {
-		base = "执行平台工具操作。"
-	}
-	if !strings.Contains(base, "。") {
-		base += "。"
-	}
-	parts := []string{base}
-	if len(meta.Required) > 0 {
-		req := append([]string{}, meta.Required...)
-		sort.Strings(req)
-		parts = append(parts, fmt.Sprintf("必填参数: %s。", strings.Join(req, ", ")))
-	}
-	if len(meta.DefaultHint) > 0 {
-		keys := make([]string, 0, len(meta.DefaultHint))
-		for k := range meta.DefaultHint {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		defaultItems := make([]string, 0, len(keys))
-		for _, k := range keys {
-			defaultItems = append(defaultItems, fmt.Sprintf("%s=%v", k, meta.DefaultHint[k]))
-		}
-		parts = append(parts, fmt.Sprintf("默认值: %s。", strings.Join(defaultItems, ", ")))
-	}
-	if len(meta.EnumSources) > 0 {
-		keys := make([]string, 0, len(meta.EnumSources))
-		for k := range meta.EnumSources {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		sourceItems := make([]string, 0, len(keys))
-		for _, k := range keys {
-			source := strings.TrimSpace(meta.EnumSources[k])
-			if source == "" {
-				continue
-			}
-			sourceItems = append(sourceItems, fmt.Sprintf("%s 可从 %s 获取", k, source))
-		}
-		if len(sourceItems) > 0 {
-			parts = append(parts, fmt.Sprintf("参数来源: %s。", strings.Join(sourceItems, "；")))
-		}
-	}
-	if len(meta.Examples) > 0 {
-		parts = append(parts, fmt.Sprintf("示例: %s。", strings.TrimSpace(meta.Examples[0])))
-	}
-	return strings.Join(parts, " ")
-}
-
-func BuildLocalTools(deps PlatformDeps) ([]RegisteredTool, error) {
-	tools := make([]RegisteredTool, 0, 24)
-
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "os_get_cpu_mem",
-			Description: "读取 CPU/内存/负载概览。默认 target=localhost。示例: {\"target\":\"10.0.0.8\"}",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"target": "localhost"},
-		},
-		func(ctx context.Context, input OSCPUMemInput) (ToolResult, error) {
-			return osGetCPUMem(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "os_get_disk_fs",
-			Description: "读取磁盘与文件系统占用。默认 target=localhost；target 支持主机 ID/IP/主机名（如 香港云服务器）。", Mode: ToolModeReadonly,
-			Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"target": "localhost"}},
-		func(ctx context.Context, input OSDiskInput) (ToolResult, error) {
-			return osGetDiskFS(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "os_get_net_stat",
-			Description: "读取网络连接与监听端口摘要。默认 target=localhost。", Mode: ToolModeReadonly,
-			Risk: ToolRiskLow, Provider: "local", Permission: "ai:tool:read", DefaultHint: map[string]any{"target": "localhost"}},
-		func(ctx context.Context, input OSNetInput) (ToolResult, error) {
-			return osGetNetStat(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "os_get_process_top",
-			Description: "读取高占用进程列表。limit 默认 10。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"target": "localhost", "limit": 10},
-		},
-		func(ctx context.Context, input OSProcessTopInput) (ToolResult, error) {
-			return osGetProcessTop(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "os_get_journal_tail",
-			Description: "按服务名读取系统日志窗口。service 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"service"},
-			DefaultHint: map[string]any{"target": "localhost", "lines": 200},
-		},
-		func(ctx context.Context, input OSJournalInput) (ToolResult, error) {
-			return osGetJournalTail(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "os_get_container_runtime",
-			Description: "读取容器运行时摘要。默认 target=localhost。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"target": "localhost"},
-		},
-		func(ctx context.Context, input OSContainerRuntimeInput) (ToolResult, error) {
-			return osGetContainerRuntime(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "k8s_query",
-			Description: "统一查询 K8s 资源，resource 必填，支持 name/label 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"resource"},
-			DefaultHint: map[string]any{"namespace": "default", "limit": 50},
-		},
-		func(ctx context.Context, input K8sQueryInput) (ToolResult, error) {
-			return k8sQuery(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "k8s_events",
-			Description: "查询 K8s 事件，支持按 kind/name 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"namespace": "default", "limit": 50},
-		},
-		func(ctx context.Context, input K8sEventsQueryInput) (ToolResult, error) {
-			return k8sEvents(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "k8s_logs",
-			Description: "查询 Pod 日志，pod 必填，可选 container 和 tail_lines。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"pod"},
-			DefaultHint: map[string]any{"namespace": "default", "tail_lines": 200},
-		},
-		func(ctx context.Context, input K8sLogsInput) (ToolResult, error) {
-			return k8sLogs(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "k8s_list_resources",
-			Description: "列出 K8s 资源。resource 必填，可选 pods/services/deployments/nodes。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"resource"},
-			DefaultHint: map[string]any{"namespace": "default", "limit": 50},
-		},
-		func(ctx context.Context, input K8sListInput) (ToolResult, error) {
-			return k8sListResources(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "k8s_get_events",
-			Description: "读取 K8s 事件，namespace 默认 default。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"namespace": "default", "limit": 50},
-		},
-		func(ctx context.Context, input K8sEventsInput) (ToolResult, error) {
-			return k8sGetEvents(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "k8s_get_pod_logs",
-			Description: "读取 Pod 日志，pod 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"pod"},
-			DefaultHint: map[string]any{"namespace": "default", "tail_lines": 200},
-		},
-		func(ctx context.Context, input K8sPodLogsInput) (ToolResult, error) {
-			return k8sGetPodLogs(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_status",
-			Description: "查询服务状态与基础运行信息，service_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"service_id"},
-		},
-		func(ctx context.Context, input ServiceStatusInput) (ToolResult, error) {
-			return serviceStatus(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_deploy",
-			Description: "统一服务部署工具，preview=true 返回预览，apply=true 执行部署。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskHigh,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"service_id", "cluster_id"},
-			DefaultHint: map[string]any{"preview": true, "apply": false},
-		},
-		func(ctx context.Context, input ServiceDeployInput) (ToolResult, error) {
-			return serviceDeploy(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_get_detail",
-			Description: "查询服务详情，service_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"service_id"},
-		},
-		func(ctx context.Context, input ServiceDetailInput) (ToolResult, error) {
-			return serviceGetDetail(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_deploy_preview",
-			Description: "预览服务部署动作，service_id/cluster_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"service_id", "cluster_id"},
-		},
-		func(ctx context.Context, input ServiceDeployPreviewInput) (ToolResult, error) {
-			return serviceDeployPreview(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_deploy_apply",
-			Description: "执行服务部署（需审批），service_id/cluster_id 必填。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskHigh,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"service_id", "cluster_id"},
-		},
-		func(ctx context.Context, input ServiceDeployApplyInput) (ToolResult, error) {
-			return serviceDeployApply(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_catalog_list",
-			Description: "查询服务目录，支持 category_id/keyword 过滤。示例: {\"category_id\":2,\"keyword\":\"payment\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input ServiceCatalogListInput) (ToolResult, error) {
-			return serviceCatalogList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_category_tree",
-			Description: "查询服务分类树。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, _ struct{}) (ToolResult, error) {
-			return serviceCategoryTree(ctx, deps)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_visibility_check",
-			Description: "查询服务可见性配置，service_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"service_id"},
-		},
-		func(ctx context.Context, input ServiceVisibilityCheckInput) (ToolResult, error) {
-			return serviceVisibilityCheck(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "deployment_target_list",
-			Description: "查询部署目标列表，支持 env/status/keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input DeploymentTargetListInput) (ToolResult, error) {
-			return deploymentTargetList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "deployment_target_detail",
-			Description: "查询部署目标详情，target_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"target_id"},
-		},
-		func(ctx context.Context, input DeploymentTargetDetailInput) (ToolResult, error) {
-			return deploymentTargetDetail(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "deployment_bootstrap_status",
-			Description: "查询部署目标引导状态，target_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"target_id"},
-		},
-		func(ctx context.Context, input DeploymentBootstrapStatusInput) (ToolResult, error) {
-			return deploymentBootstrapStatus(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "credential_list",
-			Description: "查询凭证列表，支持 type/keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input CredentialListInput) (ToolResult, error) {
-			return credentialList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "credential_test",
-			Description: "查询凭证连通性测试结果，credential_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"credential_id"},
-		},
-		func(ctx context.Context, input CredentialTestInput) (ToolResult, error) {
-			return credentialTest(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "cicd_pipeline_list",
-			Description: "查询流水线列表，支持 status/keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input CICDPipelineListInput) (ToolResult, error) {
-			return cicdPipelineList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "cicd_pipeline_status",
-			Description: "查询流水线状态，pipeline_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"pipeline_id"},
-		},
-		func(ctx context.Context, input CICDPipelineStatusInput) (ToolResult, error) {
-			return cicdPipelineStatus(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "cicd_pipeline_trigger",
-			Description: "触发流水线构建，pipeline_id/branch 必填。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskHigh,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"pipeline_id", "branch"},
-		},
-		func(ctx context.Context, input CICDPipelineTriggerInput) (ToolResult, error) {
-			return cicdPipelineTrigger(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "job_list",
-			Description: "查询任务列表，支持 status/keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input JobListInput) (ToolResult, error) {
-			return jobList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "job_execution_status",
-			Description: "查询任务执行状态，job_id 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"job_id"},
-		},
-		func(ctx context.Context, input JobExecutionStatusInput) (ToolResult, error) {
-			return jobExecutionStatus(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "job_run",
-			Description: "手动触发任务，job_id 必填。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"job_id"},
-		},
-		func(ctx context.Context, input JobRunInput) (ToolResult, error) {
-			return jobRun(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "config_app_list",
-			Description: "查询配置应用列表，支持 keyword/env 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input ConfigAppListInput) (ToolResult, error) {
-			return configAppList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "config_item_get",
-			Description: "查询配置项，app_id/key 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"app_id", "key"},
-		},
-		func(ctx context.Context, input ConfigItemGetInput) (ToolResult, error) {
-			return configItemGet(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "config_diff",
-			Description: "对比配置差异，app_id/env_a/env_b 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"app_id", "env_a", "env_b"},
-		},
-		func(ctx context.Context, input ConfigDiffInput) (ToolResult, error) {
-			return configDiff(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "monitor_alert",
-			Description: "查询活跃告警，支持 severity/service_id 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-		},
-		func(ctx context.Context, input MonitorAlertInput) (ToolResult, error) {
-			return monitorAlert(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "monitor_metric",
-			Description: "查询监控指标，query 必填，可选 time_range/step。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"query"},
-			DefaultHint: map[string]any{"time_range": "1h", "step": 60},
-		},
-		func(ctx context.Context, input MonitorMetricInput) (ToolResult, error) {
-			return monitorMetric(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "monitor_alert_rule_list",
-			Description: "查询告警规则列表，支持 status/keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input MonitorAlertRuleListInput) (ToolResult, error) {
-			return monitorAlertRuleList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "monitor_alert_active",
-			Description: "查询活跃告警，支持 severity/service_id 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input MonitorAlertActiveInput) (ToolResult, error) {
-			return monitorAlertActive(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "monitor_metric_query",
-			Description: "查询指标数据，query 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"query"},
-		},
-		func(ctx context.Context, input MonitorMetricQueryInput) (ToolResult, error) {
-			return monitorMetricQuery(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "topology_get",
-			Description: "查询服务拓扑，支持 service_id/depth。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input TopologyGetInput) (ToolResult, error) {
-			return topologyGet(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "audit_log_search",
-			Description: "查询审计日志，支持 time_range/resource_type/action/user_id。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input AuditLogSearchInput) (ToolResult, error) {
-			return auditLogSearch(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "user_list",
-			Description: "查询用户列表，支持 keyword/status 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input UserListInput) (ToolResult, error) {
-			return userList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "role_list",
-			Description: "查询角色列表，支持 keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-		},
-		func(ctx context.Context, input RoleListInput) (ToolResult, error) {
-			return roleList(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "permission_check",
-			Description: "检查权限，user_id/resource/action 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"user_id", "resource", "action"},
-		},
-		func(ctx context.Context, input PermissionCheckInput) (ToolResult, error) {
-			return permissionCheck(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "host_exec",
-			Description: "在单台主机执行只读命令，host_id/command 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"host_id", "command"},
-		},
-		func(ctx context.Context, input HostExecInput) (ToolResult, error) {
-			return hostExec(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "host_ssh_exec_readonly",
-			Description: "远程只读命令执行，host_id/command 必填。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"host_id", "command"},
-		},
-		func(ctx context.Context, input HostSSHReadonlyInput) (ToolResult, error) {
-			return hostSSHReadonly(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "host_list_inventory",
-			Description: "查询主机资产清单，可按 status/keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-		},
-		func(ctx context.Context, input HostInventoryInput) (ToolResult, error) {
-			return hostListInventory(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "cluster_list_inventory",
-			Description: "查询集群资产清单，可按 status/keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-		},
-		func(ctx context.Context, input ClusterInventoryInput) (ToolResult, error) {
-			return clusterListInventory(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "service_list_inventory",
-			Description: "查询服务资产清单，可按 runtime_type/env/status/keyword 过滤。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-		},
-		func(ctx context.Context, input ServiceInventoryInput) (ToolResult, error) {
-			return serviceListInventory(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "host_batch",
-			Description: "批量执行主机命令（需审批），禁止危险命令。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskHigh,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"host_ids", "command"},
-		},
-		func(ctx context.Context, input HostBatchInput) (ToolResult, error) {
-			return hostBatch(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "host_batch_exec_preview",
-			Description: "批量命令执行预检查，返回目标主机与风险评估。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"host_ids", "command"},
-		},
-		func(ctx context.Context, input HostBatchExecPreviewInput) (ToolResult, error) {
-			return hostBatchExecPreview(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "host_batch_exec_apply",
-			Description: "批量执行主机命令（需审批），禁止危险命令。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskHigh,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"host_ids", "command"},
-		},
-		func(ctx context.Context, input HostBatchExecApplyInput) (ToolResult, error) {
-			return hostBatchExecApply(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-	if err := addLocalTool(
-		&tools,
-		ToolMeta{
-			Name:        "host_batch_status_update",
-			Description: "批量更新主机状态（online/offline/maintenance，需审批）。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"host_ids", "action"},
-		},
-		func(ctx context.Context, input HostBatchStatusInput) (ToolResult, error) {
-			return hostBatchStatusUpdate(ctx, deps, input)
-		}); err != nil {
-		return nil, err
-	}
-
-	return tools, nil
-}
-
-func toolInfoSchema(info *schema.ToolInfo) (map[string]any, []string) {
-	if info == nil || info.ParamsOneOf == nil {
-		return nil, nil
-	}
-	js, err := info.ParamsOneOf.ToJSONSchema()
-	if err != nil || js == nil {
-		return nil, nil
-	}
-	raw, err := json.Marshal(js)
-	if err != nil {
-		return nil, nil
-	}
-	m := map[string]any{}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, nil
-	}
-	req := make([]string, 0)
-	if list, ok := m["required"].([]any); ok {
-		for _, item := range list {
-			s := fmt.Sprintf("%v", item)
-			if s != "" {
-				req = append(req, s)
-			}
-		}
-	}
-	return m, req
 }

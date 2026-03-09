@@ -6,29 +6,26 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/components/tool/utils"
 	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
 
-func DeploymentTargetList(ctx context.Context, deps PlatformDeps, input DeploymentTargetListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "deployment_target_list",
-			Description: "查询部署目标列表。可选参数 env/status/keyword/limit。示例: {\"env\":\"prod\",\"limit\":20}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"deployment:targets"},
-		},
-		input,
-		func(in DeploymentTargetListInput) (any, string, error) {
+type DeploymentTargetListOutput struct {
+	Total int              `json:"total"`
+	List  []map[string]any `json:"list"`
+}
+
+func DeploymentTargetList(ctx context.Context, deps PlatformDeps, input DeploymentTargetListInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"deployment_target_list",
+		"Query deployment target list. Optional parameters: env/status/keyword/limit. Example: {\"env\":\"prod\",\"limit\":20}.",
+		func(ctx context.Context, input *DeploymentTargetListInput, opts ...tool.Option) (*DeploymentTargetListOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -36,19 +33,19 @@ func DeploymentTargetList(ctx context.Context, deps PlatformDeps, input Deployme
 				limit = 200
 			}
 			query := deps.DB.Model(&model.DeploymentTarget{})
-			if env := strings.TrimSpace(in.Env); env != "" {
+			if env := strings.TrimSpace(input.Env); env != "" {
 				query = query.Where("env = ?", env)
 			}
-			if status := strings.TrimSpace(in.Status); status != "" {
+			if status := strings.TrimSpace(input.Status); status != "" {
 				query = query.Where("status = ?", status)
 			}
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ?", pattern)
 			}
 			var rows []model.DeploymentTarget
 			if err := query.Order("id desc").Limit(limit).Find(&rows).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			list := make([]map[string]any, 0, len(rows))
 			for _, item := range rows {
@@ -64,111 +61,117 @@ func DeploymentTargetList(ctx context.Context, deps PlatformDeps, input Deployme
 					"readiness_status": item.ReadinessStatus,
 				})
 			}
-			return map[string]any{"total": len(list), "list": list}, "db", nil
+			return &DeploymentTargetListOutput{
+				Total: len(list),
+				List:  list,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func DeploymentTargetDetail(ctx context.Context, deps PlatformDeps, input DeploymentTargetDetailInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "deployment_target_detail",
-			Description: "查询部署目标详情。target_id 必填。示例: {\"target_id\":12}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"target_id"},
-			EnumSources: map[string]string{"target_id": "deployment_target_list"},
-			SceneScope:  []string{"deployment:targets"},
-		},
-		input,
-		func(in DeploymentTargetDetailInput) (any, string, error) {
+type DeploymentTargetDetailOutput struct {
+	Target model.DeploymentTarget       `json:"target"`
+	Nodes  []model.DeploymentTargetNode `json:"nodes"`
+}
+
+func DeploymentTargetDetail(ctx context.Context, deps PlatformDeps, input DeploymentTargetDetailInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"deployment_target_detail",
+		"Query deployment target detail. target_id is required. Example: {\"target_id\":12}.",
+		func(ctx context.Context, input *DeploymentTargetDetailInput, opts ...tool.Option) (*DeploymentTargetDetailOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.TargetID <= 0 {
-				return nil, "validation", NewMissingParam("target_id", "target_id is required")
+			if input.TargetID <= 0 {
+				return nil, fmt.Errorf("target_id is required")
 			}
 			var target model.DeploymentTarget
-			if err := deps.DB.First(&target, in.TargetID).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.First(&target, input.TargetID).Error; err != nil {
+				return nil, err
 			}
 			var nodes []model.DeploymentTargetNode
 			_ = deps.DB.Where("target_id = ?", target.ID).Order("id asc").Find(&nodes).Error
-			return map[string]any{"target": target, "nodes": nodes}, "db", nil
+			return &DeploymentTargetDetailOutput{
+				Target: target,
+				Nodes:  nodes,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func DeploymentBootstrapStatus(ctx context.Context, deps PlatformDeps, input DeploymentBootstrapStatusInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "deployment_bootstrap_status",
-			Description: "查询部署目标环境引导状态。target_id 必填。示例: {\"target_id\":12}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"target_id"},
-			EnumSources: map[string]string{"target_id": "deployment_target_list"},
-			SceneScope:  []string{"deployment:targets", "deployment:clusters"},
-		},
-		input,
-		func(in DeploymentBootstrapStatusInput) (any, string, error) {
+type DeploymentBootstrapStatusOutput struct {
+	TargetID        uint                              `json:"target_id"`
+	TargetName      string                            `json:"target_name"`
+	BootstrapJobID  string                            `json:"bootstrap_job_id"`
+	TargetStatus    string                            `json:"target_status"`
+	ReadinessStatus string                            `json:"readiness_status"`
+	BootstrapJob    *model.EnvironmentInstallJob      `json:"bootstrap_job,omitempty"`
+	Steps           []model.EnvironmentInstallJobStep `json:"steps,omitempty"`
+}
+
+func DeploymentBootstrapStatus(ctx context.Context, deps PlatformDeps, input DeploymentBootstrapStatusInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"deployment_bootstrap_status",
+		"Query deployment target bootstrap status. target_id is required. Example: {\"target_id\":12}.",
+		func(ctx context.Context, input *DeploymentBootstrapStatusInput, opts ...tool.Option) (*DeploymentBootstrapStatusOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.TargetID <= 0 {
-				return nil, "validation", NewMissingParam("target_id", "target_id is required")
+			if input.TargetID <= 0 {
+				return nil, fmt.Errorf("target_id is required")
 			}
 			var target model.DeploymentTarget
-			if err := deps.DB.First(&target, in.TargetID).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.First(&target, input.TargetID).Error; err != nil {
+				return nil, err
 			}
-			result := map[string]any{
-				"target_id":        target.ID,
-				"target_name":      target.Name,
-				"bootstrap_job_id": target.BootstrapJobID,
-				"target_status":    target.Status,
-				"readiness_status": target.ReadinessStatus,
+			result := &DeploymentBootstrapStatusOutput{
+				TargetID:        target.ID,
+				TargetName:      target.Name,
+				BootstrapJobID:  target.BootstrapJobID,
+				TargetStatus:    target.Status,
+				ReadinessStatus: target.ReadinessStatus,
 			}
 			if strings.TrimSpace(target.BootstrapJobID) == "" {
-				return result, "db", nil
+				return result, nil
 			}
 			var job model.EnvironmentInstallJob
 			if err := deps.DB.Where("id = ?", target.BootstrapJobID).First(&job).Error; err == nil {
-				result["bootstrap_job"] = job
+				result.BootstrapJob = &job
 				var steps []model.EnvironmentInstallJobStep
 				_ = deps.DB.Where("job_id = ?", job.ID).Order("id asc").Find(&steps).Error
-				result["steps"] = steps
+				result.Steps = steps
 			}
-			return result, "db", nil
+			return result, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ConfigAppList(ctx context.Context, deps PlatformDeps, input ConfigAppListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "config_app_list",
-			Description: "查询配置应用列表。可选参数 keyword/env/limit。示例: {\"env\":\"prod\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"configcenter"},
-		},
-		input,
-		func(in ConfigAppListInput) (any, string, error) {
+type ConfigAppListOutput struct {
+	Total int              `json:"total"`
+	List  []map[string]any `json:"list"`
+}
+
+func ConfigAppList(ctx context.Context, deps PlatformDeps, input ConfigAppListInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"config_app_list",
+		"Query config app list. Optional parameters: keyword/env/limit. Example: {\"env\":\"prod\"}.",
+		func(ctx context.Context, input *ConfigAppListInput, opts ...tool.Option) (*ConfigAppListOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -176,100 +179,111 @@ func ConfigAppList(ctx context.Context, deps PlatformDeps, input ConfigAppListIn
 				limit = 200
 			}
 			query := deps.DB.Model(&model.Service{})
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR owner LIKE ?", pattern, pattern)
 			}
-			if env := strings.TrimSpace(in.Env); env != "" {
+			if env := strings.TrimSpace(input.Env); env != "" {
 				query = query.Where("env = ?", env)
 			}
 			var services []model.Service
 			if err := query.Order("id desc").Limit(limit).Find(&services).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			list := make([]map[string]any, 0, len(services))
 			for _, svc := range services {
 				list = append(list, map[string]any{"app_id": svc.ID, "name": svc.Name, "env": svc.Env, "owner": svc.Owner})
 			}
-			return map[string]any{"total": len(list), "list": list}, "db", nil
+			return &ConfigAppListOutput{
+				Total: len(list),
+				List:  list,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ConfigItemGet(ctx context.Context, deps PlatformDeps, input ConfigItemGetInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "config_item_get",
-			Description: "查询配置项值。app_id/key 必填，可选 env。示例: {\"app_id\":12,\"key\":\"DATABASE_URL\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"app_id", "key"},
-			EnumSources: map[string]string{"app_id": "config_app_list"},
-			SceneScope:  []string{"configcenter"},
-		},
-		input,
-		func(in ConfigItemGetInput) (any, string, error) {
+type ConfigItemGetOutput struct {
+	AppID     int    `json:"app_id"`
+	Env       string `json:"env"`
+	Key       string `json:"key"`
+	Value     any    `json:"value"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func ConfigItemGet(ctx context.Context, deps PlatformDeps, input ConfigItemGetInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"config_item_get",
+		"Query config item value. app_id and key are required, optional env. Example: {\"app_id\":12,\"key\":\"DATABASE_URL\"}.",
+		func(ctx context.Context, input *ConfigItemGetInput, opts ...tool.Option) (*ConfigItemGetOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.AppID <= 0 {
-				return nil, "validation", NewMissingParam("app_id", "app_id is required")
+			if input.AppID <= 0 {
+				return nil, fmt.Errorf("app_id is required")
 			}
-			key := strings.TrimSpace(in.Key)
+			key := strings.TrimSpace(input.Key)
 			if key == "" {
-				return nil, "validation", NewMissingParam("key", "key is required")
+				return nil, fmt.Errorf("key is required")
 			}
-			env := strings.TrimSpace(in.Env)
+			env := strings.TrimSpace(input.Env)
 			if env == "" {
 				env = "staging"
 			}
 			var set model.ServiceVariableSet
-			if err := deps.DB.Where("service_id = ? AND env = ?", in.AppID, env).Order("updated_at desc").First(&set).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.Where("service_id = ? AND env = ?", input.AppID, env).Order("updated_at desc").First(&set).Error; err != nil {
+				return nil, err
 			}
 			values := map[string]any{}
 			_ = json.Unmarshal([]byte(set.ValuesJSON), &values)
-			return map[string]any{"app_id": in.AppID, "env": env, "key": key, "value": values[key], "updated_at": set.UpdatedAt}, "db", nil
+			return &ConfigItemGetOutput{
+				AppID:     input.AppID,
+				Env:       env,
+				Key:       key,
+				Value:     values[key],
+				UpdatedAt: set.UpdatedAt.Format("2006-01-02 15:04:05"),
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ConfigDiff(ctx context.Context, deps PlatformDeps, input ConfigDiffInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "config_diff",
-			Description: "对比配置差异。app_id/env_a/env_b 必填。示例: {\"app_id\":12,\"env_a\":\"staging\",\"env_b\":\"prod\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"app_id", "env_a", "env_b"},
-			EnumSources: map[string]string{"app_id": "config_app_list"},
-			SceneScope:  []string{"configcenter"},
-		},
-		input,
-		func(in ConfigDiffInput) (any, string, error) {
+type ConfigDiffOutput struct {
+	AppID     int              `json:"app_id"`
+	EnvA      string           `json:"env_a"`
+	EnvB      string           `json:"env_b"`
+	DiffCount int              `json:"diff_count"`
+	Diff      []map[string]any `json:"diff"`
+}
+
+func ConfigDiff(ctx context.Context, deps PlatformDeps, input ConfigDiffInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"config_diff",
+		"Compare config difference. app_id, env_a, env_b are required. Example: {\"app_id\":12,\"env_a\":\"staging\",\"env_b\":\"prod\"}.",
+		func(ctx context.Context, input *ConfigDiffInput, opts ...tool.Option) (*ConfigDiffOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.AppID <= 0 {
-				return nil, "validation", NewMissingParam("app_id", "app_id is required")
+			if input.AppID <= 0 {
+				return nil, fmt.Errorf("app_id is required")
 			}
-			envA := strings.TrimSpace(in.EnvA)
-			envB := strings.TrimSpace(in.EnvB)
+			envA := strings.TrimSpace(input.EnvA)
+			envB := strings.TrimSpace(input.EnvB)
 			if envA == "" {
-				return nil, "validation", NewMissingParam("env_a", "env_a is required")
+				return nil, fmt.Errorf("env_a is required")
 			}
 			if envB == "" {
-				return nil, "validation", NewMissingParam("env_b", "env_b is required")
+				return nil, fmt.Errorf("env_b is required")
 			}
 			readEnv := func(env string) (map[string]any, error) {
 				var set model.ServiceVariableSet
-				if err := deps.DB.Where("service_id = ? AND env = ?", in.AppID, env).Order("updated_at desc").First(&set).Error; err != nil {
+				if err := deps.DB.Where("service_id = ? AND env = ?", input.AppID, env).Order("updated_at desc").First(&set).Error; err != nil {
 					return nil, err
 				}
 				out := map[string]any{}
@@ -278,11 +292,11 @@ func ConfigDiff(ctx context.Context, deps PlatformDeps, input ConfigDiffInput) (
 			}
 			a, err := readEnv(envA)
 			if err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			b, err := readEnv(envB)
 			if err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			diff := make([]map[string]any, 0)
 			seen := map[string]struct{}{}
@@ -299,27 +313,36 @@ func ConfigDiff(ctx context.Context, deps PlatformDeps, input ConfigDiffInput) (
 				}
 				diff = append(diff, map[string]any{"key": k, "env_a": nil, "env_b": bv})
 			}
-			return map[string]any{"app_id": in.AppID, "env_a": envA, "env_b": envB, "diff_count": len(diff), "diff": diff}, "db", nil
+			return &ConfigDiffOutput{
+				AppID:     input.AppID,
+				EnvA:      envA,
+				EnvB:      envB,
+				DiffCount: len(diff),
+				Diff:      diff,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ClusterListInventory(ctx context.Context, deps PlatformDeps, input ClusterInventoryInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "cluster_list_inventory",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in ClusterInventoryInput) (any, string, error) {
+type ClusterListInventoryOutput struct {
+	Total          int              `json:"total"`
+	List           []map[string]any `json:"list"`
+	FiltersApplied map[string]any   `json:"filters_applied"`
+}
+
+func ClusterListInventory(ctx context.Context, deps PlatformDeps, input ClusterInventoryInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"cluster_list_inventory",
+		"Query cluster inventory list. Optional parameters: status/keyword/limit. Example: {\"status\":\"active\"}.",
+		func(ctx context.Context, input *ClusterInventoryInput, opts ...tool.Option) (*ClusterListInventoryOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -327,16 +350,16 @@ func ClusterListInventory(ctx context.Context, deps PlatformDeps, input ClusterI
 				limit = 200
 			}
 			query := deps.DB.Model(&model.Cluster{})
-			if status := strings.TrimSpace(in.Status); status != "" {
+			if status := strings.TrimSpace(input.Status); status != "" {
 				query = query.Where("status = ?", status)
 			}
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR endpoint LIKE ?", pattern, pattern)
 			}
 			var rows []model.Cluster
 			if err := query.Order("id desc").Limit(limit).Find(&rows).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			list := make([]map[string]any, 0, len(rows))
 			for _, item := range rows {
@@ -350,34 +373,38 @@ func ClusterListInventory(ctx context.Context, deps PlatformDeps, input ClusterI
 					"updated_at": item.UpdatedAt,
 				})
 			}
-			return map[string]any{
-				"total": len(list),
-				"list":  list,
-				"filters_applied": map[string]any{
-					"status":  strings.TrimSpace(in.Status),
-					"keyword": strings.TrimSpace(in.Keyword),
+			return &ClusterListInventoryOutput{
+				Total: len(list),
+				List:  list,
+				FiltersApplied: map[string]any{
+					"status":  strings.TrimSpace(input.Status),
+					"keyword": strings.TrimSpace(input.Keyword),
 					"limit":   limit,
 				},
-			}, "db", nil
-		})
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func ServiceListInventory(ctx context.Context, deps PlatformDeps, input ServiceInventoryInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:       "service_list_inventory",
-			Mode:       ToolModeReadonly,
-			Risk:       ToolRiskLow,
-			Provider:   "local",
-			Permission: "ai:tool:read",
-		},
-		input,
-		func(in ServiceInventoryInput) (any, string, error) {
+type ServiceListInventoryOutput struct {
+	Total          int              `json:"total"`
+	List           []map[string]any `json:"list"`
+	FiltersApplied map[string]any   `json:"filters_applied"`
+}
+
+func ServiceListInventory(ctx context.Context, deps PlatformDeps, input ServiceInventoryInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"service_list_inventory",
+		"Query service inventory list. Optional parameters: status/runtime_type/env/keyword/limit. Example: {\"env\":\"prod\"}.",
+		func(ctx context.Context, input *ServiceInventoryInput, opts ...tool.Option) (*ServiceListInventoryOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -385,22 +412,22 @@ func ServiceListInventory(ctx context.Context, deps PlatformDeps, input ServiceI
 				limit = 200
 			}
 			query := deps.DB.Model(&model.Service{})
-			if status := strings.TrimSpace(in.Status); status != "" {
+			if status := strings.TrimSpace(input.Status); status != "" {
 				query = query.Where("status = ?", status)
 			}
-			if env := strings.TrimSpace(in.Env); env != "" {
+			if env := strings.TrimSpace(input.Env); env != "" {
 				query = query.Where("env = ?", env)
 			}
-			if runtime := strings.TrimSpace(in.RuntimeType); runtime != "" {
+			if runtime := strings.TrimSpace(input.RuntimeType); runtime != "" {
 				query = query.Where("runtime_type = ?", runtime)
 			}
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR owner LIKE ?", pattern, pattern)
 			}
 			var rows []model.Service
 			if err := query.Order("id desc").Limit(limit).Find(&rows).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			list := make([]map[string]any, 0, len(rows))
 			for _, item := range rows {
@@ -416,16 +443,21 @@ func ServiceListInventory(ctx context.Context, deps PlatformDeps, input ServiceI
 					"updated_at":    item.UpdatedAt,
 				})
 			}
-			return map[string]any{
-				"total": len(list),
-				"list":  list,
-				"filters_applied": map[string]any{
-					"status":       strings.TrimSpace(in.Status),
-					"env":          strings.TrimSpace(in.Env),
-					"runtime_type": strings.TrimSpace(in.RuntimeType),
-					"keyword":      strings.TrimSpace(in.Keyword),
+			return &ServiceListInventoryOutput{
+				Total: len(list),
+				List:  list,
+				FiltersApplied: map[string]any{
+					"status":       strings.TrimSpace(input.Status),
+					"env":          strings.TrimSpace(input.Env),
+					"runtime_type": strings.TrimSpace(input.RuntimeType),
+					"keyword":      strings.TrimSpace(input.Keyword),
 					"limit":        limit,
 				},
-			}, "db", nil
-		})
+			}, nil
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }

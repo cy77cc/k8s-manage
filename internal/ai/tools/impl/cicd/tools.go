@@ -13,14 +13,14 @@ import (
 )
 
 type CICDPipelineListOutput struct {
-	Total int `json:"total"`
-	List  []model.CICDServiceCIConfig
+	Total int                         `json:"total"`
+	List  []model.CICDServiceCIConfig `json:"list"`
 }
 
 func CICDPipelineList(ctx context.Context, deps PlatformDeps, input CICDPipelineListInput) tool.InvokableTool {
 	t, err := utils.InferOptionableTool(
 		"cicd_pipeline_list",
-		"查询 CI 流水线列表。可选参数 status/keyword/limit。示例: {\"status\":\"active\"}。",
+		"Query CI pipeline configuration list from the CI/CD system. Optional parameters: status filters by pipeline status (active/inactive/queued), keyword searches by repository URL or branch name using fuzzy matching, limit controls max results (default 50, max 200). Returns pipelines with repository info, branch, build configuration, and status. Use pipeline IDs for triggering builds or checking status. Example: {\"status\":\"active\",\"keyword\":\"main\",\"limit\":20}.",
 		func(ctx context.Context, input *CICDPipelineListInput, opts ...tool.Option) (*CICDPipelineListOutput, error) {
 			if deps.DB == nil {
 				return nil, fmt.Errorf("db unavailable")
@@ -56,67 +56,64 @@ func CICDPipelineList(ctx context.Context, deps PlatformDeps, input CICDPipeline
 	return t
 }
 
-func CICDPipelineStatus(ctx context.Context, deps PlatformDeps, input CICDPipelineStatusInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "cicd_pipeline_status",
-			Description: "查询流水线状态。pipeline_id 必填。示例: {\"pipeline_id\":3}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"pipeline_id"},
-			EnumSources: map[string]string{"pipeline_id": "cicd_pipeline_list"},
-			SceneScope:  []string{"cicd"},
-		},
-		input,
-		func(in CICDPipelineStatusInput) (any, string, error) {
+type CICDPipelineStatusOutput struct {
+	Pipeline   model.CICDServiceCIConfig `json:"pipeline"`
+	RecentRuns []model.CICDServiceCIRun  `json:"recent_runs"`
+}
+
+func CICDPipelineStatus(ctx context.Context, deps PlatformDeps, input CICDPipelineStatusInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"cicd_pipeline_status",
+		"Query detailed pipeline status including configuration and recent build runs. pipeline_id is required and can be obtained from cicd_pipeline_list. Returns the pipeline configuration (repository URL, branch, build settings) and up to 10 most recent run records with status, duration, and timestamps. Use this to check pipeline health or investigate build failures. Example: {\"pipeline_id\":3}.",
+		func(ctx context.Context, input *CICDPipelineStatusInput, opts ...tool.Option) (*CICDPipelineStatusOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.PipelineID <= 0 {
-				return nil, "validation", NewMissingParam("pipeline_id", "pipeline_id is required")
+			if input.PipelineID <= 0 {
+				return nil, fmt.Errorf("pipeline_id is required")
 			}
 			var cfg model.CICDServiceCIConfig
-			if err := deps.DB.First(&cfg, in.PipelineID).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.First(&cfg, input.PipelineID).Error; err != nil {
+				return nil, err
 			}
 			var runs []model.CICDServiceCIRun
 			_ = deps.DB.Where("ci_config_id = ?", cfg.ID).Order("id desc").Limit(10).Find(&runs).Error
-			return map[string]any{"pipeline": cfg, "recent_runs": runs}, "db", nil
+			return &CICDPipelineStatusOutput{
+				Pipeline:   cfg,
+				RecentRuns: runs,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func CICDPipelineTrigger(ctx context.Context, deps PlatformDeps, input CICDPipelineTriggerInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "cicd_pipeline_trigger",
-			Description: "触发流水线构建。pipeline_id/branch 必填。示例: {\"pipeline_id\":3,\"branch\":\"main\"}。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskHigh,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"pipeline_id", "branch"},
-			EnumSources: map[string]string{"pipeline_id": "cicd_pipeline_list"},
-			SceneScope:  []string{"cicd"},
-		},
-		input,
-		func(in CICDPipelineTriggerInput) (any, string, error) {
+type CICDPipelineTriggerOutput struct {
+	PipelineID uint   `json:"pipeline_id"`
+	RunID      uint   `json:"run_id"`
+	Branch     string `json:"branch"`
+	Status     string `json:"status"`
+}
+
+func CICDPipelineTrigger(ctx context.Context, deps PlatformDeps, input CICDPipelineTriggerInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"cicd_pipeline_trigger",
+		"Trigger a new build for a CI/CD pipeline. pipeline_id and branch are required parameters. pipeline_id can be obtained from cicd_pipeline_list. The branch parameter specifies which branch to build (e.g., 'main', 'develop', 'feature/xyz'). Optional params can pass additional build parameters as key-value pairs. This is a mutating operation that queues a new build run. Returns the created run ID and initial status (queued). Example: {\"pipeline_id\":3,\"branch\":\"main\"}.",
+		func(ctx context.Context, input *CICDPipelineTriggerInput, opts ...tool.Option) (*CICDPipelineTriggerOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.PipelineID <= 0 {
-				return nil, "validation", NewMissingParam("pipeline_id", "pipeline_id is required")
+			if input.PipelineID <= 0 {
+				return nil, fmt.Errorf("pipeline_id is required")
 			}
-			if strings.TrimSpace(in.Branch) == "" {
-				return nil, "validation", NewMissingParam("branch", "branch is required")
+			if strings.TrimSpace(input.Branch) == "" {
+				return nil, fmt.Errorf("branch is required")
 			}
 			var cfg model.CICDServiceCIConfig
-			if err := deps.DB.First(&cfg, in.PipelineID).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.First(&cfg, input.PipelineID).Error; err != nil {
+				return nil, err
 			}
 			run := model.CICDServiceCIRun{
 				ServiceID:   cfg.ServiceID,
@@ -127,32 +124,36 @@ func CICDPipelineTrigger(ctx context.Context, deps PlatformDeps, input CICDPipel
 				TriggeredAt: time.Now(),
 			}
 			if err := deps.DB.Create(&run).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"pipeline_id": cfg.ID, "run_id": run.ID, "branch": strings.TrimSpace(in.Branch), "status": run.Status}, "db", nil
+			return &CICDPipelineTriggerOutput{
+				PipelineID: cfg.ID,
+				RunID:      run.ID,
+				Branch:     strings.TrimSpace(input.Branch),
+				Status:     run.Status,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func JobList(ctx context.Context, deps PlatformDeps, input JobListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "job_list",
-			Description: "查询任务列表。可选参数 status/keyword/limit。示例: {\"status\":\"running\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"jobs"},
-		},
-		input,
-		func(in JobListInput) (any, string, error) {
+type JobListOutput struct {
+	Total int         `json:"total"`
+	List  []model.Job `json:"list"`
+}
+
+func JobList(ctx context.Context, deps PlatformDeps, input JobListInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"job_list",
+		"Query scheduled job list from the job management system. Optional parameters: status filters by job status (running/scheduled/paused/completed/failed), keyword searches by job name or job type using fuzzy matching, limit controls max results (default 50, max 200). Returns jobs with name, type, schedule (cron expression), next run time, and status. Use job IDs for checking execution status or triggering manual runs. Example: {\"status\":\"running\",\"keyword\":\"backup\"}.",
+		func(ctx context.Context, input *JobListInput, opts ...tool.Option) (*JobListOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -160,82 +161,85 @@ func JobList(ctx context.Context, deps PlatformDeps, input JobListInput) (ToolRe
 				limit = 200
 			}
 			query := deps.DB.Model(&model.Job{})
-			if status := strings.TrimSpace(in.Status); status != "" {
+			if status := strings.TrimSpace(input.Status); status != "" {
 				query = query.Where("status = ?", status)
 			}
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR type LIKE ?", pattern, pattern)
 			}
 			var jobs []model.Job
 			if err := query.Order("id desc").Limit(limit).Find(&jobs).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"total": len(jobs), "list": jobs}, "db", nil
+			return &JobListOutput{
+				Total: len(jobs),
+				List:  jobs,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func JobExecutionStatus(ctx context.Context, deps PlatformDeps, input JobExecutionStatusInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "job_execution_status",
-			Description: "查询任务执行状态。job_id 必填，可选 execution_id。示例: {\"job_id\":12}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"job_id"},
-			EnumSources: map[string]string{"job_id": "job_list"},
-			SceneScope:  []string{"jobs"},
-		},
-		input,
-		func(in JobExecutionStatusInput) (any, string, error) {
+type JobExecutionStatusOutput struct {
+	Total int                  `json:"total"`
+	List  []model.JobExecution `json:"list"`
+}
+
+func JobExecutionStatus(ctx context.Context, deps PlatformDeps, input JobExecutionStatusInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"job_execution_status",
+		"Query execution history and status for a specific scheduled job. job_id is required and can be obtained from job_list. Optional execution_id filters to a specific execution run. Returns up to 20 most recent execution records with start/end time, duration, exit code, output logs, and status (running/success/failed). Use this to investigate job failures or monitor long-running jobs. Example: {\"job_id\":12}.",
+		func(ctx context.Context, input *JobExecutionStatusInput, opts ...tool.Option) (*JobExecutionStatusOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.JobID <= 0 {
-				return nil, "validation", NewMissingParam("job_id", "job_id is required")
+			if input.JobID <= 0 {
+				return nil, fmt.Errorf("job_id is required")
 			}
-			query := deps.DB.Model(&model.JobExecution{}).Where("job_id = ?", in.JobID)
-			if in.ExecutionID > 0 {
-				query = query.Where("id = ?", in.ExecutionID)
+			query := deps.DB.Model(&model.JobExecution{}).Where("job_id = ?", input.JobID)
+			if input.ExecutionID > 0 {
+				query = query.Where("id = ?", input.ExecutionID)
 			}
 			var rows []model.JobExecution
 			if err := query.Order("id desc").Limit(20).Find(&rows).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"total": len(rows), "list": rows}, "db", nil
+			return &JobExecutionStatusOutput{
+				Total: len(rows),
+				List:  rows,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func JobRun(ctx context.Context, deps PlatformDeps, input JobRunInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "job_run",
-			Description: "手动触发任务执行。job_id 必填。示例: {\"job_id\":12}。",
-			Mode:        ToolModeMutating,
-			Risk:        ToolRiskMedium,
-			Provider:    "local",
-			Permission:  "ai:tool:execute",
-			Required:    []string{"job_id"},
-			EnumSources: map[string]string{"job_id": "job_list"},
-			SceneScope:  []string{"jobs"},
-		},
-		input,
-		func(in JobRunInput) (any, string, error) {
+type JobRunOutput struct {
+	JobID       uint   `json:"job_id"`
+	ExecutionID uint   `json:"execution_id"`
+	Status      string `json:"status"`
+}
+
+func JobRun(ctx context.Context, deps PlatformDeps, input JobRunInput) tool.InvokableTool {
+	t, err := utils.InferOptionableTool(
+		"job_run",
+		"Manually trigger a scheduled job to run immediately, bypassing its normal schedule. job_id is required and can be obtained from job_list. Optional params can override default job parameters as key-value pairs. This is a mutating operation that creates a new execution run with 'running' status. Returns the created execution ID and initial status. Use this for on-demand job execution or testing. Example: {\"job_id\":12}.",
+		func(ctx context.Context, input *JobRunInput, opts ...tool.Option) (*JobRunOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.JobID <= 0 {
-				return nil, "validation", NewMissingParam("job_id", "job_id is required")
+			if input.JobID <= 0 {
+				return nil, fmt.Errorf("job_id is required")
 			}
 			var job model.Job
-			if err := deps.DB.First(&job, in.JobID).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.First(&job, input.JobID).Error; err != nil {
+				return nil, err
 			}
 			now := time.Now()
 			exec := model.JobExecution{
@@ -246,10 +250,18 @@ func JobRun(ctx context.Context, deps PlatformDeps, input JobRunInput) (ToolResu
 				StartTime: now,
 			}
 			if err := deps.DB.Create(&exec).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			_ = deps.DB.Model(&job).Updates(map[string]any{"status": "running", "last_run": now}).Error
-			return map[string]any{"job_id": job.ID, "execution_id": exec.ID, "status": exec.Status}, "db", nil
+			return &JobRunOutput{
+				JobID:       job.ID,
+				ExecutionID: exec.ID,
+				Status:      exec.Status,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }

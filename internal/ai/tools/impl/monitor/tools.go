@@ -6,29 +6,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudwego/eino/components/tool"
+	einoutils "github.com/cloudwego/eino/components/tool/utils"
 	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
 
-func MonitorAlertRuleList(ctx context.Context, deps PlatformDeps, input MonitorAlertRuleListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "monitor_alert_rule_list",
-			Description: "查询告警规则列表。可选参数 status/keyword/limit。示例: {\"status\":\"enabled\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"monitor", "deployment:metrics"},
-		},
-		input,
-		func(in MonitorAlertRuleListInput) (any, string, error) {
+type MonitorAlertRuleListOutput struct {
+	Total int               `json:"total"`
+	List  []model.AlertRule `json:"list"`
+}
+
+func MonitorAlertRuleList(ctx context.Context, deps PlatformDeps, input MonitorAlertRuleListInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"monitor_alert_rule_list",
+		"Query the list of alert rules configured in the monitoring system. Optional parameters: status filters by rule state (enabled/disabled), keyword searches by rule name or metric name, limit controls max results (default 50, max 200). Returns alert rules with threshold conditions, severity levels, and notification settings. Example: {\"status\":\"enabled\",\"keyword\":\"cpu\"}.",
+		func(ctx context.Context, input *MonitorAlertRuleListInput, opts ...tool.Option) (*MonitorAlertRuleListOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -36,41 +33,43 @@ func MonitorAlertRuleList(ctx context.Context, deps PlatformDeps, input MonitorA
 				limit = 200
 			}
 			query := deps.DB.Model(&model.AlertRule{})
-			if status := strings.TrimSpace(in.Status); status != "" {
+			if status := strings.TrimSpace(input.Status); status != "" {
 				query = query.Where("state = ? OR status = ?", status, status)
 			}
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR metric LIKE ?", pattern, pattern)
 			}
 			var rules []model.AlertRule
 			if err := query.Order("id desc").Limit(limit).Find(&rules).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"total": len(rules), "list": rules}, "db", nil
+			return &MonitorAlertRuleListOutput{
+				Total: len(rules),
+				List:  rules,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func MonitorAlert(ctx context.Context, deps PlatformDeps, input MonitorAlertInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "monitor_alert",
-			Description: "查询活跃告警列表。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"monitor", "deployment:metrics"},
-		},
-		input,
-		func(in MonitorAlertInput) (any, string, error) {
+type MonitorAlertOutput struct {
+	Total int                `json:"total"`
+	List  []model.AlertEvent `json:"list"`
+}
+
+func MonitorAlert(ctx context.Context, deps PlatformDeps, input MonitorAlertInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"monitor_alert",
+		"Query active/firing alert events from the monitoring system. Optional parameters: severity filters by alert severity (critical/warning/info), service_id filters alerts related to a specific service, limit controls max results (default 50, max 200). Returns alerts currently in firing status with timestamps, labels, and annotations. Example: {\"severity\":\"critical\",\"limit\":20}.",
+		func(ctx context.Context, input *MonitorAlertInput, opts ...tool.Option) (*MonitorAlertOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -78,40 +77,42 @@ func MonitorAlert(ctx context.Context, deps PlatformDeps, input MonitorAlertInpu
 				limit = 200
 			}
 			query := deps.DB.Model(&model.AlertEvent{}).Where("status = ?", "firing")
-			if severity := strings.TrimSpace(in.Severity); severity != "" {
+			if severity := strings.TrimSpace(input.Severity); severity != "" {
 				query = query.Where("severity = ?", severity)
 			}
-			if in.ServiceID > 0 {
-				query = query.Where("source LIKE ?", fmt.Sprintf("%%service:%d%%", in.ServiceID))
+			if input.ServiceID > 0 {
+				query = query.Where("source LIKE ?", fmt.Sprintf("%%service:%d%%", input.ServiceID))
 			}
 			var alerts []model.AlertEvent
 			if err := query.Order("triggered_at desc").Limit(limit).Find(&alerts).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"total": len(alerts), "list": alerts}, "db", nil
+			return &MonitorAlertOutput{
+				Total: len(alerts),
+				List:  alerts,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func MonitorAlertActive(ctx context.Context, deps PlatformDeps, input MonitorAlertActiveInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "monitor_alert_active",
-			Description: "查询活跃告警。可选 severity/service_id/limit。示例: {\"severity\":\"critical\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"monitor", "deployment:metrics"},
-		},
-		input,
-		func(in MonitorAlertActiveInput) (any, string, error) {
+type MonitorAlertActiveOutput struct {
+	Total int                `json:"total"`
+	List  []model.AlertEvent `json:"list"`
+}
+
+func MonitorAlertActive(ctx context.Context, deps PlatformDeps, input MonitorAlertActiveInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"monitor_alert_active",
+		"Query all active/firing alerts currently affecting the system. Optional parameters: severity filters by alert level (critical/warning/info), service_id filters by specific service, limit controls max results (default 50, max 200). Use this to get a quick overview of all ongoing issues. Example: {\"severity\":\"critical\"}.",
+		func(ctx context.Context, input *MonitorAlertActiveInput, opts ...tool.Option) (*MonitorAlertActiveOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -119,46 +120,50 @@ func MonitorAlertActive(ctx context.Context, deps PlatformDeps, input MonitorAle
 				limit = 200
 			}
 			query := deps.DB.Model(&model.AlertEvent{}).Where("status = ?", "firing")
-			if severity := strings.TrimSpace(in.Severity); severity != "" {
+			if severity := strings.TrimSpace(input.Severity); severity != "" {
 				query = query.Where("severity = ?", severity)
 			}
-			if in.ServiceID > 0 {
-				query = query.Where("source LIKE ?", fmt.Sprintf("%%service:%d%%", in.ServiceID))
+			if input.ServiceID > 0 {
+				query = query.Where("source LIKE ?", fmt.Sprintf("%%service:%d%%", input.ServiceID))
 			}
 			var alerts []model.AlertEvent
 			if err := query.Order("triggered_at desc").Limit(limit).Find(&alerts).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"total": len(alerts), "list": alerts}, "db", nil
+			return &MonitorAlertActiveOutput{
+				Total: len(alerts),
+				List:  alerts,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func MonitorMetric(ctx context.Context, deps PlatformDeps, input MonitorMetricInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "monitor_metric",
-			Description: "查询监控指标数据。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"query"},
-			DefaultHint: map[string]any{"time_range": "1h", "step": 60},
-			SceneScope:  []string{"monitor", "deployment:metrics"},
-		},
-		input,
-		func(in MonitorMetricInput) (any, string, error) {
+type MonitorMetricOutput struct {
+	Query     string              `json:"query"`
+	TimeRange string              `json:"time_range"`
+	Step      int                 `json:"step"`
+	Points    []model.MetricPoint `json:"points"`
+	Count     int                 `json:"count"`
+}
+
+func MonitorMetric(ctx context.Context, deps PlatformDeps, input MonitorMetricInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"monitor_metric",
+		"Query time-series metric data from the monitoring system. query is required and specifies the metric name or PromQL expression. Optional parameters: time_range sets the query duration (default 1h, accepts values like 5m, 1h, 24h), step sets the data point interval in seconds (default 60). Returns metric points with timestamps and values. Example: {\"query\":\"cpu_usage\",\"time_range\":\"1h\",\"step\":60}.",
+		func(ctx context.Context, input *MonitorMetricInput, opts ...tool.Option) (*MonitorMetricOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			queryName := strings.TrimSpace(in.Query)
+			queryName := strings.TrimSpace(input.Query)
 			if queryName == "" {
-				return nil, "validation", NewMissingParam("query", "query is required")
+				return nil, fmt.Errorf("query is required")
 			}
-			rangeDuration := parseTimeRange(strings.TrimSpace(in.TimeRange), time.Hour)
-			step := in.Step
+			rangeDuration := parseTimeRange(strings.TrimSpace(input.TimeRange), time.Hour)
+			step := input.Step
 			if step <= 0 {
 				step = 60
 			}
@@ -168,44 +173,45 @@ func MonitorMetric(ctx context.Context, deps PlatformDeps, input MonitorMetricIn
 				Order("collected_at asc").
 				Limit(2000).
 				Find(&points).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{
-				"query":      queryName,
-				"time_range": rangeDuration.String(),
-				"step":       step,
-				"points":     points,
-				"count":      len(points),
-			}, "db", nil
+			return &MonitorMetricOutput{
+				Query:     queryName,
+				TimeRange: rangeDuration.String(),
+				Step:      step,
+				Points:    points,
+				Count:     len(points),
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func MonitorMetricQuery(ctx context.Context, deps PlatformDeps, input MonitorMetricQueryInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "monitor_metric_query",
-			Description: "查询指标数据。query 必填，可选 time_range/step。示例: {\"query\":\"cpu_usage\",\"time_range\":\"1h\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"query"},
-			DefaultHint: map[string]any{"time_range": "1h", "step": 60},
-			SceneScope:  []string{"monitor", "deployment:metrics"},
-		},
-		input,
-		func(in MonitorMetricQueryInput) (any, string, error) {
+type MonitorMetricQueryOutput struct {
+	Query     string              `json:"query"`
+	TimeRange string              `json:"time_range"`
+	Step      int                 `json:"step"`
+	Points    []model.MetricPoint `json:"points"`
+	Count     int                 `json:"count"`
+}
+
+func MonitorMetricQuery(ctx context.Context, deps PlatformDeps, input MonitorMetricQueryInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"monitor_metric_query",
+		"Query metric data points over a time range for analysis and visualization. query is required and specifies the metric name to retrieve. Optional parameters: time_range controls how far back to look (default 1h, supports formats like 5m, 30m, 2h, 24h), step sets the resolution in seconds between data points (default 60). Returns an array of metric points with timestamps. Example: {\"query\":\"memory_usage\",\"time_range\":\"30m\"}.",
+		func(ctx context.Context, input *MonitorMetricQueryInput, opts ...tool.Option) (*MonitorMetricQueryOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			queryName := strings.TrimSpace(in.Query)
+			queryName := strings.TrimSpace(input.Query)
 			if queryName == "" {
-				return nil, "validation", NewMissingParam("query", "query is required")
+				return nil, fmt.Errorf("query is required")
 			}
-			rangeDuration := parseTimeRange(strings.TrimSpace(in.TimeRange), time.Hour)
-			step := in.Step
+			rangeDuration := parseTimeRange(strings.TrimSpace(input.TimeRange), time.Hour)
+			step := input.Step
 			if step <= 0 {
 				step = 60
 			}
@@ -215,17 +221,21 @@ func MonitorMetricQuery(ctx context.Context, deps PlatformDeps, input MonitorMet
 				Order("collected_at asc").
 				Limit(2000).
 				Find(&points).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{
-				"query":      queryName,
-				"time_range": rangeDuration.String(),
-				"step":       step,
-				"points":     points,
-				"count":      len(points),
-			}, "db", nil
+			return &MonitorMetricQueryOutput{
+				Query:     queryName,
+				TimeRange: rangeDuration.String(),
+				Step:      step,
+				Points:    points,
+				Count:     len(points),
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 func parseTimeRange(raw string, fallback time.Duration) time.Duration {

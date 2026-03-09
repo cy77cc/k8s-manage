@@ -6,29 +6,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudwego/eino/components/tool"
+	einoutils "github.com/cloudwego/eino/components/tool/utils"
 	. "github.com/cy77cc/k8s-manage/internal/ai/tools/core"
 	"github.com/cy77cc/k8s-manage/internal/model"
 )
 
-func UserList(ctx context.Context, deps PlatformDeps, input UserListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "user_list",
-			Description: "查询用户列表。可选 keyword/status/limit。示例: {\"keyword\":\"alice\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"governance:users"},
-		},
-		input,
-		func(in UserListInput) (any, string, error) {
+type UserListOutput struct {
+	Total int          `json:"total"`
+	List  []model.User `json:"list"`
+}
+
+func UserList(ctx context.Context, deps PlatformDeps, input UserListInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"user_list",
+		"Query the list of users in the platform. Optional parameters: keyword searches by username or email, status filters by user status (0=disabled, 1=enabled), limit controls max results (default 50, max 200). Returns users with id, username, email, role information, and status. Use this to find user IDs for permission checks. Example: {\"keyword\":\"admin\",\"status\":1}.",
+		func(ctx context.Context, input *UserListInput, opts ...tool.Option) (*UserListOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -36,41 +33,43 @@ func UserList(ctx context.Context, deps PlatformDeps, input UserListInput) (Tool
 				limit = 200
 			}
 			query := deps.DB.Model(&model.User{})
-			if in.Status != 0 {
-				query = query.Where("status = ?", in.Status)
+			if input.Status != 0 {
+				query = query.Where("status = ?", input.Status)
 			}
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("username LIKE ? OR email LIKE ?", pattern, pattern)
 			}
 			var users []model.User
 			if err := query.Order("id desc").Limit(limit).Find(&users).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"total": len(users), "list": users}, "db", nil
+			return &UserListOutput{
+				Total: len(users),
+				List:  users,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func RoleList(ctx context.Context, deps PlatformDeps, input RoleListInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "role_list",
-			Description: "查询角色列表。可选 keyword/limit。示例: {\"keyword\":\"admin\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"limit": 50},
-			SceneScope:  []string{"governance:roles"},
-		},
-		input,
-		func(in RoleListInput) (any, string, error) {
+type RoleListOutput struct {
+	Total int          `json:"total"`
+	List  []model.Role `json:"list"`
+}
+
+func RoleList(ctx context.Context, deps PlatformDeps, input RoleListInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"role_list",
+		"Query the list of roles in the platform. Optional parameters: keyword searches by role name or code, limit controls max results (default 50, max 200). Returns roles with id, name, code, description, and permission count. Use this to understand available roles for user assignment. Example: {\"keyword\":\"admin\"}.",
+		func(ctx context.Context, input *RoleListInput, opts ...tool.Option) (*RoleListOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
@@ -78,67 +77,78 @@ func RoleList(ctx context.Context, deps PlatformDeps, input RoleListInput) (Tool
 				limit = 200
 			}
 			query := deps.DB.Model(&model.Role{})
-			if kw := strings.TrimSpace(in.Keyword); kw != "" {
+			if kw := strings.TrimSpace(input.Keyword); kw != "" {
 				pattern := "%" + kw + "%"
 				query = query.Where("name LIKE ? OR code LIKE ?", pattern, pattern)
 			}
 			var roles []model.Role
 			if err := query.Order("id desc").Limit(limit).Find(&roles).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"total": len(roles), "list": roles}, "db", nil
+			return &RoleListOutput{
+				Total: len(roles),
+				List:  roles,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func PermissionCheck(ctx context.Context, deps PlatformDeps, input PermissionCheckInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "permission_check",
-			Description: "检查用户权限。user_id/resource/action 必填。示例: {\"user_id\":1,\"resource\":\"service\",\"action\":\"read\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			Required:    []string{"user_id", "resource", "action"},
-			EnumSources: map[string]string{"user_id": "user_list"},
-			SceneScope:  []string{"governance:permissions"},
-		},
-		input,
-		func(in PermissionCheckInput) (any, string, error) {
+type PermissionCheckOutput struct {
+	Allowed            bool               `json:"allowed"`
+	Reason             string             `json:"reason,omitempty"`
+	MatchedPermissions []model.Permission `json:"matched_permissions,omitempty"`
+	Checked            map[string]any     `json:"checked"`
+}
+
+func PermissionCheck(ctx context.Context, deps PlatformDeps, input PermissionCheckInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"permission_check",
+		"Check if a user has a specific permission. user_id, resource, and action are required. Returns whether the permission is granted, matched permissions if any, and the checked parameters. Use this to verify user access before performing sensitive operations. Example: {\"user_id\":1,\"resource\":\"service\",\"action\":\"delete\"}.",
+		func(ctx context.Context, input *PermissionCheckInput, opts ...tool.Option) (*PermissionCheckOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			if in.UserID <= 0 {
-				return nil, "validation", NewMissingParam("user_id", "user_id is required")
+			if input.UserID <= 0 {
+				return nil, fmt.Errorf("user_id is required")
 			}
-			resource := strings.TrimSpace(in.Resource)
-			action := strings.TrimSpace(in.Action)
+			resource := strings.TrimSpace(input.Resource)
+			action := strings.TrimSpace(input.Action)
 			if resource == "" {
-				return nil, "validation", NewMissingParam("resource", "resource is required")
+				return nil, fmt.Errorf("resource is required")
 			}
 			if action == "" {
-				return nil, "validation", NewMissingParam("action", "action is required")
+				return nil, fmt.Errorf("action is required")
 			}
 
 			var roleIDs []int64
-			if err := deps.DB.Model(&model.UserRole{}).Where("user_id = ?", in.UserID).Pluck("role_id", &roleIDs).Error; err != nil {
-				return nil, "db", err
+			if err := deps.DB.Model(&model.UserRole{}).Where("user_id = ?", input.UserID).Pluck("role_id", &roleIDs).Error; err != nil {
+				return nil, err
 			}
 			if len(roleIDs) == 0 {
-				return map[string]any{"allowed": false, "reason": "user has no roles"}, "db", nil
+				return &PermissionCheckOutput{
+					Allowed: false,
+					Reason:  "user has no roles",
+					Checked: map[string]any{"user_id": input.UserID, "resource": resource, "action": action},
+				}, nil
 			}
 			var permIDs []int64
 			if err := deps.DB.Model(&model.RolePermission{}).Where("role_id IN ?", roleIDs).Pluck("permission_id", &permIDs).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			if len(permIDs) == 0 {
-				return map[string]any{"allowed": false, "reason": "roles have no permissions"}, "db", nil
+				return &PermissionCheckOutput{
+					Allowed: false,
+					Reason:  "roles have no permissions",
+					Checked: map[string]any{"user_id": input.UserID, "resource": resource, "action": action},
+				}, nil
 			}
 			var perms []model.Permission
 			if err := deps.DB.Where("id IN ?", permIDs).Find(&perms).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			matched := make([]model.Permission, 0)
 			for _, perm := range perms {
@@ -146,41 +156,44 @@ func PermissionCheck(ctx context.Context, deps PlatformDeps, input PermissionChe
 					matched = append(matched, perm)
 				}
 			}
-			return map[string]any{"allowed": len(matched) > 0, "matched_permissions": matched, "checked": map[string]any{"user_id": in.UserID, "resource": resource, "action": action}}, "db", nil
+			return &PermissionCheckOutput{
+				Allowed:            len(matched) > 0,
+				MatchedPermissions: matched,
+				Checked:            map[string]any{"user_id": input.UserID, "resource": resource, "action": action},
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func TopologyGet(ctx context.Context, deps PlatformDeps, input TopologyGetInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "topology_get",
-			Description: "查询服务拓扑关系。可选 service_id/depth。示例: {\"service_id\":12,\"depth\":2}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"depth": 2},
-			EnumSources: map[string]string{"service_id": "service_list_inventory"},
-			SceneScope:  []string{"deployment:topology", "services:detail"},
-		},
-		input,
-		func(in TopologyGetInput) (any, string, error) {
+type TopologyGetOutput struct {
+	Nodes []map[string]any `json:"nodes"`
+	Edges []map[string]any `json:"edges"`
+	Depth int              `json:"depth"`
+}
+
+func TopologyGet(ctx context.Context, deps PlatformDeps, input TopologyGetInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"topology_get",
+		"Query service topology showing relationships between services and deployment targets. Optional parameters: service_id focuses topology on a specific service, depth controls how many levels of relationships to explore (default 2, max 5). Returns nodes (services/targets) and edges (deployment relationships). Use this to understand service dependencies. Example: {\"service_id\":12,\"depth\":3}.",
+		func(ctx context.Context, input *TopologyGetInput, opts ...tool.Option) (*TopologyGetOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			depth := in.Depth
+			depth := input.Depth
 			if depth <= 0 {
 				depth = 2
 			}
 			services := make([]model.Service, 0)
 			query := deps.DB.Model(&model.Service{})
-			if in.ServiceID > 0 {
-				query = query.Where("id = ?", in.ServiceID)
+			if input.ServiceID > 0 {
+				query = query.Where("id = ?", input.ServiceID)
 			}
 			if err := query.Order("id desc").Limit(100).Find(&services).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
 			nodes := make([]map[string]any, 0, len(services))
 			edges := make([]map[string]any, 0)
@@ -193,54 +206,64 @@ func TopologyGet(ctx context.Context, deps PlatformDeps, input TopologyGetInput)
 					edges = append(edges, map[string]any{"from": fmt.Sprintf("service-%d", svc.ID), "to": targetNodeID, "type": "deploy"})
 				}
 			}
-			return map[string]any{"nodes": nodes, "edges": edges, "depth": depth}, "db", nil
+			return &TopologyGetOutput{
+				Nodes: nodes,
+				Edges: edges,
+				Depth: depth,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-func AuditLogSearch(ctx context.Context, deps PlatformDeps, input AuditLogSearchInput) (ToolResult, error) {
-	return RunWithPolicyAndEvent(
-		ctx,
-		ToolMeta{
-			Name:        "audit_log_search",
-			Description: "查询审计日志。可选 time_range/resource_type/action/user_id/limit。示例: {\"time_range\":\"24h\"}。",
-			Mode:        ToolModeReadonly,
-			Risk:        ToolRiskLow,
-			Provider:    "local",
-			Permission:  "ai:tool:read",
-			DefaultHint: map[string]any{"time_range": "24h", "limit": 50},
-			SceneScope:  []string{"deployment:audit", "governance:permissions"},
-		},
-		input,
-		func(in AuditLogSearchInput) (any, string, error) {
+type AuditLogSearchOutput struct {
+	Total int              `json:"total"`
+	List  []model.AuditLog `json:"list"`
+}
+
+func AuditLogSearch(ctx context.Context, deps PlatformDeps, input AuditLogSearchInput) tool.InvokableTool {
+	t, err := einoutils.InferOptionableTool(
+		"audit_log_search",
+		"Search audit logs for platform activities. Optional parameters: time_range filters logs within a duration (default 24h, accepts values like 1h, 6h, 24h, 7d), resource_type filters by resource kind (service/cluster/host), action filters by action type (create/update/delete), user_id filters by actor, limit controls max results (default 50, max 200). Returns audit entries with timestamps and details. Example: {\"time_range\":\"24h\",\"resource_type\":\"service\"}.",
+		func(ctx context.Context, input *AuditLogSearchInput, opts ...tool.Option) (*AuditLogSearchOutput, error) {
 			if deps.DB == nil {
-				return nil, "db", fmt.Errorf("db unavailable")
+				return nil, fmt.Errorf("db unavailable")
 			}
-			limit := in.Limit
+			limit := input.Limit
 			if limit <= 0 {
 				limit = 50
 			}
 			if limit > 200 {
 				limit = 200
 			}
-			since := time.Now().Add(-parseTimeRange(strings.TrimSpace(in.TimeRange), 24*time.Hour))
+			since := time.Now().Add(-parseTimeRange(strings.TrimSpace(input.TimeRange), 24*time.Hour))
 			query := deps.DB.Model(&model.AuditLog{}).Where("created_at >= ?", since)
-			if rt := strings.TrimSpace(in.ResourceType); rt != "" {
+			if rt := strings.TrimSpace(input.ResourceType); rt != "" {
 				query = query.Where("resource_type = ?", rt)
 			}
-			if action := strings.TrimSpace(in.Action); action != "" {
+			if action := strings.TrimSpace(input.Action); action != "" {
 				query = query.Where("action_type = ?", action)
 			}
-			if in.UserID > 0 {
-				query = query.Where("actor_id = ?", in.UserID)
+			if input.UserID > 0 {
+				query = query.Where("actor_id = ?", input.UserID)
 			}
 			var rows []model.AuditLog
 			if err := query.Order("id desc").Limit(limit).Find(&rows).Error; err != nil {
-				return nil, "db", err
+				return nil, err
 			}
-			return map[string]any{"total": len(rows), "list": rows}, "db", nil
+			return &AuditLogSearchOutput{
+				Total: len(rows),
+				List:  rows,
+			}, nil
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 func parseTimeRange(raw string, fallback time.Duration) time.Duration {
