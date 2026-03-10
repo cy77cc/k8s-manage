@@ -55,3 +55,25 @@ func TestPlanFallsBackToClarifyWhenRewriteStillAmbiguous(t *testing.T) {
 		t.Fatalf("Candidates = %#v", out.Candidates)
 	}
 }
+
+func TestNormalizeDecisionDoesNotPanicWhenBaseHasNoPlan(t *testing.T) {
+	base := Decision{
+		Type:      DecisionClarify,
+		Message:   "need more info",
+		Narrative: "clarify first",
+	}
+	parsed := Decision{
+		Type: DecisionPlan,
+		Plan: &ExecutionPlan{
+			Goal: "check mysql-0",
+		},
+	}
+
+	out := normalizeDecision(base, parsed)
+	if out.Plan == nil {
+		t.Fatalf("Plan is nil")
+	}
+	if out.Plan.Goal != "check mysql-0" {
+		t.Fatalf("Goal = %q", out.Plan.Goal)
+	}
+}

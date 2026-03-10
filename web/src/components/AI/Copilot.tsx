@@ -498,7 +498,6 @@ export const Copilot: React.FC<CopilotProps> = ({
                   content: String(output.narrative || output.conclusion || output.summary || ''),
                 })
               );
-              assistantContent ||= String(output.conclusion || output.summary || assistantContent || '');
               break;
             }
 

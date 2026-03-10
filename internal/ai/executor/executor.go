@@ -56,9 +56,8 @@ type StepResult struct {
 }
 
 type Result struct {
-	State           runtime.ExecutionState   `json:"state"`
-	Steps           []StepResult             `json:"steps,omitempty"`
-	PendingApproval *runtime.PendingApproval `json:"pending_approval,omitempty"`
+	State runtime.ExecutionState `json:"state"`
+	Steps []StepResult           `json:"steps,omitempty"`
 }
 
 type Executor struct {
@@ -216,4 +215,19 @@ func (e *Executor) RecordFailure(ctx context.Context, sessionID, stepID, code, m
 		return nil, err
 	}
 	return &Result{State: *state, Steps: []StepResult{snapshotResult(step)}}, nil
+}
+
+func (r *Result) Approval() *runtime.PendingApproval {
+	if r == nil {
+		return nil
+	}
+	return r.State.PendingApproval
+}
+
+func (r *Result) StepState(stepID string) (runtime.StepState, bool) {
+	if r == nil || r.State.Steps == nil {
+		return runtime.StepState{}, false
+	}
+	step, ok := r.State.Steps[stepID]
+	return step, ok
 }

@@ -48,7 +48,7 @@ func TestExecutorApprovalResumeFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.PendingApproval == nil {
+	if result.State.PendingApproval == nil {
 		t.Fatalf("expected pending approval")
 	}
 	if got := result.State.Status; got != runtime.ExecutionStatusWaitingApproval {

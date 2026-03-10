@@ -67,7 +67,7 @@ func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state 
 							return nil, err
 						}
 					}
-					return &Result{State: *state, Steps: results, PendingApproval: state.PendingApproval}, nil
+					return &Result{State: *state, Steps: results}, nil
 				}
 
 				if err := transitionStep(state, stepID, runtime.StepCompleted, "step scheduled by executor runtime"); err != nil {
@@ -91,7 +91,7 @@ func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state 
 			return nil, err
 		}
 	}
-	return &Result{State: *state, Steps: results, PendingApproval: state.PendingApproval}, nil
+	return &Result{State: *state, Steps: results}, nil
 }
 
 func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, state *runtime.ExecutionState, req ResumeRequest) (*Result, error) {
@@ -120,7 +120,7 @@ func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, st
 		Idempotency: runtime.ApprovalDecisionHash(state.PlanID, stepID, req.Approved),
 	}
 	if state.PendingApproval.DecisionHash == decision.Idempotency {
-		return &Result{State: *state, PendingApproval: state.PendingApproval}, nil
+		return &Result{State: *state}, nil
 	}
 	now := time.Now().UTC()
 	decision.Status = "rejected"

@@ -181,6 +181,9 @@ func normalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
 	if parsed == nil {
 		return base
 	}
+	if base == nil {
+		return parsed
+	}
 	if strings.TrimSpace(parsed.PlanID) == "" {
 		parsed.PlanID = base.PlanID
 	}

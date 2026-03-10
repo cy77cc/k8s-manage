@@ -163,9 +163,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 	if o.executions != nil {
 		st, err := o.executions.Load(ctx, sessionID)
 		if err == nil && st != nil {
-			st.Status = runtime.ExecutionStatusCompleted
-			st.Phase = "completed"
-			_ = o.executions.Save(ctx, *st)
+			if st.Status == runtime.ExecutionStatusRunning {
+				st.Status = runtime.ExecutionStatusCompleted
+				st.Phase = "completed"
+				_ = o.executions.Save(ctx, *st)
+			}
 		}
 	}
 	return nil
@@ -238,8 +240,8 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 	stepID := firstNonEmpty(req.StepID, req.Target, pendingStepID)
 	planID := firstNonEmpty(req.PlanID, result.State.PlanID, pendingPlanID)
 	status := firstNonEmpty(result.State.Phase)
-	if result.PendingApproval != nil && result.PendingApproval.Status != "" {
-		status = result.PendingApproval.Status
+	if approval := result.Approval(); approval != nil && approval.Status != "" {
+		status = approval.Status
 	}
 
 	return &ResumeResult{
@@ -298,7 +300,7 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 						})
 						if execErr == nil && executed != nil {
 							for _, step := range executed.Steps {
-								stepState, ok := executed.State.Steps[step.StepID]
+								stepState, ok := executed.StepState(step.StepID)
 								if !ok {
 									stepState = runtime.StepState{StepID: step.StepID}
 								}
@@ -313,20 +315,20 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 									"user_visible_summary": step.Summary,
 								})
 							}
-							if executed.PendingApproval != nil {
-								stepState, ok := executed.State.Steps[executed.PendingApproval.StepID]
+							if approval := executed.Approval(); approval != nil {
+								stepState, ok := executed.StepState(approval.StepID)
 								if !ok {
-									stepState = runtime.StepState{StepID: executed.PendingApproval.StepID}
+									stepState = runtime.StepState{StepID: approval.StepID}
 								}
 								emitEvent(emit, events.ApprovalRequired, meta, map[string]any{
 									"session_id":           sessionID,
 									"plan_id":              executed.State.PlanID,
-									"step_id":              executed.PendingApproval.StepID,
-									"title":                executed.PendingApproval.Title,
-									"risk":                 executed.PendingApproval.Risk,
-									"mode":                 executed.PendingApproval.Mode,
-									"status":               executed.PendingApproval.Status,
-									"user_visible_summary": firstNonEmpty(executed.PendingApproval.Summary, stepState.UserVisibleSummary),
+									"step_id":              approval.StepID,
+									"title":                approval.Title,
+									"risk":                 approval.Risk,
+									"mode":                 approval.Mode,
+									"status":               approval.Status,
+									"user_visible_summary": firstNonEmpty(approval.Summary, stepState.UserVisibleSummary),
 								})
 							}
 							summaryOut := o.summarizeExecution(ctx, message, decision.Plan, executed)
