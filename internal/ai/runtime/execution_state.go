@@ -49,6 +49,10 @@ type StepState struct {
 	Status             StepStatus `json:"status"`
 	Mode               string     `json:"mode,omitempty"`
 	Risk               string     `json:"risk,omitempty"`
+	Attempts           int        `json:"attempts,omitempty"`
+	MaxAttempts        int        `json:"max_attempts,omitempty"`
+	IdempotencyKey     string     `json:"idempotency_key,omitempty"`
+	ApprovalSatisfied  bool       `json:"approval_satisfied,omitempty"`
 	UserVisibleSummary string     `json:"user_visible_summary,omitempty"`
 	ErrorCode          string     `json:"error_code,omitempty"`
 	ErrorMessage       string     `json:"error_message,omitempty"`
@@ -60,6 +64,10 @@ type PendingApproval struct {
 	StepID       string    `json:"step_id,omitempty"`
 	ApprovalKey  string    `json:"approval_key,omitempty"`
 	Status       string    `json:"status,omitempty"`
+	Title        string    `json:"title,omitempty"`
+	Mode         string    `json:"mode,omitempty"`
+	Risk         string    `json:"risk,omitempty"`
+	Summary      string    `json:"summary,omitempty"`
 	Approved     *bool     `json:"approved,omitempty"`
 	Reason       string    `json:"reason,omitempty"`
 	RequestedAt  time.Time `json:"requested_at,omitempty"`

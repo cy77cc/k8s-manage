@@ -8,12 +8,16 @@ import (
 )
 
 type Output struct {
-	NormalizedGoal string        `json:"normalized_goal"`
-	OperationMode  string        `json:"operation_mode"`
-	ResourceHints  ResourceHints `json:"resource_hints,omitempty"`
-	DomainHints    []string      `json:"domain_hints,omitempty"`
-	AmbiguityFlags []string      `json:"ambiguity_flags,omitempty"`
-	Narrative      string        `json:"narrative"`
+	RawUserInput      string            `json:"raw_user_input,omitempty"`
+	NormalizedRequest NormalizedRequest `json:"normalized_request,omitempty"`
+	Ambiguities       []string          `json:"ambiguities,omitempty"`
+	Assumptions       []string          `json:"assumptions,omitempty"`
+	NormalizedGoal    string            `json:"normalized_goal"`
+	OperationMode     string            `json:"operation_mode"`
+	ResourceHints     ResourceHints     `json:"resource_hints,omitempty"`
+	DomainHints       []string          `json:"domain_hints,omitempty"`
+	AmbiguityFlags    []string          `json:"ambiguity_flags,omitempty"`
+	Narrative         string            `json:"narrative"`
 }
 
 type ResourceHints struct {
@@ -21,6 +25,31 @@ type ResourceHints struct {
 	ClusterName string `json:"cluster_name,omitempty"`
 	HostName    string `json:"host_name,omitempty"`
 	Namespace   string `json:"namespace,omitempty"`
+}
+
+type NormalizedRequest struct {
+	Intent         string           `json:"intent,omitempty"`
+	Targets        []RequestTarget  `json:"targets,omitempty"`
+	Symptoms       []RequestSymptom `json:"symptoms,omitempty"`
+	Context        RequestContext   `json:"context,omitempty"`
+	UserHypotheses []string         `json:"user_hypotheses,omitempty"`
+	Priority       string           `json:"priority,omitempty"`
+}
+
+type RequestTarget struct {
+	Type string `json:"type,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+type RequestSymptom struct {
+	Type        string `json:"type,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type RequestContext struct {
+	TimeHint     string `json:"time_hint,omitempty"`
+	TriggerEvent string `json:"trigger_event,omitempty"`
+	Environment  string `json:"environment,omitempty"`
 }
 
 type Input struct {
@@ -63,23 +92,7 @@ func (r *Rewriter) Rewrite(ctx context.Context, in Input) (Output, error) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed); err != nil {
 		return out, nil
 	}
-	if strings.TrimSpace(parsed.NormalizedGoal) == "" {
-		return out, nil
-	}
-	parsed.OperationMode = normalizeMode(parsed.OperationMode, out.OperationMode)
-	if strings.TrimSpace(parsed.Narrative) == "" {
-		parsed.Narrative = out.Narrative
-	}
-	if len(parsed.DomainHints) == 0 {
-		parsed.DomainHints = out.DomainHints
-	}
-	if len(parsed.AmbiguityFlags) == 0 {
-		parsed.AmbiguityFlags = out.AmbiguityFlags
-	}
-	if parsed.ResourceHints == (ResourceHints{}) {
-		parsed.ResourceHints = out.ResourceHints
-	}
-	return parsed, nil
+	return normalizeOutput(in, parsed, out), nil
 }
 
 func heuristicRewrite(in Input) Output {
@@ -88,7 +101,7 @@ func heuristicRewrite(in Input) Output {
 	hints := detectResourceHints(message, in.SelectedResources)
 	domains := detectDomains(message, in.Scene)
 	ambiguity := make([]string, 0, 2)
-	if hints.ServiceName == "" && len(in.SelectedResources) == 0 {
+	if !hasExplicitResourceTarget(message, hints, in.SelectedResources) {
 		ambiguity = append(ambiguity, "resource_target_not_explicit")
 	}
 
@@ -96,14 +109,19 @@ func heuristicRewrite(in Input) Output {
 	if hints.ServiceName != "" && !strings.Contains(goal, hints.ServiceName) {
 		goal = goal + "，目标服务：" + hints.ServiceName
 	}
+	normalizedRequest, assumptions := inferRequestMetadata(message, mode, hints)
 
 	return Output{
-		NormalizedGoal: goal,
-		OperationMode:  mode,
-		ResourceHints:  hints,
-		DomainHints:    domains,
-		AmbiguityFlags: ambiguity,
-		Narrative:      buildNarrative(goal, mode, hints, domains, ambiguity),
+		RawUserInput:      message,
+		NormalizedRequest: normalizedRequest,
+		Ambiguities:       append([]string(nil), ambiguity...),
+		Assumptions:       assumptions,
+		NormalizedGoal:    goal,
+		OperationMode:     mode,
+		ResourceHints:     hints,
+		DomainHints:       domains,
+		AmbiguityFlags:    ambiguity,
+		Narrative:         buildNarrative(goal, mode, hints, domains, ambiguity),
 	}
 }
 
@@ -151,6 +169,9 @@ func detectMode(message string) string {
 
 func detectDomains(message, scene string) []string {
 	lower := strings.ToLower(message + " " + scene)
+	if mentionsAllHosts(lower) {
+		return []string{"hostops"}
+	}
 	out := make([]string, 0, 3)
 	appendIf := func(domain string, keywords ...string) {
 		for _, keyword := range keywords {
@@ -169,6 +190,178 @@ func detectDomains(message, scene string) []string {
 		out = append(out, "service")
 	}
 	return dedupe(out)
+}
+
+func inferRequestMetadata(message, mode string, hints ResourceHints) (NormalizedRequest, []string) {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	intent := "operations_request"
+	switch {
+	case mode == "mutate":
+		if hints.ServiceName != "" {
+			intent = "service_change_request"
+		} else {
+			intent = "infrastructure_change_request"
+		}
+	case containsAny(lower, "状态", "健康", "health", "status"):
+		intent = "service_health_check"
+	case containsAny(lower, "慢", "延迟", "latency", "性能"):
+		intent = "performance_investigation"
+	case containsAny(lower, "错误", "失败", "报错", "异常", "告警"):
+		intent = "incident_diagnosis"
+	}
+
+	targets := make([]RequestTarget, 0, 2)
+	switch {
+	case mentionsAllHosts(lower):
+		targets = append(targets, RequestTarget{Type: "host", Name: "all"})
+	case hints.HostName != "":
+		targets = append(targets, RequestTarget{Type: "host", Name: hints.HostName})
+	}
+	if hints.ServiceName != "" {
+		targets = append(targets, RequestTarget{Type: "service", Name: hints.ServiceName})
+	}
+	if hints.ClusterName != "" {
+		targets = append(targets, RequestTarget{Type: "cluster", Name: hints.ClusterName})
+	}
+	if hints.Namespace != "" {
+		targets = append(targets, RequestTarget{Type: "namespace", Name: hints.Namespace})
+	}
+
+	ctx := RequestContext{}
+	switch {
+	case containsAny(lower, "刚刚", "刚才", "刚", "最近", "latest", "recent"):
+		ctx.TimeHint = "recent"
+	case containsAny(lower, "今天", "today"):
+		ctx.TimeHint = "today"
+	}
+	if containsAny(lower, "发布", "部署", "上线", "rollout", "deploy") {
+		ctx.TriggerEvent = "deployment_related"
+	}
+	if containsAny(lower, "生产", "prod", "线上") {
+		ctx.Environment = "production"
+	} else if containsAny(lower, "测试", "staging", "预发") {
+		ctx.Environment = "staging"
+	}
+	hypotheses := make([]string, 0, 2)
+	if containsAny(lower, "是不是", "是否", "会不会", "怀疑") {
+		hypotheses = append(hypotheses, strings.TrimSpace(message))
+	}
+	priority := ""
+	switch {
+	case containsAny(lower, "紧急", "马上", "立刻", "urgent", "asap"):
+		priority = "high"
+	case containsAny(lower, "尽快", "优先", "priority"):
+		priority = "medium"
+	}
+	assumptions := make([]string, 0, 2)
+	if hints.ServiceName != "" {
+		assumptions = append(assumptions, "service_target_inferred_from_request")
+	}
+	if hints.Namespace != "" {
+		assumptions = append(assumptions, "namespace_inferred_from_request")
+	}
+	return NormalizedRequest{
+		Intent:         intent,
+		Targets:        targets,
+		Context:        ctx,
+		UserHypotheses: hypotheses,
+		Priority:       priority,
+	}, assumptions
+}
+
+func hasExplicitResourceTarget(message string, hints ResourceHints, resources []SelectedResource) bool {
+	if len(resources) > 0 {
+		return true
+	}
+	if hints != (ResourceHints{}) {
+		return true
+	}
+	lower := strings.ToLower(strings.TrimSpace(message))
+	return mentionsAllHosts(lower) ||
+		containsAny(lower, "所有服务", "全部服务", "所有集群", "全部集群", "所有pod", "全部pod", "全部主机状态", "所有主机状态")
+}
+
+func mentionsAllHosts(lower string) bool {
+	return containsAny(lower,
+		"所有主机", "全部主机",
+		"所有机器", "全部机器",
+		"所有服务器", "全部服务器",
+	)
+}
+
+func constrainDomains(parsed Output, heuristic []string) []string {
+	for _, target := range parsed.NormalizedRequest.Targets {
+		switch strings.TrimSpace(target.Type) {
+		case "host":
+			return []string{"hostops"}
+		case "service":
+			return []string{"service"}
+		case "cluster", "namespace":
+			return []string{"k8s"}
+		}
+	}
+	if len(parsed.DomainHints) == 0 {
+		return heuristic
+	}
+	return dedupe(parsed.DomainHints)
+}
+
+func constrainAmbiguity(parsed Output, resources []SelectedResource, fallback []string) []string {
+	current := parsed.AmbiguityFlags
+	if len(current) == 0 {
+		current = fallback
+	}
+	if hasExplicitResourceTarget(parsed.RawUserInput, parsed.ResourceHints, resources) || len(parsed.NormalizedRequest.Targets) > 0 {
+		out := make([]string, 0, len(current))
+		for _, flag := range current {
+			if strings.TrimSpace(flag) == "resource_target_not_explicit" {
+				continue
+			}
+			out = append(out, flag)
+		}
+		return dedupe(out)
+	}
+	return dedupe(current)
+}
+
+func mergeNormalizedRequest(parsed, fallback NormalizedRequest) NormalizedRequest {
+	if strings.TrimSpace(parsed.Intent) == "" {
+		parsed.Intent = fallback.Intent
+	}
+	if len(parsed.Targets) == 0 {
+		parsed.Targets = fallback.Targets
+	}
+	if len(parsed.Symptoms) == 0 {
+		parsed.Symptoms = fallback.Symptoms
+	}
+	if parsed.Context == (RequestContext{}) {
+		parsed.Context = fallback.Context
+	}
+	if len(parsed.UserHypotheses) == 0 {
+		parsed.UserHypotheses = fallback.UserHypotheses
+	}
+	if strings.TrimSpace(parsed.Priority) == "" {
+		parsed.Priority = fallback.Priority
+	}
+	return parsed
+}
+
+func normalizeOutput(in Input, parsed, fallback Output) Output {
+	if strings.TrimSpace(parsed.NormalizedGoal) == "" {
+		parsed.NormalizedGoal = fallback.NormalizedGoal
+	}
+	parsed.RawUserInput = firstNonEmpty(parsed.RawUserInput, strings.TrimSpace(in.Message))
+	parsed.OperationMode = normalizeMode(parsed.OperationMode, fallback.OperationMode)
+	if parsed.ResourceHints == (ResourceHints{}) {
+		parsed.ResourceHints = fallback.ResourceHints
+	}
+	parsed.NormalizedRequest = mergeNormalizedRequest(parsed.NormalizedRequest, fallback.NormalizedRequest)
+	parsed.Assumptions = dedupe(parsed.Assumptions)
+	parsed.Ambiguities = dedupe(parsed.Ambiguities)
+	parsed.DomainHints = constrainDomains(parsed, fallback.DomainHints)
+	parsed.AmbiguityFlags = constrainAmbiguity(parsed, in.SelectedResources, fallback.AmbiguityFlags)
+	parsed.Narrative = buildNarrative(parsed.NormalizedGoal, parsed.OperationMode, parsed.ResourceHints, parsed.DomainHints, parsed.AmbiguityFlags)
+	return parsed
 }
 
 func detectResourceHints(message string, resources []SelectedResource) ResourceHints {

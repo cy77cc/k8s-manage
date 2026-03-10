@@ -41,7 +41,9 @@ export interface ToolTrace {
 export interface AIInterruptApprovalResponse {
   checkpoint_id?: string;
   session_id?: string;
-  target: string;
+  plan_id?: string;
+  step_id?: string;
+  target?: string;
   approved: boolean;
   reason?: string;
 }
@@ -51,6 +53,10 @@ export interface AIInterruptApprovalResult {
   interrupted?: boolean;
   content?: string;
   sessionId?: string;
+  session_id?: string;
+  plan_id?: string;
+  step_id?: string;
+  status?: string;
   interrupt_targets?: string[];
   interrupt_contexts?: any[];
   approval_required?: boolean;
@@ -108,6 +114,53 @@ interface SSEMetaEvent {
 interface SSEDeltaEvent {
   contentChunk: string;
   turn_id?: string;
+}
+
+export interface SSERewriteResultEvent {
+  rewrite?: Record<string, unknown>;
+  user_visible_summary?: string;
+}
+
+export interface SSEPlannerStateEvent {
+  status?: string;
+  user_visible_summary?: string;
+}
+
+export interface SSEPlanCreatedEvent {
+  plan?: Record<string, unknown>;
+  user_visible_summary?: string;
+}
+
+export interface SSEStepUpdateEvent {
+  plan_id?: string;
+  step_id?: string;
+  status?: string;
+  title?: string;
+  expert?: string;
+  user_visible_summary?: string;
+}
+
+export interface SSEClarifyRequiredEvent {
+  kind?: 'clarify';
+  title?: string;
+  message?: string;
+  candidates?: Array<Record<string, unknown>>;
+}
+
+export interface SSEReplanStartedEvent {
+  reason?: string;
+  previous_plan_id?: string;
+}
+
+export interface SSESummaryEvent {
+  output?: {
+    summary?: string;
+    conclusion?: string;
+    next_actions?: string[];
+    need_more_investigation?: boolean;
+    narrative?: string;
+    replan_hint?: Record<string, unknown>;
+  };
 }
 
 function toContentChunk(payload: unknown): string {
@@ -169,7 +222,14 @@ export interface SSEExpertProgressEvent {
 
 export interface AIChatStreamHandlers {
   onMeta?: (payload: SSEMetaEvent) => void;
+  onRewriteResult?: (payload: SSERewriteResultEvent) => void;
+  onPlannerState?: (payload: SSEPlannerStateEvent) => void;
+  onPlanCreated?: (payload: SSEPlanCreatedEvent) => void;
+  onStepUpdate?: (payload: SSEStepUpdateEvent) => void;
   onDelta?: (payload: SSEDeltaEvent) => void;
+  onClarifyRequired?: (payload: SSEClarifyRequiredEvent) => void;
+  onReplanStarted?: (payload: SSEReplanStartedEvent) => void;
+  onSummary?: (payload: SSESummaryEvent) => void;
   onDone?: (payload: SSEDoneEvent) => void;
   onError?: (payload: SSEErrorEvent) => void;
   onThinkingDelta?: (payload: SSEThinkingEvent) => void;
@@ -417,6 +477,14 @@ export const aiApi = {
 
       if (eventType === 'meta') {
         handlers.onMeta?.(payload as SSEMetaEvent);
+      } else if (eventType === 'rewrite_result') {
+        handlers.onRewriteResult?.(payload as SSERewriteResultEvent);
+      } else if (eventType === 'planner_state') {
+        handlers.onPlannerState?.(payload as SSEPlannerStateEvent);
+      } else if (eventType === 'plan_created') {
+        handlers.onPlanCreated?.(payload as SSEPlanCreatedEvent);
+      } else if (eventType === 'step_update') {
+        handlers.onStepUpdate?.(payload as SSEStepUpdateEvent);
       } else if (eventType === 'delta' || eventType === 'message') {
         const contentChunk = toContentChunk(payload);
         if (contentChunk) {
@@ -451,6 +519,14 @@ export const aiApi = {
         handlers.onApprovalRequired?.(payload as ApprovalTicket & { approval_required?: boolean; previewDiff?: string });
         toolPending = false;
         clearToolTimer();
+      } else if (eventType === 'clarify_required') {
+        handlers.onClarifyRequired?.(payload as SSEClarifyRequiredEvent);
+        toolPending = false;
+        clearToolTimer();
+      } else if (eventType === 'replan_started') {
+        handlers.onReplanStarted?.(payload as SSEReplanStartedEvent);
+      } else if (eventType === 'summary') {
+        handlers.onSummary?.(payload as SSESummaryEvent);
       } else if (eventType === 'confirmation_required') {
         handlers.onConfirmationRequired?.(payload as { turn_id?: string; tool?: string; confirmation_token?: string; expiresAt?: string; preview?: Record<string, any>; message?: string });
         toolPending = false;
@@ -569,7 +645,7 @@ export const aiApi = {
   },
 
   async respondApproval(params: AIInterruptApprovalResponse): Promise<ApiResponse<AIInterruptApprovalResult>> {
-    return apiService.post('/ai/approval/respond', params);
+    return apiService.post('/ai/resume/step', params);
   },
 
   async confirmConfirmation(id: string, approve: boolean): Promise<ApiResponse<ConfirmationTicket>> {

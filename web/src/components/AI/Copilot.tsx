@@ -19,13 +19,14 @@ import {
   Conversations,
   Prompts,
   Sender,
+  ThoughtChain,
   Welcome,
 } from '@ant-design/x';
 import type { BubbleListRef, BubbleProps } from '@ant-design/x/es/bubble';
 import { Button, message, Popover, Select, Space, Tooltip, theme, Skeleton } from 'antd';
 import dayjs from 'dayjs';
 import { getSceneLabel } from './constants/sceneMapping';
-import type { ChatMessage, EmbeddedRecommendation } from './types';
+import type { ChatMessage, EmbeddedRecommendation, SSEEventType, ThoughtStageItem, ThoughtStageStatus } from './types';
 import type { SceneOption } from './hooks/useAutoScene';
 import { useConversationRestore, type RestoredConversation } from './hooks/useConversationRestore';
 import { useScenePrompts } from './hooks/useScenePrompts';
@@ -35,30 +36,58 @@ import { normalizeAssistantMessage } from './messageBlocks';
 
 const { useToken } = theme;
 
-// SSE 事件类型
-type SSEEventType =
-  | 'meta'
-  | 'plan_created'
-  | 'step_status'
-  | 'delta'
-  | 'message'
-  | 'thinking_delta'
-  | 'tool_call'
-  | 'tool_result'
-  | 'ask_user'
-  | 'approval_required'
-  | 'confirmation_required'
-  | 'replan_decision'
-  | 'summary'
-  | 'next_actions'
-  | 'done'
-  | 'error'
-  | 'heartbeat';
-
 // 扩展消息类型，包含 thinking 和 recommendations
 interface ExtendedChatMessage extends ChatMessage {
   thinking?: string;
   recommendations?: EmbeddedRecommendation[];
+}
+
+function upsertThoughtStage(
+  stages: ThoughtStageItem[],
+  patch: Partial<ThoughtStageItem> & Pick<ThoughtStageItem, 'key' | 'title' | 'status'>
+): ThoughtStageItem[] {
+  const index = stages.findIndex((item) => item.key === patch.key);
+  const next: ThoughtStageItem = {
+    key: patch.key,
+    title: patch.title,
+    status: patch.status,
+    description: patch.description,
+    content: patch.content,
+    footer: patch.footer,
+    collapsible: patch.collapsible ?? true,
+    blink: patch.blink ?? patch.status === 'loading',
+  };
+  if (index === -1) {
+    return [...stages, next];
+  }
+  const merged = {
+    ...stages[index],
+    ...next,
+    blink: patch.blink ?? next.status === 'loading',
+  };
+  return stages.map((item, itemIndex) => (itemIndex === index ? merged : item));
+}
+
+function normalizeThoughtStatus(status: string | undefined, fallback: ThoughtStageStatus = 'loading'): ThoughtStageStatus {
+  switch (status) {
+    case 'completed':
+    case 'success':
+      return 'success';
+    case 'failed':
+    case 'error':
+    case 'blocked':
+      return 'error';
+    case 'cancelled':
+    case 'rejected':
+      return 'abort';
+    case 'running':
+    case 'waiting_approval':
+    case 'planning':
+    case 'replanning':
+      return 'loading';
+    default:
+      return fallback;
+  }
 }
 
 // 助手消息渲染组件
@@ -303,6 +332,7 @@ export const Copilot: React.FC<CopilotProps> = ({
 
   // 会话 ID
   const [sessionId, setSessionId] = useState<string | undefined>();
+  const [thoughtStages, setThoughtStages] = useState<ThoughtStageItem[]>([]);
 
   // 发送消息
   const handleSubmit = useCallback(async (val: string) => {
@@ -323,6 +353,7 @@ export const Copilot: React.FC<CopilotProps> = ({
     }));
 
     setIsLoading(true);
+    setThoughtStages([]);
 
     // 创建助手消息占位
     const assistantId = `assistant-${Date.now()}`;
@@ -362,6 +393,54 @@ export const Copilot: React.FC<CopilotProps> = ({
               }
               break;
 
+            case 'rewrite_result':
+              setThoughtStages((prev) =>
+                upsertThoughtStage(prev, {
+                  key: 'rewrite',
+                  title: '理解你的问题',
+                  status: 'success',
+                  description: '已将口语化输入整理为可规划任务',
+                  content: String(data.user_visible_summary || ''),
+                })
+              );
+              break;
+
+            case 'planner_state':
+              setThoughtStages((prev) =>
+                upsertThoughtStage(prev, {
+                  key: 'plan',
+                  title: '整理排查计划',
+                  status: normalizeThoughtStatus(data.status as string | undefined, 'loading'),
+                  description: String(data.user_visible_summary || '正在根据 Rewrite 结果整理计划'),
+                  content: String(data.user_visible_summary || ''),
+                })
+              );
+              break;
+
+            case 'plan_created':
+              setThoughtStages((prev) =>
+                upsertThoughtStage(prev, {
+                  key: 'plan',
+                  title: '整理排查计划',
+                  status: 'success',
+                  description: '已生成结构化计划',
+                  content: String(data.user_visible_summary || ''),
+                })
+              );
+              break;
+
+            case 'step_update':
+              setThoughtStages((prev) =>
+                upsertThoughtStage(prev, {
+                  key: 'execute',
+                  title: '调用专家执行',
+                  status: normalizeThoughtStatus(data.status as string | undefined, 'loading'),
+                  description: String(data.title || '正在推进计划步骤'),
+                  content: String(data.user_visible_summary || ''),
+                })
+              );
+              break;
+
             case 'delta':
             case 'message':
               assistantContent += resolveStreamContent(data);
@@ -371,19 +450,57 @@ export const Copilot: React.FC<CopilotProps> = ({
               assistantThinking += (data.contentChunk as string) || '';
               break;
 
-            case 'summary':
-              assistantContent = String(data.summary || assistantContent || '');
+            case 'approval_required':
+              setThoughtStages((prev) =>
+                upsertThoughtStage(prev, {
+                  key: 'user_action',
+                  title: '等待你确认',
+                  status: 'loading',
+                  description: String(data.title || '当前步骤需要审批后继续执行'),
+                  content: String(data.user_visible_summary || ''),
+                })
+              );
               break;
 
-            case 'ask_user':
-              assistantContent ||= String(data.description || data.title || '需要你确认后继续执行');
+            case 'clarify_required':
+              setThoughtStages((prev) =>
+                upsertThoughtStage(prev, {
+                  key: 'user_action',
+                  title: '等待你补充信息',
+                  status: 'loading',
+                  description: String(data.message || data.title || '当前目标仍有歧义'),
+                  content: String(data.message || ''),
+                })
+              );
+              assistantContent ||= String(data.message || '');
               break;
 
-            case 'replan_decision':
-              if (data.outcome === 'ask_user') {
-                assistantContent ||= String(data.rationale || '当前执行未完成，需要你决定下一步动作');
-              }
+            case 'replan_started':
+              setThoughtStages((prev) =>
+                upsertThoughtStage(prev, {
+                  key: 'plan',
+                  title: '整理排查计划',
+                  status: 'loading',
+                  description: '正在开始新一轮规划',
+                  content: String(data.reason || ''),
+                })
+              );
               break;
+
+            case 'summary': {
+              const output = (data.output as Record<string, unknown> | undefined) || {};
+              setThoughtStages((prev) =>
+                upsertThoughtStage(prev, {
+                  key: 'summary',
+                  title: '生成结论',
+                  status: 'success',
+                  description: String(output.summary || ''),
+                  content: String(output.narrative || output.conclusion || output.summary || ''),
+                })
+              );
+              assistantContent ||= String(output.conclusion || output.summary || assistantContent || '');
+              break;
+            }
 
             case 'done':
               // 提取推荐
@@ -399,10 +516,20 @@ export const Copilot: React.FC<CopilotProps> = ({
                   setSessionId(session.id as string);
                 }
               }
+              setThoughtStages((prev) =>
+                prev.map((item) => ({
+                  ...item,
+                  blink: false,
+                  status: item.status === 'loading' ? 'success' : item.status,
+                }))
+              );
               setIsLoading(false);
               break;
 
             case 'error':
+              setThoughtStages((prev) =>
+                prev.map((item, index) => index === prev.length - 1 ? { ...item, status: 'error', blink: false } : item)
+              );
               setIsLoading(false);
               break;
           }
@@ -454,6 +581,7 @@ export const Copilot: React.FC<CopilotProps> = ({
     ]);
     setActiveKey(timeNow);
     setSessionId(undefined);
+    setThoughtStages([]);
   }, []);
 
   // 场景选择器
@@ -649,6 +777,23 @@ export const Copilot: React.FC<CopilotProps> = ({
         flexDirection: 'column',
         minHeight: 0,
       }}>
+        {thoughtStages.length > 0 && (
+          <div style={{ padding: '12px 16px 0' }}>
+            <ThoughtChain
+              items={thoughtStages.map((item) => ({
+                key: item.key,
+                title: item.title,
+                description: item.description,
+                content: item.content,
+                footer: item.footer,
+                status: item.status,
+                collapsible: item.collapsible,
+                blink: item.blink,
+              }))}
+              defaultExpandedKeys={thoughtStages.map((item) => item.key)}
+            />
+          </div>
+        )}
         {/* 恢复会话中的加载状态 */}
         {isRestoring ? (
           <div style={{ padding: 16 }}>

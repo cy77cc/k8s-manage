@@ -13,6 +13,7 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/rewrite"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
 	"github.com/cy77cc/OpsPilot/internal/ai/state"
+	"github.com/cy77cc/OpsPilot/internal/ai/summarizer"
 	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
 	"github.com/google/uuid"
 )
@@ -25,6 +26,8 @@ type Orchestrator struct {
 	rewriter   *rewrite.Rewriter
 	planner    *planner.Planner
 	executor   *executor.Executor
+	summarizer *summarizer.Summarizer
+	maxIters   int
 }
 
 func NewOrchestrator(sessions *state.SessionState, executions *runtime.ExecutionStore, deps common.PlatformDeps) *Orchestrator {
@@ -32,9 +35,10 @@ func NewOrchestrator(sessions *state.SessionState, executions *runtime.Execution
 		sessions:   sessions,
 		executions: executions,
 		executor:   executor.New(executions),
+		maxIters:   2,
 	}
 	bootstrapCtx := context.Background()
-	if rewriteModel, err := NewToolCallingChatModel(bootstrapCtx); err == nil {
+	if rewriteModel, err := NewRewriteChatModel(bootstrapCtx); err == nil {
 		if stageRunner, stageErr := rewrite.NewADKRunner(bootstrapCtx, rewriteModel); stageErr == nil {
 			out.rewriter = rewrite.New(stageRunner)
 		}
@@ -42,6 +46,11 @@ func NewOrchestrator(sessions *state.SessionState, executions *runtime.Execution
 	if plannerModel, err := NewToolCallingChatModel(bootstrapCtx); err == nil {
 		if stageRunner, stageErr := planner.NewADKRunner(bootstrapCtx, plannerModel, deps); stageErr == nil {
 			out.planner = planner.New(stageRunner)
+		}
+	}
+	if summarizerModel, err := NewSummarizerChatModel(bootstrapCtx); err == nil {
+		if stageRunner, stageErr := summarizer.NewADKRunner(bootstrapCtx, summarizerModel); stageErr == nil {
+			out.summarizer = summarizer.New(stageRunner)
 		}
 	}
 	return out
@@ -167,20 +176,42 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
-	if o.executions == nil {
+	if o.executor == nil {
 		return &ResumeResult{
 			Resumed:   false,
 			SessionID: sessionID,
 			Status:    "unavailable",
-			Message:   "execution store is not configured",
+			Message:   "executor is not configured",
 		}, nil
 	}
-
-	st, err := o.executions.Load(ctx, sessionID)
+	if o.executions != nil {
+		if st, err := o.executions.Load(ctx, sessionID); err == nil && st != nil && st.PendingApproval != nil {
+			stepID := firstNonEmpty(req.StepID, req.Target, st.PendingApproval.StepID)
+			planID := firstNonEmpty(req.PlanID, st.PlanID, st.PendingApproval.PlanID)
+			decisionHash := runtime.ApprovalDecisionHash(planID, stepID, req.Approved)
+			if st.PendingApproval.DecisionHash == decisionHash {
+				return &ResumeResult{
+					Resumed:   true,
+					SessionID: sessionID,
+					PlanID:    planID,
+					StepID:    stepID,
+					Status:    "idempotent",
+					Message:   "duplicate approval request ignored",
+				}, nil
+			}
+		}
+	}
+	result, err := o.executor.Resume(ctx, executor.ResumeRequest{
+		SessionID: sessionID,
+		PlanID:    req.PlanID,
+		StepID:    firstNonEmpty(req.StepID, req.Target),
+		Approved:  req.Approved,
+		Reason:    req.Reason,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if st == nil {
+	if result == nil {
 		return &ResumeResult{
 			Resumed:   false,
 			SessionID: sessionID,
@@ -188,48 +219,21 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 			Message:   "execution state not found",
 		}, nil
 	}
-
-	if st.PendingApproval == nil {
+	if result.State.SessionID == "" {
 		return &ResumeResult{
 			Resumed:   false,
 			SessionID: sessionID,
-			PlanID:    st.PlanID,
+			PlanID:    req.PlanID,
 			StepID:    firstNonEmpty(req.StepID, req.Target),
 			Status:    "noop",
 			Message:   "no pending approval for this session",
 		}, nil
 	}
-	stepID := firstNonEmpty(req.StepID, req.Target, st.PendingApproval.StepID)
-	planID := firstNonEmpty(req.PlanID, st.PlanID, st.PendingApproval.PlanID)
-
-	decisionHash := runtime.ApprovalDecisionHash(planID, stepID, req.Approved)
-	if st.PendingApproval.DecisionHash == decisionHash {
-		return &ResumeResult{
-			Resumed:   true,
-			SessionID: sessionID,
-			PlanID:    planID,
-			StepID:    stepID,
-			Status:    "idempotent",
-			Message:   "duplicate approval request ignored",
-		}, nil
-	}
-
-	now := time.Now().UTC()
-	st.PendingApproval.Approved = &req.Approved
-	st.PendingApproval.Reason = strings.TrimSpace(req.Reason)
-	st.PendingApproval.ResolvedAt = now
-	st.PendingApproval.DecisionHash = decisionHash
-	if req.Approved {
-		st.PendingApproval.Status = "approved"
-		st.Status = runtime.ExecutionStatusRunning
-		st.Phase = "resume_requested"
-	} else {
-		st.PendingApproval.Status = "rejected"
-		st.Status = runtime.ExecutionStatusFailed
-		st.Phase = "cancelled"
-	}
-	if err := o.executions.Save(ctx, *st); err != nil {
-		return nil, err
+	stepID := firstNonEmpty(req.StepID, req.Target, result.State.PendingApproval.StepID)
+	planID := firstNonEmpty(req.PlanID, result.State.PlanID, result.State.PendingApproval.PlanID)
+	status := firstNonEmpty(result.State.Phase)
+	if result.PendingApproval != nil && result.PendingApproval.Status != "" {
+		status = result.PendingApproval.Status
 	}
 
 	return &ResumeResult{
@@ -238,7 +242,7 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 		SessionID:   sessionID,
 		PlanID:      planID,
 		StepID:      stepID,
-		Status:      st.PendingApproval.Status,
+		Status:      status,
 		Message:     approvalMessage(req.Approved),
 	}, nil
 }
@@ -273,7 +277,7 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 						"user_visible_summary": decision.Narrative,
 					})
 					if o.executor != nil {
-						prepared, prepErr := o.executor.SavePreparedState(ctx, executor.Request{
+						executed, execErr := o.executor.Run(ctx, executor.Request{
 							TraceID:   meta.TraceID,
 							SessionID: sessionID,
 							Message:   message,
@@ -286,18 +290,48 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 								ResourceIDs: selectedResourceIDs(runtimeCtx.SelectedResources),
 							},
 						})
-						if prepErr == nil && prepared != nil {
-							for _, step := range prepared.Steps {
+						if execErr == nil && executed != nil {
+							for _, step := range executed.Steps {
 								stepMeta := meta
 								stepMeta.StepID = step.StepID
 								emitEvent(emit, events.StepUpdate, stepMeta, map[string]any{
-									"plan_id":              prepared.State.PlanID,
+									"plan_id":              executed.State.PlanID,
 									"step_id":              step.StepID,
 									"status":               step.Status,
-									"title":                prepared.State.Steps[step.StepID].Title,
-									"expert":               prepared.State.Steps[step.StepID].Expert,
+									"title":                executed.State.Steps[step.StepID].Title,
+									"expert":               executed.State.Steps[step.StepID].Expert,
 									"user_visible_summary": step.Summary,
 								})
+							}
+							if executed.PendingApproval != nil {
+								stepState := executed.State.Steps[executed.PendingApproval.StepID]
+								emitEvent(emit, events.ApprovalRequired, meta, map[string]any{
+									"session_id":           sessionID,
+									"plan_id":              executed.State.PlanID,
+									"step_id":              executed.PendingApproval.StepID,
+									"title":                executed.PendingApproval.Title,
+									"risk":                 executed.PendingApproval.Risk,
+									"mode":                 executed.PendingApproval.Mode,
+									"status":               executed.PendingApproval.Status,
+									"user_visible_summary": firstNonEmpty(executed.PendingApproval.Summary, stepState.UserVisibleSummary),
+								})
+							}
+							summaryOut := o.summarizeExecution(ctx, message, decision.Plan, executed)
+							emitEvent(emit, events.Summary, meta, map[string]any{
+								"output": summaryOut,
+							})
+							if summaryOut.NeedMoreInvestigation && meta.Iteration < o.maxIters {
+								reason := ""
+								if summaryOut.ReplanHint != nil {
+									reason = summaryOut.ReplanHint.Reason
+								}
+								emitEvent(emit, events.ReplanStarted, meta, map[string]any{
+									"reason":           reason,
+									"previous_plan_id": executed.State.PlanID,
+								})
+							}
+							if body := firstNonEmpty(summaryOut.Conclusion, summaryOut.Summary); body != "" {
+								return body, nil
 							}
 						}
 					}
@@ -385,6 +419,40 @@ func approvalMessage(approved bool) string {
 		return "审批已记录，执行链路可继续恢复"
 	}
 	return "审批已拒绝，当前执行已保持中断"
+}
+
+func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result) summarizer.SummaryOutput {
+	if result == nil {
+		return summarizer.SummaryOutput{
+			Summary:   "当前执行结果不可用。",
+			Narrative: "Summarizer 未拿到 executor result，因此回退到保守总结。",
+		}
+	}
+	if o.summarizer == nil {
+		fallback, _ := summarizer.New(nil).Summarize(context.Background(), summarizer.Input{
+			Message: message,
+			Plan:    plan,
+			State:   result.State,
+			Steps:   result.Steps,
+		})
+		return fallback
+	}
+	out, err := o.summarizer.Summarize(ctx, summarizer.Input{
+		Message: message,
+		Plan:    plan,
+		State:   result.State,
+		Steps:   result.Steps,
+	})
+	if err != nil {
+		fallback, _ := summarizer.New(nil).Summarize(context.Background(), summarizer.Input{
+			Message: message,
+			Plan:    plan,
+			State:   result.State,
+			Steps:   result.Steps,
+		})
+		return fallback
+	}
+	return out
 }
 
 func toRewriteResources(items []SelectedResource) []rewrite.SelectedResource {

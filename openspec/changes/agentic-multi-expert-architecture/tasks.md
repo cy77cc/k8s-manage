@@ -142,14 +142,14 @@
 - [x] 定义 `StepError` 与错误码
 
 ### 5.3 Approval And Retry
-- [ ] 定义 `ApprovalDecision`
-- [ ] 明确 `readonly/low`、`medium`、`high` 风险策略
-- [ ] 实现审批前持久化
-- [ ] 实现审批后恢复
-- [ ] 实现重试逻辑
-- [ ] 约束非幂等写工具不得自动重试
-- [ ] 为 resume / approval 补充幂等键或等价去重机制
-- [ ] 明确“重复批准请求不得重复执行副作用”
+- [x] 定义 `ApprovalDecision`
+- [x] 明确 `readonly/low`、`medium`、`high` 风险策略
+- [x] 实现审批前持久化
+- [x] 实现审批后恢复
+- [x] 实现重试逻辑
+- [x] 约束非幂等写工具不得自动重试
+- [x] 为 resume / approval 补充幂等键或等价去重机制
+- [x] 明确“重复批准请求不得重复执行副作用”
 
 ### 5.4 Step Output
 - [x] 定义 `StepResult`
@@ -162,77 +162,77 @@
 目标：在执行完成后生成用户可读总结，并决定是否需要补充调查。
 
 ### 6.1 Summary Contract
-- [ ] 定义 `SummaryOutput`
-- [ ] 包含 `summary / conclusion / next_actions / need_more_investigation / narrative`
-- [ ] 约束 `summary` 作为最终结构化结论，而不是正文流式输出替代物
+- [x] 定义 `SummaryOutput`
+- [x] 包含 `summary / conclusion / next_actions / need_more_investigation / narrative`
+- [x] 约束 `summary` 作为最终结构化结论，而不是正文流式输出替代物
 
 ### 6.2 Summarizer Runtime
-- [ ] 创建 `internal/ai/summarizer/` 目录
-- [ ] 实现 `summarizer.go`
-- [ ] 实现 `prompt.go`
-- [ ] 定义 `NeedMoreInvestigation` 判定规则
-- [ ] 定义 `ReplanHint` 或等价重规划提示结构
-- [ ] 实现 `Summary -> Replan` 回路契约
-- [ ] 实现最大迭代次数控制
-- [ ] 输出 `summary` 事件
+- [x] 创建 `internal/ai/summarizer/` 目录
+- [x] 实现 `summarizer.go`
+- [x] 实现 `prompt.go`
+- [x] 定义 `NeedMoreInvestigation` 判定规则
+- [x] 定义 `ReplanHint` 或等价重规划提示结构
+- [x] 实现 `Summary -> Replan` 回路契约
+- [x] 实现最大迭代次数控制
+- [x] 输出 `summary` 事件
 
 ## Stage 7: Event Stream And ThoughtChain
 
 目标：建立面向前端的高层事件语义，并用 ThoughtChain 承载阶段过程。
 
 ### 7.1 Event Schema
-- [ ] 定义 `rewrite_result`
-- [ ] 定义 `planner_state`
-- [ ] 定义 `plan_created`
-- [ ] 定义 `step_update`
-- [ ] 定义 `approval_required`
-- [ ] 定义 `clarify_required`
-- [ ] 定义 `replan_started`
-- [ ] 定义 `delta`
-- [ ] 定义 `summary`
-- [ ] 定义 `done / error`
+- [x] 定义 `rewrite_result`
+- [x] 定义 `planner_state`
+- [x] 定义 `plan_created`
+- [x] 定义 `step_update`
+- [x] 定义 `approval_required`
+- [x] 定义 `clarify_required`
+- [x] 定义 `replan_started`
+- [x] 定义 `delta`
+- [x] 定义 `summary`
+- [x] 定义 `done / error`
 
 ### 7.2 Frontend Contract
-- [ ] 定义 ThoughtChain 阶段模型：`rewrite / plan / execute / user_action / summary`
-- [ ] 为每个阶段定义标题、描述、内容、状态映射
-- [ ] 约束前端主体验消费高层事件
+- [x] 定义 ThoughtChain 阶段模型：`rewrite / plan / execute / user_action / summary`
+- [x] 为每个阶段定义标题、描述、内容、状态映射
+- [x] 约束前端主体验消费高层事件
 - [ ] 保留 `tool_call / tool_result` 作为补充信息，而不是主流程
-- [ ] 明确 `delta` 用于正文流式输出，`summary` 用于结构化结论
+- [x] 明确 `delta` 用于正文流式输出，`summary` 用于结构化结论
 
 ### 7.3 ThoughtChain UI
-- [ ] 在 AI 面板引入 `ThoughtChain`
-- [ ] 将 `rewrite_result` 映射到 `rewrite`
-- [ ] 将 `plan_created` 映射到 `plan`
-- [ ] 将 `step_update` 聚合到 `execute`
-- [ ] 将 `approval_required / clarify_required` 映射到 `user_action`
-- [ ] 明确区分 `clarify` 与 `approval` 的标题、说明、CTA、恢复语义
-- [ ] 将 `replan_started` 映射为新一轮规划提示或迭代状态
-- [ ] 将 `summary` 映射到 `summary`
-- [ ] 保持正文回答独立渲染，不与 ThoughtChain 混淆
+- [x] 在 AI 面板引入 `ThoughtChain`
+- [x] 将 `rewrite_result` 映射到 `rewrite`
+- [x] 将 `plan_created` 映射到 `plan`
+- [x] 将 `step_update` 聚合到 `execute`
+- [x] 将 `approval_required / clarify_required` 映射到 `user_action`
+- [x] 明确区分 `clarify` 与 `approval` 的标题、说明、CTA、恢复语义
+- [x] 将 `replan_started` 映射为新一轮规划提示或迭代状态
+- [x] 将 `summary` 映射到 `summary`
+- [x] 保持正文回答独立渲染，不与 ThoughtChain 混淆
 
 ## Stage 8: Resume API And Gateway Alignment
 
 目标：将审批和恢复模型从旧 checkpoint 语义收敛到 plan-step 语义，同时保持网关映射清晰。
 
 ### 8.1 Resume Model
-- [ ] 将恢复接口收敛到 `session_id + plan_id + step_id`
-- [ ] 明确前端审批请求模型
+- [x] 将恢复接口收敛到 `session_id + plan_id + step_id`
+- [x] 明确前端审批请求模型
 - [ ] 明确 rejected/cancelled 的用户可见语义
-- [ ] 明确重复恢复请求的幂等响应语义
+- [x] 明确重复恢复请求的幂等响应语义
 
 ### 8.2 Gateway Alignment
-- [ ] 对齐 `/api/v1/ai/chat`
-- [ ] 定义规范的 step-resume 接口，并将 `/api/v1/ai/approval/respond` 映射到该语义
+- [x] 对齐 `/api/v1/ai/chat`
+- [x] 定义规范的 step-resume 接口，并将 `/api/v1/ai/approval/respond` 映射到该语义
 - [ ] 为 `/api/v1/ai/adk/resume` 定义兼容策略，避免继续暴露旧 checkpoint 心智模型
-- [ ] 统一 route 层与 orchestrator host 的请求映射
+- [x] 统一 route 层与 orchestrator host 的请求映射
 
 ### 8.3 Model Guardrails
 - [ ] 补充运行时和 prompt 约束，避免模型在 Rewrite / Planner / Expert / Summarizer 阶段跑偏
 
 #### Rewrite Guardrails
-- [ ] 明确 Rewrite MUST NOT 伪造资源 ID、权限结果、执行结论
-- [ ] 明确 Rewrite 遇到歧义时保留 `ambiguity_flags`，而不是擅自消歧
-- [ ] 定义进入 `clarify` 的歧义阈值或等价判定规则
+- [x] 明确 Rewrite MUST NOT 伪造资源 ID、权限结果、执行结论
+- [x] 明确 Rewrite 遇到歧义时保留 `ambiguity_flags`，而不是擅自消歧
+- [x] 定义进入 `clarify` 的歧义阈值或等价判定规则
 
 #### Planner Guardrails
 - [ ] 明确 Planner 在 unresolved / ambiguous 资源场景 MUST 输出 `clarify`
@@ -254,14 +254,14 @@
 目标：验证新架构的契约、执行链路和前端体验。
 
 ### 9.1 Unit Tests
-- [ ] Rewrite 输出协议测试
+- [x] Rewrite 输出协议测试
 - [ ] Planner 决策协议测试
 - [ ] Resolve 工具测试
-- [ ] Executor 状态机测试
-- [ ] Approval / Resume 测试
-- [ ] Resume 幂等测试
-- [ ] Summarizer 判定测试
-- [ ] Event schema 测试
+- [x] Executor 状态机测试
+- [x] Approval / Resume 测试
+- [x] Resume 幂等测试
+- [x] Summarizer 判定测试
+- [x] Event schema 测试
 
 ### 9.2 Integration Tests
 - [ ] 端到端主链路测试
@@ -271,7 +271,7 @@
 - [ ] 重启后 `waiting_approval` 恢复测试
 - [ ] 多专家协作测试
 - [ ] Replan 事件与前端感知测试
-- [ ] Summary 输出测试
+- [x] Summary 输出测试
 - [ ] ThoughtChain 事件对接测试
 
 ### 9.3 Evaluation

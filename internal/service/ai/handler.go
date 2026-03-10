@@ -103,6 +103,10 @@ func (h *HTTPHandler) ChatRespond(c *gin.Context) {
 	h.HandleApprovalResponse(c)
 }
 
+func (h *HTTPHandler) ResumeStep(c *gin.Context) {
+	h.HandleApprovalResponse(c)
+}
+
 func (h *HTTPHandler) HandleApprovalResponse(c *gin.Context) {
 	var req approvalResponseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -129,6 +133,7 @@ func (h *HTTPHandler) HandleApprovalResponse(c *gin.Context) {
 		"plan_id":           res.PlanID,
 		"step_id":           res.StepID,
 		"message":           res.Message,
+		"status":            res.Status,
 		"interrupt_error":   "",
 		"approval_required": false,
 	})

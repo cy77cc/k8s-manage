@@ -145,12 +145,22 @@ export interface DrawerWidthConfig {
 // SSE 事件类型
 export type SSEEventType =
   | 'meta'
+  | 'rewrite_result'
+  | 'planner_state'
+  | 'plan_created'
+  | 'step_update'
   | 'delta'
+  | 'message'
   | 'thinking_delta'
   | 'tool_call'
   | 'tool_result'
   | 'approval_required'
+  | 'clarify_required'
+  | 'replan_started'
+  | 'summary'
   | 'confirmation_required'
+  | 'tool_intent_unresolved'
+  | 'expert_progress'
   | 'done'
   | 'error'
   | 'heartbeat';
@@ -159,6 +169,21 @@ export type SSEEventType =
 export interface SSEEventPayload {
   type: SSEEventType;
   data: Record<string, unknown>;
+}
+
+export type ThoughtStageKey = 'rewrite' | 'plan' | 'execute' | 'user_action' | 'summary';
+
+export type ThoughtStageStatus = 'loading' | 'success' | 'error' | 'abort';
+
+export interface ThoughtStageItem {
+  key: ThoughtStageKey;
+  title: string;
+  description?: string;
+  content?: string;
+  footer?: string;
+  status: ThoughtStageStatus;
+  collapsible?: boolean;
+  blink?: boolean;
 }
 
 // 错误类型

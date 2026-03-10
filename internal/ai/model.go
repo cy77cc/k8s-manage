@@ -13,6 +13,18 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/config"
 )
 
+const (
+	defaultChatModelTimeout = 30 * time.Second
+	rewriteChatModelTimeout = 60 * time.Second
+	summaryChatModelTimeout = 45 * time.Second
+)
+
+type chatModelOptions struct {
+	timeout  time.Duration
+	thinking bool
+	temp     float32
+}
+
 // NewToolCallingChatModel 创建支持工具调用的聊天模型。
 // 根据配置文件中的 Provider 选择 Ollama 或 Qwen 模型。
 //
@@ -23,6 +35,30 @@ import (
 //   - einomodel.ToolCallingChatModel: 聊天模型实例。
 //   - error: 创建错误。
 func NewToolCallingChatModel(ctx context.Context) (einomodel.ToolCallingChatModel, error) {
+	return newChatModel(ctx, chatModelOptions{
+		timeout:  defaultChatModelTimeout,
+		thinking: true,
+		temp:     float32(config.CFG.LLM.Temperature),
+	})
+}
+
+func NewRewriteChatModel(ctx context.Context) (einomodel.BaseChatModel, error) {
+	return newChatModel(ctx, chatModelOptions{
+		timeout:  rewriteChatModelTimeout,
+		thinking: false,
+		temp:     0,
+	})
+}
+
+func NewSummarizerChatModel(ctx context.Context) (einomodel.BaseChatModel, error) {
+	return newChatModel(ctx, chatModelOptions{
+		timeout:  summaryChatModelTimeout,
+		thinking: false,
+		temp:     float32(config.CFG.LLM.Temperature),
+	})
+}
+
+func newChatModel(ctx context.Context, opts chatModelOptions) (einomodel.ToolCallingChatModel, error) {
 	if !config.CFG.LLM.Enable {
 		return nil, fmt.Errorf("llm disabled")
 	}
@@ -31,17 +67,17 @@ func NewToolCallingChatModel(ctx context.Context) (einomodel.ToolCallingChatMode
 		return ollamamodel.NewChatModel(ctx, &ollamamodel.ChatModelConfig{
 			BaseURL: config.CFG.LLM.BaseURL,
 			Model:   config.CFG.LLM.Model,
-			Timeout: 30 * time.Second,
+			Timeout: opts.timeout,
 		})
 	case "qwen":
-		thinking := true
-		temp := float32(config.CFG.LLM.Temperature)
+		thinking := opts.thinking
+		temp := opts.temp
 		return qwenmodel.NewChatModel(ctx, &qwenmodel.ChatModelConfig{
 			APIKey:         config.CFG.LLM.APIKey,
 			BaseURL:        config.CFG.LLM.BaseURL,
 			Model:          config.CFG.LLM.Model,
 			Temperature:    &temp,
-			Timeout:        30 * time.Second,
+			Timeout:        opts.timeout,
 			EnableThinking: &thinking,
 		})
 	default:

@@ -17,6 +17,7 @@ func registerHandlers(g *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	g.POST("/chat/respond", h.ChatRespond)
 	g.POST("/feedback", h.SubmitFeedback)
 	g.POST("/approval/respond", h.HandleApprovalResponse)
+	g.POST("/resume/step", h.ResumeStep)
 	g.POST("/adk/resume", h.ResumeADKApproval)
 	g.GET("/sessions", h.ListSessions)
 	g.GET("/sessions/current", h.CurrentSession)

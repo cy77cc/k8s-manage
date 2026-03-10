@@ -43,16 +43,21 @@ func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state 
 
 				step = state.Steps[stepID]
 				if needsApproval(step) {
+					policy := riskPolicy(step.Mode, step.Risk)
 					pending := &runtime.PendingApproval{
 						PlanID:      state.PlanID,
 						StepID:      stepID,
 						ApprovalKey: fmt.Sprintf("%s:%s", state.PlanID, stepID),
 						Status:      "pending",
+						Title:       step.Title,
+						Mode:        step.Mode,
+						Risk:        step.Risk,
+						Summary:     step.UserVisibleSummary,
 						RequestedAt: time.Now().UTC(),
 					}
 					state.PendingApproval = pending
 					state.Status = runtime.ExecutionStatusWaitingApproval
-					state.Phase = "waiting_approval"
+					state.Phase = fmt.Sprintf("waiting_approval:%s", approvalStageName(policy))
 					if err := transitionStep(state, stepID, runtime.StepWaitingApproval, "step requires approval before execution"); err != nil {
 						return nil, err
 					}
@@ -114,21 +119,30 @@ func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, st
 		Reason:      strings.TrimSpace(req.Reason),
 		Idempotency: runtime.ApprovalDecisionHash(state.PlanID, stepID, req.Approved),
 	}
+	if state.PendingApproval.DecisionHash == decision.Idempotency {
+		return &Result{State: *state, PendingApproval: state.PendingApproval}, nil
+	}
 	now := time.Now().UTC()
+	decision.Status = "rejected"
+	if req.Approved {
+		decision.Status = "approved"
+	}
 	state.PendingApproval.DecisionHash = decision.Idempotency
 	state.PendingApproval.Approved = &decision.Approved
 	state.PendingApproval.Reason = decision.Reason
 	state.PendingApproval.ResolvedAt = now
+	state.PendingApproval.Status = decision.Status
 
 	if req.Approved {
-		state.PendingApproval.Status = "approved"
+		step := state.Steps[stepID]
+		step.ApprovalSatisfied = true
+		state.Steps[stepID] = step
 		if err := transitionStep(state, stepID, runtime.StepReady, "approval granted, step returned to ready"); err != nil {
 			return nil, err
 		}
 		state.Status = runtime.ExecutionStatusRunning
 		state.Phase = "approval_granted"
 	} else {
-		state.PendingApproval.Status = "rejected"
 		if err := transitionStep(state, stepID, runtime.StepCancelled, "approval rejected by user"); err != nil {
 			return nil, err
 		}
@@ -177,10 +191,28 @@ func stepDependencies(state *runtime.ExecutionState, stepID string) []string {
 }
 
 func needsApproval(step runtime.StepState) bool {
-	if step.Mode == "mutating" {
-		return true
+	if step.ApprovalSatisfied {
+		return false
 	}
-	return step.Risk == "medium" || step.Risk == "high"
+	return riskPolicy(step.Mode, step.Risk).RequiresApproval
+}
+
+func shouldAutoRetry(step runtime.StepState) bool {
+	policy := riskPolicy(step.Mode, step.Risk)
+	if !policy.AutoRetry {
+		return false
+	}
+	return step.Attempts < step.MaxAttempts
+}
+
+func approvalStageName(policy RiskPolicy) string {
+	if !policy.RequiresApproval {
+		return "none"
+	}
+	if policy.MaxAttempts <= 1 {
+		return "strict"
+	}
+	return "guarded"
 }
 
 func hasFailedOrBlocked(state *runtime.ExecutionState) bool {
@@ -215,6 +247,12 @@ func transitionStep(state *runtime.ExecutionState, stepID string, target runtime
 		return fmt.Errorf("invalid step transition: %s -> %s", step.Status, target)
 	}
 	step.Status = target
+	if target == runtime.StepRunning {
+		step.Attempts++
+		if step.MaxAttempts == 0 {
+			step.MaxAttempts = riskPolicy(step.Mode, step.Risk).MaxAttempts
+		}
+	}
 	step.UserVisibleSummary = strings.TrimSpace(summary)
 	step.UpdatedAt = time.Now().UTC()
 	state.Steps[stepID] = step
@@ -243,10 +281,15 @@ func validTransition(from, to runtime.StepStatus) bool {
 }
 
 func snapshotResult(step runtime.StepState) StepResult {
+	var errInfo *StepError
+	if step.ErrorCode != "" || step.ErrorMessage != "" {
+		errInfo = &StepError{Code: step.ErrorCode, Message: step.ErrorMessage}
+	}
 	return StepResult{
 		StepID:    step.StepID,
 		Status:    step.Status,
 		Summary:   step.UserVisibleSummary,
+		Error:     errInfo,
 		UpdatedAt: step.UpdatedAt,
 	}
 }

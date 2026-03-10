@@ -1,0 +1,87 @@
+package summarizer
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/cloudwego/eino/adk"
+	einomodel "github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/schema"
+)
+
+type adkRunner struct {
+	runner *adk.Runner
+}
+
+func NewADKRunner(ctx context.Context, model einomodel.BaseChatModel) (StageRunner, error) {
+	if model == nil {
+		return nil, fmt.Errorf("summarizer model is required")
+	}
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name:          "summarizer-stage",
+		Description:   "Summarize executor outputs into structured conclusions and replan hints.",
+		Instruction:   SystemPrompt(),
+		Model:         model,
+		MaxIterations: 2,
+		ToolsConfig: adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{
+				Tools: []tool.BaseTool{summaryDecisionTool()},
+			},
+			ReturnDirectly: map[string]bool{
+				"emit_summary": true,
+			},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &adkRunner{runner: adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})}, nil
+}
+
+func (r *adkRunner) Run(ctx context.Context, input string) (string, error) {
+	if r == nil || r.runner == nil {
+		return "", fmt.Errorf("summarizer ADK runner is not configured")
+	}
+	iter := r.runner.Query(ctx, input)
+	var last string
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event == nil {
+			continue
+		}
+		if event.Err != nil {
+			return "", event.Err
+		}
+		msg, _, err := adk.GetMessage(event)
+		if err != nil || msg == nil {
+			continue
+		}
+		if isSummaryOutput(msg) {
+			last = strings.TrimSpace(msg.Content)
+		}
+	}
+	if last == "" {
+		return "", fmt.Errorf("summarizer stage produced empty output")
+	}
+	return last, nil
+}
+
+func isSummaryOutput(msg *schema.Message) bool {
+	if msg == nil || strings.TrimSpace(msg.Content) == "" {
+		return false
+	}
+	switch msg.Role {
+	case schema.Tool:
+		return strings.TrimSpace(msg.ToolName) == "emit_summary"
+	case schema.Assistant:
+		return len(msg.ToolCalls) == 0
+	default:
+		return false
+	}
+}

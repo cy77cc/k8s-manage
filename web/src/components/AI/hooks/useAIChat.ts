@@ -87,6 +87,8 @@ export function useAIChat(options: UseAIChatOptions) {
       await aiApi.respondApproval({
         checkpoint_id: details.checkpoint_id as string,
         session_id: details.session_id as string,
+        plan_id: details.plan_id as string | undefined,
+        step_id: (details.step_id as string | undefined) || (details.interrupt_targets as string[])?.[0] || '',
         target: (details.interrupt_targets as string[])?.[0] || '',
         approved,
       });
