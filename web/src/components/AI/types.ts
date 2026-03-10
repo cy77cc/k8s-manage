@@ -94,6 +94,8 @@ export interface ChatMessage {
   confirmation?: ConfirmationRequest;
   // 新增: 下一步推荐
   recommendations?: EmbeddedRecommendation[];
+  thoughtChain?: ThoughtStageItem[];
+  traceId?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -175,12 +177,20 @@ export type ThoughtStageKey = 'rewrite' | 'plan' | 'execute' | 'user_action' | '
 
 export type ThoughtStageStatus = 'loading' | 'success' | 'error' | 'abort';
 
+export interface ThoughtStageDetailItem {
+  id: string;
+  label: string;
+  status: ThoughtStageStatus;
+  content?: string;
+}
+
 export interface ThoughtStageItem {
   key: ThoughtStageKey;
   title: string;
   description?: string;
   content?: string;
   footer?: string;
+  details?: ThoughtStageDetailItem[];
   status: ThoughtStageStatus;
   collapsible?: boolean;
   blink?: boolean;

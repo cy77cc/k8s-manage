@@ -42,21 +42,24 @@ type ContextSnapshot struct {
 }
 
 type StepState struct {
-	StepID             string     `json:"step_id"`
-	Title              string     `json:"title,omitempty"`
-	Expert             string     `json:"expert,omitempty"`
-	DependsOn          []string   `json:"depends_on,omitempty"`
-	Status             StepStatus `json:"status"`
-	Mode               string     `json:"mode,omitempty"`
-	Risk               string     `json:"risk,omitempty"`
-	Attempts           int        `json:"attempts,omitempty"`
-	MaxAttempts        int        `json:"max_attempts,omitempty"`
-	IdempotencyKey     string     `json:"idempotency_key,omitempty"`
-	ApprovalSatisfied  bool       `json:"approval_satisfied,omitempty"`
-	UserVisibleSummary string     `json:"user_visible_summary,omitempty"`
-	ErrorCode          string     `json:"error_code,omitempty"`
-	ErrorMessage       string     `json:"error_message,omitempty"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	StepID             string         `json:"step_id"`
+	Title              string         `json:"title,omitempty"`
+	Expert             string         `json:"expert,omitempty"`
+	Intent             string         `json:"intent,omitempty"`
+	Task               string         `json:"task,omitempty"`
+	Input              map[string]any `json:"input,omitempty"`
+	DependsOn          []string       `json:"depends_on,omitempty"`
+	Status             StepStatus     `json:"status"`
+	Mode               string         `json:"mode,omitempty"`
+	Risk               string         `json:"risk,omitempty"`
+	Attempts           int            `json:"attempts,omitempty"`
+	MaxAttempts        int            `json:"max_attempts,omitempty"`
+	IdempotencyKey     string         `json:"idempotency_key,omitempty"`
+	ApprovalSatisfied  bool           `json:"approval_satisfied,omitempty"`
+	UserVisibleSummary string         `json:"user_visible_summary,omitempty"`
+	ErrorCode          string         `json:"error_code,omitempty"`
+	ErrorMessage       string         `json:"error_message,omitempty"`
+	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
 type PendingApproval struct {

@@ -26,7 +26,7 @@ import type { BubbleListRef, BubbleProps } from '@ant-design/x/es/bubble';
 import { Button, message, Popover, Select, Space, Tooltip, theme, Skeleton } from 'antd';
 import dayjs from 'dayjs';
 import { getSceneLabel } from './constants/sceneMapping';
-import type { ChatMessage, EmbeddedRecommendation, SSEEventType, ThoughtStageItem, ThoughtStageStatus } from './types';
+import type { ChatMessage, EmbeddedRecommendation, SSEEventType, ThoughtStageDetailItem, ThoughtStageItem, ThoughtStageStatus } from './types';
 import type { SceneOption } from './hooks/useAutoScene';
 import { useConversationRestore, type RestoredConversation } from './hooks/useConversationRestore';
 import { useScenePrompts } from './hooks/useScenePrompts';
@@ -42,6 +42,25 @@ interface ExtendedChatMessage extends ChatMessage {
   recommendations?: EmbeddedRecommendation[];
 }
 
+function updateAssistantMessage(
+  conversations: ConversationItem[],
+  conversationKey: string,
+  assistantId: string,
+  updater: (message: ExtendedChatMessage) => ExtendedChatMessage
+): ConversationItem[] {
+  return conversations.map((conversation) => {
+    if (conversation.key !== conversationKey) {
+      return conversation;
+    }
+    return {
+      ...conversation,
+      messages: conversation.messages.map((message) => (
+        message.id === assistantId ? updater(message) : message
+      )),
+    };
+  });
+}
+
 function upsertThoughtStage(
   stages: ThoughtStageItem[],
   patch: Partial<ThoughtStageItem> & Pick<ThoughtStageItem, 'key' | 'title' | 'status'>
@@ -52,8 +71,9 @@ function upsertThoughtStage(
     title: patch.title,
     status: patch.status,
     description: patch.description,
-    content: patch.content,
+    content: renderThoughtContent(patch.content, patch.details),
     footer: patch.footer,
+    details: patch.details,
     collapsible: patch.collapsible ?? true,
     blink: patch.blink ?? patch.status === 'loading',
   };
@@ -63,9 +83,45 @@ function upsertThoughtStage(
   const merged = {
     ...stages[index],
     ...next,
+    content: renderThoughtContent(next.content, next.details ?? stages[index].details),
     blink: patch.blink ?? next.status === 'loading',
   };
   return stages.map((item, itemIndex) => (itemIndex === index ? merged : item));
+}
+
+function renderThoughtContent(content?: string, details?: ThoughtStageDetailItem[]): string | undefined {
+  const summary = (content || '').trim();
+  const detailLines = (details || []).map((detail) => {
+    const prefix = detail.status === 'error' ? '[失败]' : detail.status === 'success' ? '[完成]' : '[执行中]';
+    const body = detail.content?.trim();
+    return body ? `${prefix} ${detail.label}: ${body}` : `${prefix} ${detail.label}`;
+  });
+  const segments = [summary, ...detailLines].filter(Boolean);
+  return segments.length > 0 ? segments.join('\n') : undefined;
+}
+
+function upsertThoughtDetail(
+  stages: ThoughtStageItem[],
+  stageKey: ThoughtStageItem['key'],
+  detail: ThoughtStageDetailItem
+): ThoughtStageItem[] {
+  return stages.map((item) => {
+    if (item.key !== stageKey) {
+      return item;
+    }
+    const details = [...(item.details || [])];
+    const index = details.findIndex((candidate) => candidate.id === detail.id);
+    if (index === -1) {
+      details.push(detail);
+    } else {
+      details[index] = { ...details[index], ...detail };
+    }
+    return {
+      ...item,
+      details,
+      content: renderThoughtContent(item.content, details),
+    };
+  });
 }
 
 function normalizeThoughtStatus(status: string | undefined, fallback: ThoughtStageStatus = 'loading'): ThoughtStageStatus {
@@ -95,12 +151,13 @@ const AssistantMessage: React.FC<{
   content: string;
   thinking?: string;
   recommendations?: EmbeddedRecommendation[];
+  thoughtChain?: ThoughtStageItem[];
   isStreaming?: boolean;
   showActions?: boolean;
   onRegenerate?: () => void;
   onRecommendationSelect?: (prompt: string) => void;
   isLoading?: boolean;
-}> = ({ content, thinking, recommendations, isStreaming, showActions = true, onRegenerate, onRecommendationSelect, isLoading }) => {
+}> = ({ content, thinking, recommendations, thoughtChain, isStreaming, showActions = true, onRegenerate, onRecommendationSelect, isLoading }) => {
   const { token } = theme.useToken();
   const blocks = useMemo(() => normalizeAssistantMessage({
     content,
@@ -111,6 +168,23 @@ const AssistantMessage: React.FC<{
 
   return (
     <div>
+      {thoughtChain && thoughtChain.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <ThoughtChain
+            items={thoughtChain.map((item) => ({
+              key: item.key,
+              title: item.title,
+              description: item.description,
+              content: item.content,
+              footer: item.footer,
+              status: item.status,
+              collapsible: item.collapsible,
+              blink: item.blink,
+            }))}
+            defaultExpandedKeys={[]}
+          />
+        </div>
+      )}
       {blocks.length > 0 ? (
         <AssistantMessageBlocks
           blocks={blocks}
@@ -332,7 +406,6 @@ export const Copilot: React.FC<CopilotProps> = ({
 
   // 会话 ID
   const [sessionId, setSessionId] = useState<string | undefined>();
-  const [thoughtStages, setThoughtStages] = useState<ThoughtStageItem[]>([]);
 
   // 发送消息
   const handleSubmit = useCallback(async (val: string) => {
@@ -353,13 +426,13 @@ export const Copilot: React.FC<CopilotProps> = ({
     }));
 
     setIsLoading(true);
-    setThoughtStages([]);
 
     // 创建助手消息占位
     const assistantId = `assistant-${Date.now()}`;
     let assistantContent = '';
     let assistantThinking = '';
     let assistantRecommendations: EmbeddedRecommendation[] | undefined;
+    let assistantTraceId: string | undefined;
 
     // 添加助手消息占位
     setConversations(prev => prev.map(c => {
@@ -370,6 +443,7 @@ export const Copilot: React.FC<CopilotProps> = ({
           id: assistantId,
           role: 'assistant',
           content: '',
+          thoughtChain: [],
           createdAt: new Date().toISOString(),
         }],
       };
@@ -391,54 +465,98 @@ export const Copilot: React.FC<CopilotProps> = ({
               if (data.sessionId) {
                 setSessionId(data.sessionId as string);
               }
+              if (data.traceId) {
+                assistantTraceId = String(data.traceId);
+              }
               break;
 
             case 'rewrite_result':
-              setThoughtStages((prev) =>
-                upsertThoughtStage(prev, {
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'rewrite',
                   title: '理解你的问题',
                   status: 'success',
                   description: '已将口语化输入整理为可规划任务',
                   content: String(data.user_visible_summary || ''),
-                })
-              );
+                }),
+              })));
               break;
 
             case 'planner_state':
-              setThoughtStages((prev) =>
-                upsertThoughtStage(prev, {
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'plan',
                   title: '整理排查计划',
                   status: normalizeThoughtStatus(data.status as string | undefined, 'loading'),
                   description: String(data.user_visible_summary || '正在根据 Rewrite 结果整理计划'),
                   content: String(data.user_visible_summary || ''),
-                })
-              );
+                }),
+              })));
               break;
 
             case 'plan_created':
-              setThoughtStages((prev) =>
-                upsertThoughtStage(prev, {
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'plan',
                   title: '整理排查计划',
                   status: 'success',
                   description: '已生成结构化计划',
                   content: String(data.user_visible_summary || ''),
-                })
-              );
+                }),
+              })));
               break;
 
             case 'step_update':
-              setThoughtStages((prev) =>
-                upsertThoughtStage(prev, {
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'execute',
                   title: '调用专家执行',
                   status: normalizeThoughtStatus(data.status as string | undefined, 'loading'),
                   description: String(data.title || '正在推进计划步骤'),
                   content: String(data.user_visible_summary || ''),
-                })
-              );
+                }),
+              })));
+              break;
+
+            case 'tool_call':
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => {
+                const nextStages = upsertThoughtStage(message.thoughtChain || [], {
+                  key: 'execute',
+                  title: '调用专家执行',
+                  status: 'loading',
+                  description: String(data.expert || data.tool_name || '专家正在执行'),
+                  content: String(data.summary || ''),
+                });
+                return {
+                  ...message,
+                  thoughtChain: upsertThoughtDetail(nextStages, 'execute', {
+                    id: String(data.call_id || data.tool_name || Date.now()),
+                    label: String(data.tool_name || data.expert || 'tool'),
+                    status: 'loading',
+                    content: String(data.summary || ''),
+                  }),
+                };
+              }));
+              break;
+
+            case 'tool_result':
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => {
+                const result = data.result as Record<string, unknown> | undefined;
+                const status = data.status === 'error' || result?.ok === false ? 'error' : 'success';
+                return {
+                  ...message,
+                  thoughtChain: upsertThoughtDetail(message.thoughtChain || [], 'execute', {
+                    id: String(data.call_id || data.tool_name || Date.now()),
+                    label: String(data.tool_name || data.expert || 'tool'),
+                    status,
+                    content: String(data.error || data.summary || ''),
+                  }),
+                };
+              }));
               break;
 
             case 'delta':
@@ -451,53 +569,57 @@ export const Copilot: React.FC<CopilotProps> = ({
               break;
 
             case 'approval_required':
-              setThoughtStages((prev) =>
-                upsertThoughtStage(prev, {
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'user_action',
                   title: '等待你确认',
                   status: 'loading',
                   description: String(data.title || '当前步骤需要审批后继续执行'),
                   content: String(data.user_visible_summary || ''),
-                })
-              );
+                }),
+              })));
               break;
 
             case 'clarify_required':
-              setThoughtStages((prev) =>
-                upsertThoughtStage(prev, {
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'user_action',
                   title: '等待你补充信息',
                   status: 'loading',
                   description: String(data.message || data.title || '当前目标仍有歧义'),
                   content: String(data.message || ''),
-                })
-              );
+                }),
+              })));
               assistantContent ||= String(data.message || '');
               break;
 
             case 'replan_started':
-              setThoughtStages((prev) =>
-                upsertThoughtStage(prev, {
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'plan',
                   title: '整理排查计划',
                   status: 'loading',
                   description: '正在开始新一轮规划',
                   content: String(data.reason || ''),
-                })
-              );
+                }),
+              })));
               break;
 
             case 'summary': {
               const output = (data.output as Record<string, unknown> | undefined) || {};
-              setThoughtStages((prev) =>
-                upsertThoughtStage(prev, {
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'summary',
                   title: '生成结论',
                   status: 'success',
                   description: String(output.summary || ''),
                   content: String(output.narrative || output.conclusion || output.summary || ''),
-                })
-              );
+                }),
+              })));
               break;
             }
 
@@ -515,20 +637,24 @@ export const Copilot: React.FC<CopilotProps> = ({
                   setSessionId(session.id as string);
                 }
               }
-              setThoughtStages((prev) =>
-                prev.map((item) => ({
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: (message.thoughtChain || []).map((item) => ({
                   ...item,
                   blink: false,
                   status: item.status === 'loading' ? 'success' : item.status,
-                }))
-              );
+                })),
+              })));
               setIsLoading(false);
               break;
 
             case 'error':
-              setThoughtStages((prev) =>
-                prev.map((item, index) => index === prev.length - 1 ? { ...item, status: 'error', blink: false } : item)
-              );
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                ...message,
+                thoughtChain: (message.thoughtChain || []).map((item, index, items) => (
+                  index === items.length - 1 ? { ...item, status: 'error', blink: false } : item
+                )),
+              })));
               setIsLoading(false);
               break;
           }
@@ -545,6 +671,7 @@ export const Copilot: React.FC<CopilotProps> = ({
                   content: assistantContent,
                   thinking: assistantThinking || undefined,
                   recommendations: assistantRecommendations,
+                  traceId: assistantTraceId,
                 };
               }),
             };
@@ -580,7 +707,6 @@ export const Copilot: React.FC<CopilotProps> = ({
     ]);
     setActiveKey(timeNow);
     setSessionId(undefined);
-    setThoughtStages([]);
   }, []);
 
   // 场景选择器
@@ -689,6 +815,7 @@ export const Copilot: React.FC<CopilotProps> = ({
         content={msg.content}
         thinking={msg.thinking}
         recommendations={msg.recommendations}
+        thoughtChain={msg.thoughtChain}
         isStreaming={isStreaming || (isCurrentStreaming && !!msg.thinking && !msg.content)}
         onRegenerate={() => handleRegenerate(msg.id)}
         onRecommendationSelect={handleRecommendationSelect}
@@ -776,23 +903,6 @@ export const Copilot: React.FC<CopilotProps> = ({
         flexDirection: 'column',
         minHeight: 0,
       }}>
-        {thoughtStages.length > 0 && (
-          <div style={{ padding: '12px 16px 0' }}>
-            <ThoughtChain
-              items={thoughtStages.map((item) => ({
-                key: item.key,
-                title: item.title,
-                description: item.description,
-                content: item.content,
-                footer: item.footer,
-                status: item.status,
-                collapsible: item.collapsible,
-                blink: item.blink,
-              }))}
-              defaultExpandedKeys={thoughtStages.map((item) => item.key)}
-            />
-          </div>
-        )}
         {/* 恢复会话中的加载状态 */}
         {isRestoring ? (
           <div style={{ padding: 16 }}>

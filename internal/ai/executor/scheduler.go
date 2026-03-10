@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +11,7 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
 )
 
-func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state *runtime.ExecutionState) (*Result, error) {
+func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state *runtime.ExecutionState, req Request, stepRunner StepRunner) (*Result, error) {
 	if state == nil {
 		return nil, fmt.Errorf("execution state is required")
 	}
@@ -38,7 +39,9 @@ func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state 
 				if err := transitionStep(state, stepID, runtime.StepRunning, "step entered executor runtime"); err != nil {
 					return nil, err
 				}
-				results = append(results, snapshotResult(state.Steps[stepID]))
+				runningStep := state.Steps[stepID]
+				results = append(results, snapshotResult(runningStep))
+				emitStepUpdate(req, state, runningStep)
 				progress = true
 
 				step = state.Steps[stepID]
@@ -61,7 +64,10 @@ func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state 
 					if err := transitionStep(state, stepID, runtime.StepWaitingApproval, "step requires approval before execution"); err != nil {
 						return nil, err
 					}
-					results = append(results, snapshotResult(state.Steps[stepID]))
+					waitingStep := state.Steps[stepID]
+					results = append(results, snapshotResult(waitingStep))
+					emitStepUpdate(req, state, waitingStep)
+					emitApprovalRequired(req, state, pending, waitingStep)
 					if store != nil {
 						if err := store.Save(ctx, *state); err != nil {
 							return nil, err
@@ -70,11 +76,12 @@ func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state 
 					return &Result{State: *state, Steps: results}, nil
 				}
 
-				if err := transitionStep(state, stepID, runtime.StepCompleted, "step scheduled by executor runtime"); err != nil {
+				executed, err := executeStep(ctx, state, stepID, req, stepRunner)
+				if err != nil {
 					return nil, err
 				}
-				results = append(results, snapshotResult(state.Steps[stepID]))
-				progress = true
+				results = append(results, executed...)
+				progress = len(executed) > 0
 			}
 		}
 	}
@@ -94,7 +101,7 @@ func advanceScheduler(ctx context.Context, store *runtime.ExecutionStore, state 
 	return &Result{State: *state, Steps: results}, nil
 }
 
-func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, state *runtime.ExecutionState, req ResumeRequest) (*Result, error) {
+func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, state *runtime.ExecutionState, req ResumeRequest, stepRunner StepRunner) (*Result, error) {
 	if state == nil {
 		return nil, fmt.Errorf("execution state is required")
 	}
@@ -150,7 +157,106 @@ func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, st
 		state.Phase = "cancelled"
 		markDependentsBlocked(state, stepID)
 	}
-	return advanceScheduler(ctx, store, state)
+	return advanceScheduler(ctx, store, state, Request{
+		TraceID:        state.TraceID,
+		SessionID:      state.SessionID,
+		Message:        state.Message,
+		Plan:           planner.ExecutionPlan{PlanID: state.PlanID},
+		RuntimeContext: state.RuntimeContext,
+		EventMeta: EventMeta{
+			SessionID: state.SessionID,
+			TraceID:   state.TraceID,
+			PlanID:    state.PlanID,
+		},
+	}, stepRunner)
+}
+
+func executeStep(ctx context.Context, state *runtime.ExecutionState, stepID string, req Request, stepRunner StepRunner) ([]StepResult, error) {
+	step := state.Steps[stepID]
+	if stepRunner == nil {
+		return markStepFailure(req, state, stepID, "expert_tool_stream_failed", "expert runner is not configured", "专家执行链路未正确初始化，当前步骤无法执行。")
+	}
+	emitToolCall(req, state, step, step.Expert, firstNonEmpty(step.Task, step.Title, "专家开始执行步骤"))
+
+	planStep := planner.PlanStep{
+		StepID:    step.StepID,
+		Title:     step.Title,
+		Expert:    step.Expert,
+		Intent:    step.Intent,
+		Task:      step.Task,
+		Input:     step.Input,
+		DependsOn: append([]string(nil), step.DependsOn...),
+		Mode:      step.Mode,
+		Risk:      step.Risk,
+	}
+	for _, candidate := range req.Plan.Steps {
+		if candidate.StepID == stepID {
+			planStep = candidate
+			break
+		}
+	}
+
+	result, err := stepRunner.RunStep(ctx, req, planStep)
+	if err != nil {
+		code := "expert_tool_execution_failed"
+		userSummary := "专家执行失败，需要人工跟进。"
+		errMessage := err.Error()
+		if execErr, ok := err.(*ExecutionError); ok {
+			code = firstNonEmpty(execErr.Code, code)
+			if strings.TrimSpace(execErr.UserSummary) != "" {
+				userSummary = strings.TrimSpace(execErr.UserSummary)
+			}
+			errMessage = firstNonEmpty(execErr.Message, errMessage)
+			err = errors.New(strings.TrimSpace(execErr.Message))
+		} else if summary, field, ok := summarizeMissingPrerequisite(errMessage); ok {
+			code = "missing_execution_prerequisite"
+			userSummary = fmt.Sprintf("%s。缺少前置上下文：%s", summary, field)
+		}
+		compactMessage := compactToolError(errMessage)
+		emitToolResult(req, state, step, step.Expert, "error", userSummary, compactMessage, map[string]any{"ok": false})
+		return markStepFailure(req, state, stepID, code, compactMessage, userSummary)
+	}
+
+	summary := firstNonEmpty(result.Summary, "step executed by expert agent")
+	if err := transitionStep(state, stepID, runtime.StepCompleted, summary); err != nil {
+		return nil, err
+	}
+	result.StepID = stepID
+	result.Status = runtime.StepCompleted
+	result.Summary = summary
+	result.UpdatedAt = state.Steps[stepID].UpdatedAt
+	emitToolResult(req, state, state.Steps[stepID], step.Expert, "success", summary, "", map[string]any{"ok": true})
+	emitStepUpdate(req, state, state.Steps[stepID])
+	return []StepResult{result}, nil
+}
+
+func markStepFailure(req Request, state *runtime.ExecutionState, stepID, code, message, userSummary string) ([]StepResult, error) {
+	step, ok := state.Steps[stepID]
+	if !ok {
+		return nil, fmt.Errorf("step %s not found", stepID)
+	}
+	step.ErrorCode = strings.TrimSpace(code)
+	step.ErrorMessage = strings.TrimSpace(message)
+	summary := firstNonEmpty(userSummary, "专家执行失败，需要人工跟进。")
+	if shouldAutoRetry(step) {
+		step.Status = runtime.StepReady
+		step.UserVisibleSummary = summary
+		step.UpdatedAt = time.Now().UTC()
+		state.Steps[stepID] = step
+		state.UpdatedAt = step.UpdatedAt
+		emitStepUpdate(req, state, step)
+		return []StepResult{snapshotResult(step)}, nil
+	}
+	step.Status = runtime.StepFailed
+	step.UserVisibleSummary = summary
+	step.UpdatedAt = time.Now().UTC()
+	state.Steps[stepID] = step
+	state.Status = runtime.ExecutionStatusFailed
+	state.Phase = "executor_failed"
+	state.UpdatedAt = step.UpdatedAt
+	markDependentsBlocked(state, stepID)
+	emitStepUpdate(req, state, step)
+	return []StepResult{snapshotResult(step)}, nil
 }
 
 func depsSatisfied(state *runtime.ExecutionState, stepID string) bool {

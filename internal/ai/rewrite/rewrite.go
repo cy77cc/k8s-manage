@@ -23,8 +23,11 @@ type Output struct {
 
 type ResourceHints struct {
 	ServiceName string `json:"service_name,omitempty"`
+	ServiceID   int    `json:"service_id,omitempty"`
 	ClusterName string `json:"cluster_name,omitempty"`
+	ClusterID   int    `json:"cluster_id,omitempty"`
 	HostName    string `json:"host_name,omitempty"`
+	HostID      int    `json:"host_id,omitempty"`
 	Namespace   string `json:"namespace,omitempty"`
 }
 
@@ -203,10 +206,13 @@ func detectResourceHints(resources []SelectedResource) ResourceHints {
 		switch strings.ToLower(strings.TrimSpace(item.Type)) {
 		case "service":
 			hints.ServiceName = firstNonEmpty(item.Name, item.ID)
+			hints.ServiceID = parseResourceID(item.ID)
 		case "cluster":
 			hints.ClusterName = firstNonEmpty(item.Name, item.ID)
+			hints.ClusterID = parseResourceID(item.ID)
 		case "host":
 			hints.HostName = firstNonEmpty(item.Name, item.ID)
+			hints.HostID = parseResourceID(item.ID)
 		case "namespace":
 			hints.Namespace = firstNonEmpty(item.Name, item.ID)
 		}
@@ -221,6 +227,9 @@ func buildNarrative(goal, mode string, hints ResourceHints, domains, ambiguity [
 	}
 	if hints.ClusterName != "" {
 		parts = append(parts, "集群线索："+hints.ClusterName+"。")
+	}
+	if hints.ClusterID > 0 {
+		parts = append(parts, "集群ID线索："+itoa(hints.ClusterID)+"。")
 	}
 	if len(domains) > 0 {
 		parts = append(parts, "涉及领域："+strings.Join(domains, " / ")+"。")
@@ -263,6 +272,34 @@ func dedupe(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func parseResourceID(raw string) int {
+	for _, r := range strings.TrimSpace(raw) {
+		if r < '0' || r > '9' {
+			return 0
+		}
+	}
+	if strings.TrimSpace(raw) == "" {
+		return 0
+	}
+	value := 0
+	for _, r := range raw {
+		value = value*10 + int(r-'0')
+	}
+	return value
+}
+
+func itoa(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	buf := make([]byte, 0, 12)
+	for value > 0 {
+		buf = append([]byte{byte('0' + value%10)}, buf...)
+		value /= 10
+	}
+	return string(buf)
 }
 
 func firstNonEmpty(values ...string) string {

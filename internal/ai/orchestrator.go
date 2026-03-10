@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/cy77cc/OpsPilot/internal/ai/events"
 	"github.com/cy77cc/OpsPilot/internal/ai/executor"
+	"github.com/cy77cc/OpsPilot/internal/ai/experts"
 	"github.com/cy77cc/OpsPilot/internal/ai/planner"
 	"github.com/cy77cc/OpsPilot/internal/ai/rewrite"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
@@ -46,6 +47,9 @@ func NewOrchestrator(sessions *state.SessionState, executions *runtime.Execution
 	if plannerModel, err := NewToolCallingChatModel(bootstrapCtx); err == nil {
 		if stage, stageErr := planner.NewWithADK(bootstrapCtx, plannerModel, deps); stageErr == nil {
 			out.planner = stage
+		}
+		if stepRunner, stepErr := executor.NewAgentStepRunner(bootstrapCtx, plannerModel, experts.DefaultRegistry(deps)); stepErr == nil {
+			out.executor = executor.New(executions, executor.WithStepRunner(stepRunner))
 		}
 	}
 	if summarizerModel, err := NewSummarizerChatModel(bootstrapCtx); err == nil {
@@ -136,6 +140,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 	reply, genErr := o.planAndReply(ctx, message, rewriteOut, req.RuntimeContext, meta, emit, sessionID)
 	if genErr != nil {
 		reply = fmt.Sprintf("AI 编排入口已经切换到新的宿主边界，但当前模型暂不可用：%s", genErr.Error())
+		emitDeltaChunks(emit, meta, reply)
 	}
 
 	if o.sessions != nil {
@@ -143,11 +148,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 			return err
 		}
 	}
-
-	emitEvent(emit, events.Delta, meta, map[string]any{
-		"content_chunk": reply,
-		"contentChunk":  reply,
-	})
 
 	sessionPayload := map[string]any{
 		"id":        sessionID,
@@ -274,8 +274,10 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 					"candidates": decision.Candidates,
 					"kind":       "clarify",
 				})
+				emitDeltaChunks(emit, meta, decision.Message)
 				return decision.Message, nil
 			case planner.DecisionDirectReply:
+				emitDeltaChunks(emit, meta, decision.Message)
 				return decision.Message, nil
 			case planner.DecisionPlan:
 				if decision.Plan != nil {
@@ -297,40 +299,26 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 								CurrentPage: runtimeCtx.CurrentPage,
 								ResourceIDs: selectedResourceIDs(runtimeCtx.SelectedResources),
 							},
+							EventMeta: executor.EventMeta{
+								SessionID: meta.SessionID,
+								TraceID:   meta.TraceID,
+								PlanID:    meta.PlanID,
+								Iteration: meta.Iteration,
+								Timestamp: meta.Timestamp,
+							},
+							EmitEvent: func(name string, eventMeta executor.EventMeta, data map[string]any) bool {
+								emitEvent(emit, events.Name(name), events.EventMeta{
+									SessionID: eventMeta.SessionID,
+									TraceID:   eventMeta.TraceID,
+									PlanID:    eventMeta.PlanID,
+									StepID:    eventMeta.StepID,
+									Iteration: eventMeta.Iteration,
+									Timestamp: eventMeta.Timestamp,
+								}, data)
+								return true
+							},
 						})
 						if execErr == nil && executed != nil {
-							for _, step := range executed.Steps {
-								stepState, ok := executed.StepState(step.StepID)
-								if !ok {
-									stepState = runtime.StepState{StepID: step.StepID}
-								}
-								stepMeta := meta
-								stepMeta.StepID = step.StepID
-								emitEvent(emit, events.StepUpdate, stepMeta, map[string]any{
-									"plan_id":              executed.State.PlanID,
-									"step_id":              step.StepID,
-									"status":               step.Status,
-									"title":                stepState.Title,
-									"expert":               stepState.Expert,
-									"user_visible_summary": step.Summary,
-								})
-							}
-							if approval := executed.Approval(); approval != nil {
-								stepState, ok := executed.StepState(approval.StepID)
-								if !ok {
-									stepState = runtime.StepState{StepID: approval.StepID}
-								}
-								emitEvent(emit, events.ApprovalRequired, meta, map[string]any{
-									"session_id":           sessionID,
-									"plan_id":              executed.State.PlanID,
-									"step_id":              approval.StepID,
-									"title":                approval.Title,
-									"risk":                 approval.Risk,
-									"mode":                 approval.Mode,
-									"status":               approval.Status,
-									"user_visible_summary": firstNonEmpty(approval.Summary, stepState.UserVisibleSummary),
-								})
-							}
 							summaryOut := o.summarizeExecution(ctx, message, decision.Plan, executed)
 							emitEvent(emit, events.Summary, meta, map[string]any{
 								"output": summaryOut,
@@ -346,6 +334,7 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 								})
 							}
 							if body := firstNonEmpty(summaryOut.Conclusion, summaryOut.Summary); body != "" {
+								emitDeltaChunks(emit, meta, body)
 								return body, nil
 							}
 						}
@@ -354,7 +343,11 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 			}
 		}
 	}
-	return o.generateReply(ctx, message)
+	reply, err := o.generateReply(ctx, message)
+	if err == nil {
+		emitDeltaChunks(emit, meta, reply)
+	}
+	return reply, err
 }
 
 func (o *Orchestrator) generateReply(ctx context.Context, message string) (string, error) {
@@ -406,6 +399,26 @@ func emitEvent(emit StreamEmitter, name events.Name, meta events.EventMeta, data
 		Meta:     meta.WithDefaults(),
 		Data:     data,
 	})
+}
+
+func emitDeltaChunks(emit StreamEmitter, meta events.EventMeta, content string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	runes := []rune(content)
+	const chunkSize = 24
+	for start := 0; start < len(runes); start += chunkSize {
+		end := start + chunkSize
+		if end > len(runes) {
+			end = len(runes)
+		}
+		chunk := string(runes[start:end])
+		emitEvent(emit, events.Delta, meta, map[string]any{
+			"content_chunk": chunk,
+			"contentChunk":  chunk,
+		})
+	}
 }
 
 func deriveSessionTitle(message string) string {

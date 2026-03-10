@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
@@ -49,9 +50,13 @@ type ExecutionPlan struct {
 
 type ResolvedResources struct {
 	ServiceName string   `json:"service_name,omitempty"`
+	ServiceID   int      `json:"service_id,omitempty"`
 	ClusterName string   `json:"cluster_name,omitempty"`
+	ClusterID   int      `json:"cluster_id,omitempty"`
 	HostNames   []string `json:"host_names,omitempty"`
+	HostIDs     []int    `json:"host_ids,omitempty"`
 	Namespace   string   `json:"namespace,omitempty"`
+	PodName     string   `json:"pod_name,omitempty"`
 }
 
 type PlanStep struct {
@@ -90,12 +95,29 @@ func (p *Planner) Plan(ctx context.Context, in Input) (Decision, error) {
 }
 
 func ParseDecision(raw string) (Decision, error) {
-	var out Decision
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return Decision{}, err
+	}
+
+	out := Decision{
+		Type:       DecisionType(strings.TrimSpace(looseStringValue(payload["type"]))),
+		Message:    strings.TrimSpace(looseStringValue(payload["message"])),
+		Reason:     strings.TrimSpace(looseStringValue(payload["reason"])),
+		Narrative:  strings.TrimSpace(looseStringValue(payload["narrative"])),
+		Candidates: mapSliceValue(payload["candidates"]),
 	}
 	if out.Type == "" {
 		return Decision{}, fmt.Errorf("planner decision missing type")
+	}
+
+	planValue, hasPlan := payload["plan"]
+	if out.Type == DecisionPlan || hasPlan {
+		plan, err := parseExecutionPlan(planValue)
+		if err != nil {
+			return Decision{}, err
+		}
+		out.Plan = plan
 	}
 	return out, nil
 }
@@ -124,9 +146,12 @@ func buildBaseDecision(in Input) Decision {
 			Goal:   goal,
 			Resolved: ResolvedResources{
 				ServiceName: rewritten.ResourceHints.ServiceName,
+				ServiceID:   rewritten.ResourceHints.ServiceID,
 				ClusterName: rewritten.ResourceHints.ClusterName,
+				ClusterID:   rewritten.ResourceHints.ClusterID,
 				Namespace:   rewritten.ResourceHints.Namespace,
 				HostNames:   collectHostNames(rewritten),
+				HostIDs:     collectHostIDs(rewritten),
 			},
 			Narrative: "该计划是 Planner 失败时的最小兜底结构，保留用户目标与已知资源线索。",
 			Steps: []PlanStep{
@@ -173,6 +198,9 @@ func normalizeDecision(base, parsed Decision) Decision {
 	}
 	if parsed.Type == DecisionPlan {
 		parsed.Plan = normalizePlan(base.Plan, parsed.Plan)
+		if clarify := validatePlanPrerequisites(parsed.Plan); clarify.Type != "" {
+			return clarify
+		}
 	}
 	return parsed
 }
@@ -191,10 +219,20 @@ func normalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
 		parsed.Goal = base.Goal
 	}
 	parsed.Resolved.ServiceName = firstNonEmpty(parsed.Resolved.ServiceName, base.Resolved.ServiceName)
+	if parsed.Resolved.ServiceID == 0 {
+		parsed.Resolved.ServiceID = base.Resolved.ServiceID
+	}
 	parsed.Resolved.ClusterName = firstNonEmpty(parsed.Resolved.ClusterName, base.Resolved.ClusterName)
+	if parsed.Resolved.ClusterID == 0 {
+		parsed.Resolved.ClusterID = base.Resolved.ClusterID
+	}
 	parsed.Resolved.Namespace = firstNonEmpty(parsed.Resolved.Namespace, base.Resolved.Namespace)
+	parsed.Resolved.PodName = firstNonEmpty(parsed.Resolved.PodName, base.Resolved.PodName)
 	if len(parsed.Resolved.HostNames) == 0 {
 		parsed.Resolved.HostNames = base.Resolved.HostNames
+	}
+	if len(parsed.Resolved.HostIDs) == 0 {
+		parsed.Resolved.HostIDs = append([]int(nil), base.Resolved.HostIDs...)
 	}
 	if strings.TrimSpace(parsed.Narrative) == "" {
 		parsed.Narrative = base.Narrative
@@ -202,7 +240,380 @@ func normalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
 	if len(parsed.Steps) == 0 {
 		parsed.Steps = base.Steps
 	}
+	for i := range parsed.Steps {
+		step := parsed.Steps[i]
+		if strings.TrimSpace(step.StepID) == "" {
+			step.StepID = fmt.Sprintf("step-%d", i+1)
+		}
+		if strings.TrimSpace(step.Title) == "" {
+			step.Title = fmt.Sprintf("步骤 %d", i+1)
+		}
+		if strings.TrimSpace(step.Expert) == "" {
+			if i < len(base.Steps) {
+				step.Expert = base.Steps[i].Expert
+			}
+			if strings.TrimSpace(step.Expert) == "" {
+				step.Expert = "service"
+			}
+		}
+		step.Expert = normalizeExpertName(step.Expert, parsed.Steps, i)
+		step.Mode, step.Risk = normalizeModeRisk(step.Mode, step.Risk)
+		if len(step.DependsOn) > 0 {
+			step.DependsOn = dedupe(step.DependsOn)
+		}
+		if strings.TrimSpace(step.Narrative) == "" {
+			step.Narrative = firstNonEmpty(step.Task, step.Title)
+		}
+		step.Input = populateStepInput(step, parsed.Resolved)
+		parsed.Steps[i] = step
+	}
 	return parsed
+}
+
+func parseExecutionPlan(value any) (*ExecutionPlan, error) {
+	if value == nil {
+		return nil, nil
+	}
+	planMap, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("planner plan must be an object")
+	}
+	out := &ExecutionPlan{
+		PlanID:    strings.TrimSpace(looseStringValue(planMap["plan_id"])),
+		Goal:      strings.TrimSpace(looseStringValue(planMap["goal"])),
+		Narrative: strings.TrimSpace(looseStringValue(planMap["narrative"])),
+		Resolved:  parseResolvedResources(planMap["resolved"]),
+		Steps:     parsePlanSteps(planMap["steps"]),
+	}
+	return out, nil
+}
+
+func parseResolvedResources(value any) ResolvedResources {
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return ResolvedResources{}
+	}
+	serviceName := firstNonEmpty(
+		looseStringValue(raw["service_name"]),
+		looseStringValue(raw["service"]),
+	)
+	serviceID := looseIntValue(raw["service_id"])
+	clusterName := firstNonEmpty(
+		looseStringValue(raw["cluster_name"]),
+		looseStringValue(raw["cluster"]),
+	)
+	clusterID := looseIntValue(raw["cluster_id"])
+	if clusterName == "" && clusterID > 0 {
+		clusterName = strconv.Itoa(clusterID)
+	}
+	namespace := firstNonEmpty(
+		looseStringValue(raw["namespace"]),
+		looseStringValue(raw["ns"]),
+	)
+	podName := firstNonEmpty(
+		looseStringValue(raw["pod_name"]),
+		looseStringValue(raw["pod"]),
+	)
+	hosts := stringSliceValue(raw["host_names"])
+	if len(hosts) == 0 {
+		hosts = stringSliceValue(raw["hosts"])
+	}
+	hostIDs := intSliceValue(raw["host_ids"])
+	if len(hostIDs) == 0 {
+		if hostID := looseIntValue(raw["host_id"]); hostID > 0 {
+			hostIDs = []int{hostID}
+		}
+	}
+	return ResolvedResources{
+		ServiceName: serviceName,
+		ServiceID:   serviceID,
+		ClusterName: clusterName,
+		ClusterID:   clusterID,
+		Namespace:   namespace,
+		HostNames:   hosts,
+		HostIDs:     hostIDs,
+		PodName:     podName,
+	}
+}
+
+func parsePlanSteps(value any) []PlanStep {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]PlanStep, 0, len(items))
+	for i, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		step := PlanStep{
+			StepID:    firstNonEmpty(looseStringValue(raw["step_id"]), fmt.Sprintf("step-%d", i+1)),
+			Title:     strings.TrimSpace(looseStringValue(raw["title"])),
+			Expert:    strings.TrimSpace(looseStringValue(raw["expert"])),
+			Intent:    strings.TrimSpace(looseStringValue(raw["intent"])),
+			Task:      strings.TrimSpace(looseStringValue(raw["task"])),
+			DependsOn: stringSliceValue(raw["depends_on"]),
+			Mode:      strings.TrimSpace(looseStringValue(raw["mode"])),
+			Risk:      strings.TrimSpace(looseStringValue(raw["risk"])),
+			Narrative: strings.TrimSpace(looseStringValue(raw["narrative"])),
+		}
+		if input, ok := raw["input"].(map[string]any); ok {
+			step.Input = input
+		}
+		out = append(out, step)
+	}
+	return out
+}
+
+func looseStringValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case json.Number:
+		return v.String()
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case float32:
+		if v == float32(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	default:
+		return ""
+	}
+}
+
+func looseIntValue(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case float32:
+		return int(v)
+	case json.Number:
+		out, _ := strconv.Atoi(v.String())
+		return out
+	case string:
+		out, _ := strconv.Atoi(strings.TrimSpace(v))
+		return out
+	default:
+		return 0
+	}
+}
+
+func stringSliceValue(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := strings.TrimSpace(looseStringValue(item)); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func intSliceValue(value any) []int {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]int, 0, len(items))
+	for _, item := range items {
+		if number := looseIntValue(item); number > 0 {
+			out = append(out, number)
+		}
+	}
+	return out
+}
+
+func mapSliceValue(value any) []map[string]any {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func normalizeExpertName(expert string, steps []PlanStep, index int) string {
+	switch strings.ToLower(strings.TrimSpace(expert)) {
+	case "host", "hostops", "os":
+		return "hostops"
+	case "k8s", "kubernetes", "cluster", "pod":
+		return "k8s"
+	case "service", "app", "application":
+		return "service"
+	case "delivery", "deploy", "deployment", "cicd", "pipeline":
+		return "delivery"
+	case "observability", "monitor", "metrics", "topology", "audit":
+		return "observability"
+	case "analysis":
+		if index > 0 && strings.TrimSpace(steps[index-1].Expert) != "" {
+			return normalizeExpertName(steps[index-1].Expert, steps, index-1)
+		}
+		return "observability"
+	default:
+		return strings.TrimSpace(expert)
+	}
+}
+
+func normalizeModeRisk(mode, risk string) (string, string) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "mutating", "mutate", "write", "apply", "edit":
+		return "mutating", normalizedRisk(risk, "high")
+	case "analysis", "query", "inspect", "read", "readonly", "":
+		return "readonly", normalizedRisk(risk, "low")
+	default:
+		return "readonly", normalizedRisk(risk, "low")
+	}
+}
+
+func normalizedRisk(risk, fallback string) string {
+	switch strings.ToLower(strings.TrimSpace(risk)) {
+	case "low", "medium", "high":
+		return strings.ToLower(strings.TrimSpace(risk))
+	default:
+		return fallback
+	}
+}
+
+func populateStepInput(step PlanStep, resolved ResolvedResources) map[string]any {
+	input := cloneInput(step.Input)
+	switch step.Expert {
+	case "k8s":
+		if resolved.ClusterID > 0 && looseIntValue(input["cluster_id"]) == 0 {
+			input["cluster_id"] = resolved.ClusterID
+		}
+		if resolved.Namespace != "" && strings.TrimSpace(looseStringValue(input["namespace"])) == "" {
+			input["namespace"] = resolved.Namespace
+		}
+		if resolved.PodName != "" && strings.TrimSpace(looseStringValue(input["pod"])) == "" {
+			input["pod"] = resolved.PodName
+		}
+	case "service":
+		if resolved.ServiceID > 0 && looseIntValue(input["service_id"]) == 0 {
+			input["service_id"] = resolved.ServiceID
+		}
+		if resolved.ClusterID > 0 && looseIntValue(input["cluster_id"]) == 0 {
+			input["cluster_id"] = resolved.ClusterID
+		}
+	case "hostops":
+		if len(resolved.HostIDs) == 1 && looseIntValue(input["host_id"]) == 0 {
+			input["host_id"] = resolved.HostIDs[0]
+		}
+		if len(resolved.HostIDs) > 1 && len(intSliceValue(input["host_ids"])) == 0 {
+			hostIDs := make([]int, len(resolved.HostIDs))
+			copy(hostIDs, resolved.HostIDs)
+			input["host_ids"] = hostIDs
+		}
+	}
+	return input
+}
+
+func cloneInput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
+func validatePlanPrerequisites(plan *ExecutionPlan) Decision {
+	if plan == nil {
+		return Decision{}
+	}
+	for _, step := range plan.Steps {
+		switch step.Expert {
+		case "k8s":
+			if looseIntValue(step.Input["cluster_id"]) <= 0 {
+				return Decision{
+					Type:      DecisionClarify,
+					Message:   "需要先明确目标集群后才能执行 Kubernetes 相关步骤。",
+					Narrative: "Kubernetes 步骤缺少 cluster_id，Planner 不能继续交给 Executor。",
+				}
+			}
+			if mentionsPod(step) && strings.TrimSpace(looseStringValue(step.Input["pod"])) == "" {
+				return Decision{
+					Type:      DecisionClarify,
+					Message:   "需要先明确目标 Pod 名称后才能继续执行。",
+					Narrative: "Kubernetes Pod 相关步骤缺少 pod 标识。",
+				}
+			}
+		case "service":
+			if requiresServiceID(step) && looseIntValue(step.Input["service_id"]) <= 0 {
+				return Decision{
+					Type:      DecisionClarify,
+					Message:   "需要先明确目标服务后才能继续执行服务相关步骤。",
+					Narrative: "Service 步骤缺少 service_id。",
+				}
+			}
+			if requiresClusterID(step) && looseIntValue(step.Input["cluster_id"]) <= 0 {
+				return Decision{
+					Type:      DecisionClarify,
+					Message:   "需要先明确目标集群后才能执行服务部署相关步骤。",
+					Narrative: "Service 部署步骤缺少 cluster_id。",
+				}
+			}
+		case "hostops":
+			if mentionsHost(step) && looseIntValue(step.Input["host_id"]) <= 0 && len(intSliceValue(step.Input["host_ids"])) == 0 {
+				return Decision{
+					Type:      DecisionClarify,
+					Message:   "需要先明确目标主机后才能继续执行主机相关步骤。",
+					Narrative: "HostOps 步骤缺少 host_id 或 host_ids。",
+				}
+			}
+		}
+	}
+	return Decision{}
+}
+
+func mentionsPod(step PlanStep) bool {
+	text := strings.ToLower(strings.Join([]string{step.Title, step.Intent, step.Task, step.Narrative}, " "))
+	return strings.Contains(text, "pod")
+}
+
+func mentionsHost(step PlanStep) bool {
+	text := strings.ToLower(strings.Join([]string{step.Title, step.Intent, step.Task, step.Narrative}, " "))
+	return strings.Contains(text, "host") || strings.Contains(text, "ssh")
+}
+
+func requiresServiceID(step PlanStep) bool {
+	return step.Expert == "service"
+}
+
+func requiresClusterID(step PlanStep) bool {
+	text := strings.ToLower(strings.Join([]string{step.Title, step.Intent, step.Task, step.Narrative, step.Mode}, " "))
+	return strings.Contains(text, "deploy") || strings.Contains(text, "release") || strings.Contains(text, "cluster") || step.Mode == "mutating"
 }
 
 func buildClarifyCandidates(ambiguities []string) []map[string]any {
@@ -265,6 +676,13 @@ func collectHostNames(r rewrite.Output) []string {
 		hosts = append(hosts, name)
 	}
 	return dedupe(hosts)
+}
+
+func collectHostIDs(r rewrite.Output) []int {
+	if r.ResourceHints.HostID > 0 {
+		return []int{r.ResourceHints.HostID}
+	}
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {

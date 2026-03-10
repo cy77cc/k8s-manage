@@ -2,6 +2,8 @@ package executor
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -10,6 +12,27 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/planner"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
 )
+
+type stubStepRunner struct {
+	result StepResult
+	err    error
+	calls  int
+}
+
+func (s *stubStepRunner) RunStep(_ context.Context, _ Request, step planner.PlanStep) (StepResult, error) {
+	s.calls++
+	if s.err != nil {
+		return StepResult{}, s.err
+	}
+	out := s.result
+	if out.StepID == "" {
+		out.StepID = step.StepID
+	}
+	if out.Summary == "" {
+		out.Summary = fmt.Sprintf("expert %s executed step %s", step.Expert, step.StepID)
+	}
+	return out, nil
+}
 
 func newExecutionStore(t *testing.T) *runtime.ExecutionStore {
 	t.Helper()
@@ -24,7 +47,8 @@ func newExecutionStore(t *testing.T) *runtime.ExecutionStore {
 
 func TestExecutorApprovalResumeFlow(t *testing.T) {
 	store := newExecutionStore(t)
-	exec := New(store)
+	runner := &stubStepRunner{result: StepResult{Summary: "service expert completed deployment"}}
+	exec := New(store, WithStepRunner(runner))
 	ctx := context.Background()
 
 	result, err := exec.Run(ctx, Request{
@@ -69,5 +93,224 @@ func TestExecutorApprovalResumeFlow(t *testing.T) {
 	}
 	if got := resumed.State.Steps["step-1"].Status; got != runtime.StepCompleted {
 		t.Fatalf("step status = %s, want %s", got, runtime.StepCompleted)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("runner calls = %d, want 1", runner.calls)
+	}
+}
+
+func TestExecutorReadonlyStepRequiresExpertRunner(t *testing.T) {
+	store := newExecutionStore(t)
+	exec := New(store)
+	ctx := context.Background()
+
+	result, err := exec.Run(ctx, Request{
+		TraceID:   "trace-2",
+		SessionID: "session-2",
+		Message:   "inspect payment-api",
+		Plan: planner.ExecutionPlan{
+			PlanID: "plan-2",
+			Goal:   "inspect payment-api",
+			Steps: []planner.PlanStep{
+				{
+					StepID: "step-1",
+					Title:  "检查服务状态",
+					Expert: "service",
+					Mode:   "readonly",
+					Risk:   "low",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := result.State.Steps["step-1"].Status; got != runtime.StepFailed {
+		t.Fatalf("step status = %s, want %s", got, runtime.StepFailed)
+	}
+	if got := result.State.Steps["step-1"].ErrorCode; got != "expert_tool_stream_failed" {
+		t.Fatalf("error code = %q, want %q", got, "expert_tool_stream_failed")
+	}
+}
+
+func TestExecutorInvokesExpertRunnerForReadonlyStep(t *testing.T) {
+	store := newExecutionStore(t)
+	runner := &stubStepRunner{
+		result: StepResult{
+			Summary: "service expert inspected runtime state",
+			Evidence: []Evidence{
+				{Kind: "expert_result", Source: "service"},
+			},
+		},
+	}
+	exec := New(store, WithStepRunner(runner))
+	ctx := context.Background()
+
+	result, err := exec.Run(ctx, Request{
+		TraceID:   "trace-3",
+		SessionID: "session-3",
+		Message:   "inspect payment-api",
+		Plan: planner.ExecutionPlan{
+			PlanID: "plan-3",
+			Goal:   "inspect payment-api",
+			Steps: []planner.PlanStep{
+				{
+					StepID: "step-1",
+					Title:  "检查服务状态",
+					Expert: "service",
+					Intent: "inspect_service",
+					Task:   "inspect payment-api",
+					Mode:   "readonly",
+					Risk:   "low",
+					Input: map[string]any{
+						"service_id": 42,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("runner calls = %d, want 1", runner.calls)
+	}
+	if got := result.State.Steps["step-1"].Status; got != runtime.StepCompleted {
+		t.Fatalf("step status = %s, want %s", got, runtime.StepCompleted)
+	}
+	foundEvidence := false
+	for _, step := range result.Steps {
+		if step.StepID == "step-1" && len(step.Evidence) > 0 {
+			foundEvidence = true
+		}
+	}
+	if !foundEvidence {
+		t.Fatalf("expected expert evidence in step results")
+	}
+}
+
+func TestExecutorEmitsRealtimeStepAndToolEvents(t *testing.T) {
+	store := newExecutionStore(t)
+	runner := &stubStepRunner{result: StepResult{Summary: "k8s expert fetched pod logs"}}
+	exec := New(store, WithStepRunner(runner))
+	ctx := context.Background()
+
+	var names []string
+	result, err := exec.Run(ctx, Request{
+		TraceID:   "trace-4",
+		SessionID: "session-4",
+		Message:   "check mysql-0 logs",
+		EventMeta: EventMeta{
+			SessionID: "session-4",
+			TraceID:   "trace-4",
+			PlanID:    "plan-4",
+		},
+		EmitEvent: func(name string, _ EventMeta, _ map[string]any) bool {
+			names = append(names, name)
+			return true
+		},
+		Plan: planner.ExecutionPlan{
+			PlanID: "plan-4",
+			Goal:   "check mysql-0 logs",
+			Steps: []planner.PlanStep{{
+				StepID: "step-1",
+				Title:  "fetch logs",
+				Expert: "k8s",
+				Task:   "fetch pod logs",
+				Mode:   "readonly",
+				Risk:   "low",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.State.Steps["step-1"].Status != runtime.StepCompleted {
+		t.Fatalf("step status = %s, want %s", result.State.Steps["step-1"].Status, runtime.StepCompleted)
+	}
+	want := []string{"step_update", "tool_call", "tool_result", "step_update"}
+	if len(names) != len(want) {
+		t.Fatalf("event count = %d, want %d (%v)", len(names), len(want), names)
+	}
+	for i, name := range want {
+		if names[i] != name {
+			t.Fatalf("event[%d] = %s, want %s", i, names[i], name)
+		}
+	}
+}
+
+func TestExecutorClassifiesExpertFailures(t *testing.T) {
+	store := newExecutionStore(t)
+	runner := &stubStepRunner{err: &ExecutionError{
+		Code:        "expert_result_invalid",
+		Message:     "expert returned non-JSON output",
+		UserSummary: "专家已执行，但返回结果格式不符合协议。",
+	}}
+	exec := New(store, WithStepRunner(runner))
+	ctx := context.Background()
+
+	result, err := exec.Run(ctx, Request{
+		TraceID:   "trace-5",
+		SessionID: "session-5",
+		Message:   "inspect mysql-0",
+		Plan: planner.ExecutionPlan{
+			PlanID: "plan-5",
+			Goal:   "inspect mysql-0",
+			Steps: []planner.PlanStep{{
+				StepID: "step-1",
+				Title:  "analyze pod health",
+				Expert: "analysis",
+				Mode:   "readonly",
+				Risk:   "low",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	step := result.State.Steps["step-1"]
+	if step.ErrorCode != "expert_result_invalid" {
+		t.Fatalf("error code = %q, want %q", step.ErrorCode, "expert_result_invalid")
+	}
+	if step.UserVisibleSummary != "专家已执行，但返回结果格式不符合协议。" {
+		t.Fatalf("user summary = %q", step.UserVisibleSummary)
+	}
+}
+
+func TestExecutorCompactsMissingPrerequisiteErrors(t *testing.T) {
+	store := newExecutionStore(t)
+	runner := &stubStepRunner{err: fmt.Errorf("[NodeRunError] failed to invoke tool[name:k8s_get_pod_logs id:call_1]: [LocalFunc] failed to invoke tool, toolName=k8s_get_pod_logs, err=k8s client unavailable: cluster_id is required ------------------------ node path: [node_1, ToolNode]")}
+	exec := New(store, WithStepRunner(runner))
+	ctx := context.Background()
+
+	result, err := exec.Run(ctx, Request{
+		TraceID:   "trace-6",
+		SessionID: "session-6",
+		Message:   "查看 mysql-0 的日志",
+		Plan: planner.ExecutionPlan{
+			PlanID: "plan-6",
+			Goal:   "查看 mysql-0 的日志",
+			Steps: []planner.PlanStep{{
+				StepID: "step-1",
+				Title:  "拉取 pod 日志",
+				Expert: "k8s",
+				Task:   "fetch mysql-0 logs",
+				Mode:   "readonly",
+				Risk:   "low",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	step := result.State.Steps["step-1"]
+	if step.ErrorCode != "missing_execution_prerequisite" {
+		t.Fatalf("error code = %q", step.ErrorCode)
+	}
+	if got := step.UserVisibleSummary; got != "当前没有可执行的集群上下文。缺少前置上下文：cluster_id" {
+		t.Fatalf("user summary = %q", got)
+	}
+	if strings.Contains(step.ErrorMessage, "node path") {
+		t.Fatalf("error message should be compacted, got %q", step.ErrorMessage)
 	}
 }

@@ -16,6 +16,8 @@ type Request struct {
 	Message        string
 	Plan           planner.ExecutionPlan
 	RuntimeContext runtime.ContextSnapshot
+	EventMeta      EventMeta
+	EmitEvent      EventEmitter
 }
 
 type ResumeRequest struct {
@@ -60,8 +62,47 @@ type Result struct {
 	Steps []StepResult           `json:"steps,omitempty"`
 }
 
+type StepRunner interface {
+	RunStep(ctx context.Context, req Request, step planner.PlanStep) (StepResult, error)
+}
+
+type EventMeta struct {
+	SessionID string
+	TraceID   string
+	PlanID    string
+	StepID    string
+	Iteration int
+	Timestamp time.Time
+}
+
+func (m EventMeta) WithDefaults() EventMeta {
+	if m.Timestamp.IsZero() {
+		m.Timestamp = time.Now().UTC()
+	}
+	if m.Iteration == 0 {
+		m.Iteration = 1
+	}
+	return m
+}
+
+type EventEmitter func(name string, meta EventMeta, data map[string]any) bool
+
+type ExecutionError struct {
+	Code        string
+	Message     string
+	UserSummary string
+}
+
+func (e *ExecutionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return strings.TrimSpace(e.Message)
+}
+
 type Executor struct {
-	store *runtime.ExecutionStore
+	store      *runtime.ExecutionStore
+	stepRunner StepRunner
 }
 
 type RiskPolicy struct {
@@ -70,8 +111,22 @@ type RiskPolicy struct {
 	AutoRetry        bool `json:"auto_retry"`
 }
 
-func New(store *runtime.ExecutionStore) *Executor {
-	return &Executor{store: store}
+type Option func(*Executor)
+
+func WithStepRunner(stepRunner StepRunner) Option {
+	return func(e *Executor) {
+		e.stepRunner = stepRunner
+	}
+}
+
+func New(store *runtime.ExecutionStore, opts ...Option) *Executor {
+	exec := &Executor{store: store}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(exec)
+		}
+	}
+	return exec
 }
 
 func riskPolicy(mode, risk string) RiskPolicy {
@@ -112,6 +167,9 @@ func (e *Executor) PrepareState(_ context.Context, req Request) (runtime.Executi
 			StepID:             step.StepID,
 			Title:              step.Title,
 			Expert:             step.Expert,
+			Intent:             step.Intent,
+			Task:               step.Task,
+			Input:              step.Input,
 			DependsOn:          append([]string(nil), step.DependsOn...),
 			Status:             status,
 			Mode:               strings.TrimSpace(step.Mode),
@@ -168,7 +226,7 @@ func (e *Executor) Resume(ctx context.Context, req ResumeRequest) (*Result, erro
 	if state == nil {
 		return nil, fmt.Errorf("execution state not found")
 	}
-	return advanceAfterApproval(ctx, e.store, state, req)
+	return advanceAfterApproval(ctx, e.store, state, req, e.stepRunner)
 }
 
 func (e *Executor) Run(ctx context.Context, req Request) (*Result, error) {
@@ -179,7 +237,7 @@ func (e *Executor) Run(ctx context.Context, req Request) (*Result, error) {
 	if e == nil || e.store == nil {
 		return prepared, nil
 	}
-	return advanceScheduler(ctx, e.store, &prepared.State)
+	return advanceScheduler(ctx, e.store, &prepared.State, req, e.stepRunner)
 }
 
 func (e *Executor) RecordFailure(ctx context.Context, sessionID, stepID, code, message string) (*Result, error) {

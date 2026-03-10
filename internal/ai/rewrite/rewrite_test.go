@@ -63,3 +63,26 @@ func TestNormalizeOutputKeepsModelSemanticsAndFillsBaseFields(t *testing.T) {
 		t.Fatalf("OperationMode = %q, want investigate", out.OperationMode)
 	}
 }
+
+func TestRewriteDetectsNumericResourceIDsFromSelection(t *testing.T) {
+	out, err := New(nil).Rewrite(context.Background(), Input{
+		Message: "查看 default 命名空间 mysql-0 的日志",
+		SelectedResources: []SelectedResource{
+			{Type: "cluster", ID: "12", Name: "prod-cluster"},
+			{Type: "service", ID: "34", Name: "payment-api"},
+			{Type: "host", ID: "56", Name: "node-a"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Rewrite() error = %v", err)
+	}
+	if out.ResourceHints.ClusterID != 12 {
+		t.Fatalf("ClusterID = %d, want 12", out.ResourceHints.ClusterID)
+	}
+	if out.ResourceHints.ServiceID != 34 {
+		t.Fatalf("ServiceID = %d, want 34", out.ResourceHints.ServiceID)
+	}
+	if out.ResourceHints.HostID != 56 {
+		t.Fatalf("HostID = %d, want 56", out.ResourceHints.HostID)
+	}
+}

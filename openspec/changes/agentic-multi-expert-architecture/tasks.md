@@ -196,7 +196,7 @@
 - [x] 定义 ThoughtChain 阶段模型：`rewrite / plan / execute / user_action / summary`
 - [x] 为每个阶段定义标题、描述、内容、状态映射
 - [x] 约束前端主体验消费高层事件
-- [ ] 保留 `tool_call / tool_result` 作为补充信息，而不是主流程
+- [x] 保留 `tool_call / tool_result` 作为补充信息，而不是主流程
 - [x] 明确 `delta` 用于正文流式输出，`summary` 用于结构化结论
 
 ### 7.3 ThoughtChain UI
@@ -236,13 +236,13 @@
 
 #### Planner Guardrails
 - [ ] 明确 Planner 在 unresolved / ambiguous 资源场景 MUST 输出 `clarify`
-- [ ] 明确 Planner MUST 使用结构化字段表达 `mode/risk/depends_on`
-- [ ] 明确 Planner MUST NOT 通过 narrative 隐式塞入执行要求
+- [x] 明确 Planner MUST 使用结构化字段表达 `mode/risk/depends_on`
+- [x] 明确 Planner MUST NOT 通过 narrative 隐式塞入执行要求
 
 #### Expert Guardrails
-- [ ] 明确 Experts MUST 只调用本领域工具
-- [ ] 明确 Experts MUST NOT 越权调用 Planner support tools
-- [ ] 明确 Experts 输出结论时区分“观察事实”和“推断判断”
+- [x] 明确 Experts MUST 只调用本领域工具
+- [x] 明确 Experts MUST NOT 越权调用 Planner support tools
+- [x] 明确 Experts 输出结论时区分“观察事实”和“推断判断”
 
 #### Summarizer Guardrails
 - [ ] 明确 Summarizer MUST 基于 `StepResult/Evidence` 生成结论
@@ -255,7 +255,7 @@
 
 ### 9.1 Unit Tests
 - [x] Rewrite 输出协议测试
-- [ ] Planner 决策协议测试
+- [x] Planner 决策协议测试
 - [ ] Resolve 工具测试
 - [x] Executor 状态机测试
 - [x] Approval / Resume 测试
