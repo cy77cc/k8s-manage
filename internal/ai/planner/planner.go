@@ -72,21 +72,21 @@ func New(runner *adk.Runner) *Planner {
 }
 
 func (p *Planner) Plan(ctx context.Context, in Input) (Decision, error) {
-	out := heuristicPlan(in)
+	base := buildBaseDecision(in)
 
 	if p == nil || p.runner == nil {
-		return out, nil
+		return base, nil
 	}
 	raw, err := runADKPlanner(ctx, p.runner, buildPromptInput(in))
 	if err != nil {
-		return out, nil
+		return base, nil
 	}
 
 	parsed, err := ParseDecision(strings.TrimSpace(raw))
 	if err != nil {
-		return out, nil
+		return base, nil
 	}
-	return mergeDecision(out, parsed), nil
+	return normalizeDecision(base, parsed), nil
 }
 
 func ParseDecision(raw string) (Decision, error) {
@@ -100,42 +100,52 @@ func ParseDecision(raw string) (Decision, error) {
 	return out, nil
 }
 
-func heuristicPlan(in Input) Decision {
+func buildBaseDecision(in Input) Decision {
 	rewritten := in.Rewrite
-	if len(rewritten.AmbiguityFlags) > 0 {
+	ambiguities := dedupe(append(append([]string(nil), rewritten.AmbiguityFlags...), rewritten.Ambiguities...))
+	if len(ambiguities) > 0 {
 		return Decision{
-			Type:      DecisionClarify,
-			Message:   "我需要先确认目标资源后再继续规划。",
-			Narrative: "Rewrite 阶段识别到目标资源仍有歧义，Planner 选择先澄清而不是继续生成执行计划。",
-			Candidates: []map[string]any{
-				{"kind": "resource_target", "message": strings.Join(rewritten.AmbiguityFlags, ", ")},
-			},
-		}
-	}
-
-	if rewritten.OperationMode == "query" && looksLikeDirectReply(in.Message) {
-		return Decision{
-			Type:      DecisionDirectReply,
-			Message:   "我可以继续帮你做服务排查、发布检查、监控分析和运维辅助。你可以直接说目标对象和想做的事。",
-			Narrative: "该请求更适合直接回答，不需要进入执行计划。",
+			Type:       DecisionClarify,
+			Message:    "我需要先确认目标资源后再继续规划。",
+			Narrative:  "Rewrite 输出仍有未消解歧义，Planner 先请求补充信息。",
+			Candidates: buildClarifyCandidates(ambiguities),
 		}
 	}
 
 	planID := uuid.NewString()
-	steps := buildPlanSteps(rewritten)
+	goal := firstNonEmpty(rewritten.NormalizedGoal, strings.TrimSpace(in.Message))
+	mode, risk := normalizeStepMode(rewritten.OperationMode)
+	expert := pickPrimaryExpert(rewritten)
 	return Decision{
 		Type:      DecisionPlan,
-		Narrative: "Planner 已根据 Rewrite 输出生成初步执行计划，后续执行层可按 step 依赖继续推进。",
+		Narrative: "Planner 模型不可用时，使用最小结构化计划继续交给执行层处理。",
 		Plan: &ExecutionPlan{
 			PlanID: planID,
-			Goal:   firstNonEmpty(rewritten.NormalizedGoal, strings.TrimSpace(in.Message)),
+			Goal:   goal,
 			Resolved: ResolvedResources{
 				ServiceName: rewritten.ResourceHints.ServiceName,
 				ClusterName: rewritten.ResourceHints.ClusterName,
 				Namespace:   rewritten.ResourceHints.Namespace,
+				HostNames:   collectHostNames(rewritten),
 			},
-			Narrative: "该计划围绕用户当前目标组织调查步骤，并保留结构化的 mode/risk 信息。",
-			Steps:     steps,
+			Narrative: "该计划是 Planner 失败时的最小兜底结构，保留用户目标与已知资源线索。",
+			Steps: []PlanStep{
+				{
+					StepID:    "step-1",
+					Title:     "处理用户请求",
+					Expert:    expert,
+					Intent:    "handle_request",
+					Task:      goal,
+					Mode:      mode,
+					Risk:      risk,
+					Narrative: goal,
+					Input: map[string]any{
+						"message":            strings.TrimSpace(in.Message),
+						"normalized_request": rewritten.NormalizedRequest,
+						"resource_hints":     rewritten.ResourceHints,
+					},
+				},
+			},
 		},
 	}
 }
@@ -145,89 +155,113 @@ func buildPromptInput(in Input) string {
 	return "message: " + strings.TrimSpace(in.Message) + "\nrewrite: " + string(data)
 }
 
-func buildPlanSteps(r rewrite.Output) []PlanStep {
-	mode := "readonly"
-	risk := "low"
-	if r.OperationMode == "mutate" {
-		mode = "mutating"
-		risk = "high"
-	}
-
-	steps := make([]PlanStep, 0, 3)
-	appendStep := func(id, title, expert, intent, task string, dependsOn ...string) {
-		steps = append(steps, PlanStep{
-			StepID:    id,
-			Title:     title,
-			Expert:    expert,
-			Intent:    intent,
-			Task:      task,
-			DependsOn: dependsOn,
-			Mode:      mode,
-			Risk:      risk,
-			Narrative: task,
-			Input: map[string]any{
-				"service_name": r.ResourceHints.ServiceName,
-				"cluster_name": r.ResourceHints.ClusterName,
-				"namespace":    r.ResourceHints.Namespace,
-			},
-		})
-	}
-
-	stepNo := 1
-	appendFromDomain := func(domain string) {
-		id := fmt.Sprintf("step-%d", stepNo)
-		stepNo++
-		switch domain {
-		case "observability":
-			appendStep(id, "检查监控与异常", "observability", "collect_evidence", "检查延迟、错误率、日志或告警信号。")
-		case "delivery":
-			appendStep(id, "核对近期发布", "delivery", "check_release", "核对近期发布、流水线或变更记录。")
-		case "k8s":
-			appendStep(id, "检查集群工作负载", "k8s", "inspect_workload", "检查相关工作负载、Pod 状态与命名空间上下文。")
-		case "hostops":
-			appendStep(id, "检查主机层运行状态", "hostops", "inspect_hosts", "检查主机资源或运行状态是否异常。")
-		default:
-			appendStep(id, "检查服务状态", "service", "inspect_service", "检查服务当前状态、配置和运行表现。")
-		}
-	}
-
-	for _, domain := range r.DomainHints {
-		appendFromDomain(domain)
-		if len(steps) >= 3 {
-			break
-		}
-	}
-	if len(steps) == 0 {
-		appendFromDomain("service")
-	}
-	return steps
-}
-
-func looksLikeDirectReply(message string) bool {
-	lower := strings.ToLower(strings.TrimSpace(message))
-	return strings.HasPrefix(lower, "你能") ||
-		strings.HasPrefix(lower, "你会") ||
-		strings.Contains(lower, "help") ||
-		strings.Contains(lower, "怎么用")
-}
-
-func mergeDecision(fallback, parsed Decision) Decision {
+func normalizeDecision(base, parsed Decision) Decision {
 	if parsed.Type == "" {
-		return fallback
+		return base
 	}
 	if strings.TrimSpace(parsed.Narrative) == "" {
-		parsed.Narrative = fallback.Narrative
+		parsed.Narrative = base.Narrative
 	}
 	if parsed.Type == DecisionPlan && parsed.Plan == nil {
-		parsed.Plan = fallback.Plan
+		parsed.Plan = base.Plan
 	}
 	if parsed.Type == DecisionClarify && strings.TrimSpace(parsed.Message) == "" {
-		parsed.Message = fallback.Message
+		parsed.Message = base.Message
 	}
 	if parsed.Type == DecisionDirectReply && strings.TrimSpace(parsed.Message) == "" {
-		parsed.Message = fallback.Message
+		parsed.Message = base.Message
+	}
+	if parsed.Type == DecisionPlan {
+		parsed.Plan = normalizePlan(base.Plan, parsed.Plan)
 	}
 	return parsed
+}
+
+func normalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
+	if parsed == nil {
+		return base
+	}
+	if strings.TrimSpace(parsed.PlanID) == "" {
+		parsed.PlanID = base.PlanID
+	}
+	if strings.TrimSpace(parsed.Goal) == "" {
+		parsed.Goal = base.Goal
+	}
+	parsed.Resolved.ServiceName = firstNonEmpty(parsed.Resolved.ServiceName, base.Resolved.ServiceName)
+	parsed.Resolved.ClusterName = firstNonEmpty(parsed.Resolved.ClusterName, base.Resolved.ClusterName)
+	parsed.Resolved.Namespace = firstNonEmpty(parsed.Resolved.Namespace, base.Resolved.Namespace)
+	if len(parsed.Resolved.HostNames) == 0 {
+		parsed.Resolved.HostNames = base.Resolved.HostNames
+	}
+	if strings.TrimSpace(parsed.Narrative) == "" {
+		parsed.Narrative = base.Narrative
+	}
+	if len(parsed.Steps) == 0 {
+		parsed.Steps = base.Steps
+	}
+	return parsed
+}
+
+func buildClarifyCandidates(ambiguities []string) []map[string]any {
+	out := make([]map[string]any, 0, len(ambiguities))
+	for _, item := range ambiguities {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"kind":    "ambiguity",
+			"message": item,
+		})
+	}
+	return out
+}
+
+func normalizeStepMode(mode string) (string, string) {
+	if strings.TrimSpace(mode) == "mutate" {
+		return "mutating", "high"
+	}
+	return "readonly", "low"
+}
+
+func pickPrimaryExpert(r rewrite.Output) string {
+	for _, domain := range r.DomainHints {
+		domain = strings.TrimSpace(domain)
+		if domain != "" {
+			return domain
+		}
+	}
+	for _, target := range r.NormalizedRequest.Targets {
+		switch strings.TrimSpace(target.Type) {
+		case "host":
+			return "hostops"
+		case "cluster", "namespace", "pod", "deployment":
+			return "k8s"
+		case "pipeline":
+			return "delivery"
+		case "service":
+			return "service"
+		}
+	}
+	return "service"
+}
+
+func collectHostNames(r rewrite.Output) []string {
+	if strings.TrimSpace(r.ResourceHints.HostName) != "" {
+		return []string{strings.TrimSpace(r.ResourceHints.HostName)}
+	}
+	hosts := make([]string, 0, len(r.NormalizedRequest.Targets))
+	for _, target := range r.NormalizedRequest.Targets {
+		if strings.TrimSpace(target.Type) != "host" {
+			continue
+		}
+		name := strings.TrimSpace(target.Name)
+		if name == "" {
+			continue
+		}
+		hosts = append(hosts, name)
+	}
+	return dedupe(hosts)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -238,4 +272,21 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func dedupe(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
