@@ -19,6 +19,7 @@ Gateway / API
 - Gateway 只负责 transport / auth / session shell
 - `internal/ai` MUST 作为 AI 编排主边界
 - `Executor` MUST 作为 runtime 负责确定性执行，而不是再次退化为大一统自治 Agent
+- 实现 MUST 优先保持代码简洁规范，避免没有独立语义或复用价值的过渡封装
 
 **Acceptance Criteria:**
 - [ ] AI Orchestrator Host MUST 成为唯一稳定入口
@@ -31,6 +32,12 @@ Gateway / API
 - **WHEN** Gateway 接收请求
 - **THEN** Gateway MUST 将标准化请求委托给 `internal/ai` 中的 Orchestrator Host
 - **AND** Gateway MUST NOT 在 handler 层重写编排语义
+
+#### Scenario: implementation chooses direct ADK stage assembly over wrapper indirection
+- **GIVEN** Rewrite、Planner、Summarizer 已有 Eino ADK 原生装配方式
+- **WHEN** 实现阶段对象
+- **THEN** 系统 SHOULD 直接使用阶段自己的 ADK 装配
+- **AND** SHOULD NOT 增加仅用于转发 `agent/runner` 调用的通用包装层
 
 ### Requirement: Rewrite Stage For Colloquial Input
 

@@ -1,5 +1,5 @@
 groups:
-    - name: k8s-manage-alerts
+    - name: OpsPilot-alerts
       rules:
         - alert: 主机 CPU 高使用
           expr: cpu_usage > 85

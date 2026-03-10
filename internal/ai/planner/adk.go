@@ -29,7 +29,13 @@ func NewADKRunner(ctx context.Context, model einomodel.BaseChatModel, deps commo
 		MaxIterations: 4,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: tools.NewCommonTools(ctx, deps),
+				Tools: append(tools.NewCommonTools(ctx, deps), decisionTools()...),
+			},
+			ReturnDirectly: map[string]bool{
+				"clarify":      true,
+				"reject":       true,
+				"direct_reply": true,
+				"plan":         true,
 			},
 		},
 	})
@@ -62,7 +68,7 @@ func (r *adkRunner) Run(ctx context.Context, input string) (string, error) {
 		if err != nil || msg == nil {
 			continue
 		}
-		if msg.Role == schema.Assistant {
+		if isDecisionOutput(msg) {
 			last = strings.TrimSpace(msg.Content)
 		}
 	}
@@ -70,4 +76,31 @@ func (r *adkRunner) Run(ctx context.Context, input string) (string, error) {
 		return "", fmt.Errorf("planner stage produced empty output")
 	}
 	return last, nil
+}
+
+func isDecisionOutput(msg *schema.Message) bool {
+	if msg == nil {
+		return false
+	}
+	content := strings.TrimSpace(msg.Content)
+	if content == "" {
+		return false
+	}
+	switch msg.Role {
+	case schema.Tool:
+		return isDecisionToolName(msg.ToolName)
+	case schema.Assistant:
+		return len(msg.ToolCalls) == 0
+	default:
+		return false
+	}
+}
+
+func isDecisionToolName(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "clarify", "reject", "direct_reply", "plan":
+		return true
+	default:
+		return false
+	}
 }
