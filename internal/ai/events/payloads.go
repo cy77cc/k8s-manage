@@ -23,6 +23,15 @@ type PlanCreatedPayload struct {
 	UserVisibleSummary string                 `json:"user_visible_summary,omitempty"`
 }
 
+type StageDeltaPayload struct {
+	Stage        string `json:"stage"`
+	ContentChunk string `json:"content_chunk,omitempty"`
+	Status       string `json:"status,omitempty"`
+	StepID       string `json:"step_id,omitempty"`
+	Expert       string `json:"expert,omitempty"`
+	Replace      bool   `json:"replace,omitempty"`
+}
+
 type StepUpdatePayload struct {
 	PlanID             string             `json:"plan_id,omitempty"`
 	StepID             string             `json:"step_id,omitempty"`

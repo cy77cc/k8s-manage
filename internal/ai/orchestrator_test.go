@@ -114,3 +114,48 @@ func TestResumeDoesNotPanicWhenPendingApprovalAlreadyCleared(t *testing.T) {
 		t.Fatalf("StepID = %q, want step-3", res.StepID)
 	}
 }
+
+func TestResumeRejectReturnsRejectedMessage(t *testing.T) {
+	store := newExecutionStoreForOrchestrator(t)
+	exec := executor.New(store)
+	ctx := context.Background()
+
+	_, err := exec.Run(ctx, executor.Request{
+		TraceID:   "trace-4",
+		SessionID: "session-4",
+		Message:   "deploy payment-api",
+		Plan: planner.ExecutionPlan{
+			PlanID: "plan-4",
+			Goal:   "deploy payment-api",
+			Steps: []planner.PlanStep{
+				{
+					StepID: "step-4",
+					Title:  "发布服务",
+					Expert: "service",
+					Mode:   "mutating",
+					Risk:   "high",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	orch := NewOrchestrator(nil, store, common.PlatformDeps{})
+	res, err := orch.Resume(ctx, ResumeRequest{
+		SessionID: "session-4",
+		PlanID:    "plan-4",
+		StepID:    "step-4",
+		Approved:  false,
+	})
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if res.Status != "rejected" {
+		t.Fatalf("status = %q, want rejected", res.Status)
+	}
+	if res.Message != "审批已拒绝，待审批步骤不会执行，相关下游步骤已被取消或阻断。" {
+		t.Fatalf("message = %q", res.Message)
+	}
+}

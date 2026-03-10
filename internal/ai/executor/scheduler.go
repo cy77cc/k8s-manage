@@ -144,17 +144,17 @@ func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, st
 		step := state.Steps[stepID]
 		step.ApprovalSatisfied = true
 		state.Steps[stepID] = step
-		if err := transitionStep(state, stepID, runtime.StepReady, "approval granted, step returned to ready"); err != nil {
+		if err := transitionStep(state, stepID, runtime.StepReady, "审批已通过，步骤已返回待执行队列。"); err != nil {
 			return nil, err
 		}
 		state.Status = runtime.ExecutionStatusRunning
 		state.Phase = "approval_granted"
 	} else {
-		if err := transitionStep(state, stepID, runtime.StepCancelled, "approval rejected by user"); err != nil {
+		if err := transitionStep(state, stepID, runtime.StepCancelled, "审批已拒绝，当前步骤不会执行。"); err != nil {
 			return nil, err
 		}
 		state.Status = runtime.ExecutionStatusFailed
-		state.Phase = "cancelled"
+		state.Phase = "rejected"
 		markDependentsBlocked(state, stepID)
 	}
 	return advanceScheduler(ctx, store, state, Request{
@@ -334,7 +334,7 @@ func markDependentsBlocked(state *runtime.ExecutionState, failedStepID string) {
 	for stepID := range state.Steps {
 		for _, dep := range stepDependencies(state, stepID) {
 			if dep == failedStepID {
-				_ = transitionStep(state, stepID, runtime.StepBlocked, "upstream dependency was cancelled")
+				_ = transitionStep(state, stepID, runtime.StepBlocked, "上游步骤已取消，当前步骤不会继续执行。")
 				break
 			}
 		}

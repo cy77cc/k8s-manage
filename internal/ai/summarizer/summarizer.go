@@ -43,11 +43,19 @@ func New(runner *adk.Runner) *Summarizer {
 }
 
 func (s *Summarizer) Summarize(ctx context.Context, in Input) (SummaryOutput, error) {
+	return s.summarize(ctx, in, nil)
+}
+
+func (s *Summarizer) SummarizeStream(ctx context.Context, in Input, onDelta func(string)) (SummaryOutput, error) {
+	return s.summarize(ctx, in, onDelta)
+}
+
+func (s *Summarizer) summarize(ctx context.Context, in Input, onDelta func(string)) (SummaryOutput, error) {
 	base := buildBaseSummary(in)
 	if s == nil || s.runner == nil {
 		return base, nil
 	}
-	raw, err := runADKSummarizer(ctx, s.runner, buildPromptInput(in))
+	raw, err := runADKSummarizer(ctx, s.runner, buildPromptInput(in), onDelta)
 	if err != nil {
 		return base, nil
 	}

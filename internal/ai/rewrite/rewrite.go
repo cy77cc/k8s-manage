@@ -78,12 +78,20 @@ func New(runner *adk.Runner) *Rewriter {
 }
 
 func (r *Rewriter) Rewrite(ctx context.Context, in Input) (Output, error) {
+	return r.rewrite(ctx, in, nil)
+}
+
+func (r *Rewriter) RewriteStream(ctx context.Context, in Input, onDelta func(string)) (Output, error) {
+	return r.rewrite(ctx, in, onDelta)
+}
+
+func (r *Rewriter) rewrite(ctx context.Context, in Input, onDelta func(string)) (Output, error) {
 	base := buildBaseOutput(in)
 
 	if r == nil || r.runner == nil {
 		return buildFallbackOutput(base, "rewrite_runner_unavailable"), nil
 	}
-	raw, err := runADKRewrite(ctx, r.runner, buildPromptInput(in))
+	raw, err := runADKRewrite(ctx, r.runner, buildPromptInput(in), onDelta)
 	if err != nil {
 		return buildFallbackOutput(base, "rewrite_model_unavailable"), nil
 	}

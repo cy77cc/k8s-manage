@@ -2,7 +2,9 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -122,18 +124,22 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 
 	var rewriteOut rewrite.Output
 	if o.rewriter != nil {
+		emitStageDelta(emit, meta, "rewrite", "loading", "开始理解你的问题并提取目标线索。", "", "")
 		var err error
-		rewriteOut, err = o.rewriter.Rewrite(ctx, rewrite.Input{
+		rewriteOut, err = o.rewriter.RewriteStream(ctx, rewrite.Input{
 			Message:           message,
 			Scene:             req.RuntimeContext.Scene,
 			CurrentPage:       req.RuntimeContext.CurrentPage,
 			SelectedResources: toRewriteResources(req.RuntimeContext.SelectedResources),
+		}, func(chunk string) {
+			emitStageDelta(emit, meta, "rewrite", "loading", chunk, "", "")
 		})
 		if err == nil {
 			emitEvent(emit, events.RewriteResult, meta, map[string]any{
 				"rewrite":              rewriteOut,
 				"user_visible_summary": rewriteOut.Narrative,
 			})
+			emitStageDelta(emit, meta, "rewrite", "success", rewriteOut.Narrative, "", "")
 		}
 	}
 
@@ -251,7 +257,7 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 		PlanID:      planID,
 		StepID:      stepID,
 		Status:      status,
-		Message:     approvalMessage(req.Approved),
+		Message:     resumeStatusMessage(status, req.Approved),
 	}, nil
 }
 
@@ -261,9 +267,12 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 			"status":               "planning",
 			"user_visible_summary": "正在根据 Rewrite 结果整理执行计划。",
 		})
-		decision, err := o.planner.Plan(ctx, planner.Input{
+		emitStageDelta(emit, meta, "plan", "loading", "正在整理目标、资源和执行约束。", "", "")
+		decision, err := o.planner.PlanStream(ctx, planner.Input{
 			Message: message,
 			Rewrite: rewritten,
+		}, func(chunk string) {
+			emitStageDelta(emit, meta, "plan", "loading", chunk, "", "")
 		})
 		if err == nil {
 			switch decision.Type {
@@ -274,9 +283,11 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 					"candidates": decision.Candidates,
 					"kind":       "clarify",
 				})
+				emitStageDelta(emit, meta, "plan", "error", decision.Message, "", "")
 				emitDeltaChunks(emit, meta, decision.Message)
 				return decision.Message, nil
 			case planner.DecisionDirectReply:
+				emitStageDelta(emit, meta, "plan", "success", firstNonEmpty(decision.Message, decision.Narrative), "", "")
 				emitDeltaChunks(emit, meta, decision.Message)
 				return decision.Message, nil
 			case planner.DecisionPlan:
@@ -286,6 +297,7 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 						"plan":                 decision.Plan,
 						"user_visible_summary": decision.Narrative,
 					})
+					emitStageDelta(emit, meta, "plan", "success", firstNonEmpty(decision.Narrative, decision.Plan.Narrative), "", "")
 					if o.executor != nil {
 						executed, execErr := o.executor.Run(ctx, executor.Request{
 							TraceID:   meta.TraceID,
@@ -315,14 +327,26 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 									Iteration: eventMeta.Iteration,
 									Timestamp: eventMeta.Timestamp,
 								}, data)
+								emitExecuteStageDelta(emit, events.EventMeta{
+									SessionID: eventMeta.SessionID,
+									TraceID:   eventMeta.TraceID,
+									PlanID:    eventMeta.PlanID,
+									StepID:    eventMeta.StepID,
+									Iteration: eventMeta.Iteration,
+									Timestamp: eventMeta.Timestamp,
+								}, name, data)
 								return true
 							},
 						})
 						if execErr == nil && executed != nil {
-							summaryOut := o.summarizeExecution(ctx, message, decision.Plan, executed)
+							emitStageDelta(emit, meta, "summary", "loading", "正在汇总执行证据并生成结论。", "", "")
+							summaryOut := o.summarizeExecution(ctx, message, decision.Plan, executed, func(chunk string) {
+								emitStageDelta(emit, meta, "summary", "loading", chunk, "", "")
+							})
 							emitEvent(emit, events.Summary, meta, map[string]any{
 								"output": summaryOut,
 							})
+							emitStageDelta(emit, meta, "summary", "success", firstNonEmpty(summaryOut.Summary, "已生成结构化结论。"), "", "")
 							if summaryOut.NeedMoreInvestigation && meta.Iteration < o.maxIters {
 								reason := ""
 								if summaryOut.ReplanHint != nil {
@@ -332,6 +356,9 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 									"reason":           reason,
 									"previous_plan_id": executed.State.PlanID,
 								})
+							}
+							if body, streamErr := o.streamFinalAnswer(ctx, message, decision.Plan, executed, summaryOut, emit, meta); streamErr == nil && body != "" {
+								return body, nil
 							}
 							if body := firstNonEmpty(summaryOut.Conclusion, summaryOut.Summary); body != "" {
 								emitDeltaChunks(emit, meta, body)
@@ -369,6 +396,42 @@ func (o *Orchestrator) generateReply(ctx context.Context, message string) (strin
 	return content, nil
 }
 
+func (o *Orchestrator) streamFinalAnswer(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result, summaryOut summarizer.SummaryOutput, emit StreamEmitter, meta events.EventMeta) (string, error) {
+	model, err := NewAnswerChatModel(ctx)
+	if err != nil {
+		return "", err
+	}
+	stream, err := model.Stream(ctx, buildFinalAnswerMessages(message, plan, result, summaryOut))
+	if err != nil {
+		return "", err
+	}
+	defer stream.Close()
+
+	var builder strings.Builder
+	for {
+		msg, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			return builder.String(), recvErr
+		}
+		if msg == nil {
+			continue
+		}
+		chunk := strings.TrimSpace(msg.Content)
+		if chunk == "" {
+			continue
+		}
+		builder.WriteString(chunk)
+		emitEvent(emit, events.Delta, meta, map[string]any{
+			"content_chunk": chunk,
+			"contentChunk":  chunk,
+		})
+	}
+	return strings.TrimSpace(builder.String()), nil
+}
+
 func (o *Orchestrator) sessionMessages(ctx context.Context, sessionID string) []map[string]any {
 	if o.sessions == nil {
 		return []map[string]any{}
@@ -401,6 +464,75 @@ func emitEvent(emit StreamEmitter, name events.Name, meta events.EventMeta, data
 	})
 }
 
+func emitStageDelta(emit StreamEmitter, meta events.EventMeta, stage, status, chunk, stepID, expert string) {
+	chunk = strings.TrimSpace(chunk)
+	if emit == nil || stage == "" || chunk == "" {
+		return
+	}
+	payload := map[string]any{
+		"stage":         stage,
+		"status":        status,
+		"content_chunk": chunk,
+	}
+	if stepID != "" {
+		payload["step_id"] = stepID
+	}
+	if expert != "" {
+		payload["expert"] = expert
+	}
+	emitEvent(emit, events.StageDelta, meta, payload)
+}
+
+func emitExecuteStageDelta(emit StreamEmitter, meta events.EventMeta, name string, data map[string]any) {
+	switch name {
+	case string(events.StepUpdate):
+		emitStageDelta(
+			emit,
+			meta,
+			"execute",
+			stageStatusFromValue(data["status"]),
+			firstNonEmpty(stringValue(data["title"]), stringValue(data["user_visible_summary"])),
+			stringValue(data["step_id"]),
+			stringValue(data["expert"]),
+		)
+	case string(events.ToolCall):
+		emitStageDelta(
+			emit,
+			meta,
+			"execute",
+			"loading",
+			firstNonEmpty(stringValue(data["summary"]), stringValue(data["tool_name"])),
+			stringValue(data["step_id"]),
+			firstNonEmpty(stringValue(data["expert"]), stringValue(data["tool_name"])),
+		)
+	case string(events.ToolResult):
+		status := "success"
+		if strings.TrimSpace(stringValue(data["error"])) != "" || strings.EqualFold(stringValue(data["status"]), "error") {
+			status = "error"
+		}
+		emitStageDelta(
+			emit,
+			meta,
+			"execute",
+			status,
+			firstNonEmpty(stringValue(data["summary"]), stringValue(data["error"]), stringValue(data["tool_name"])),
+			stringValue(data["step_id"]),
+			firstNonEmpty(stringValue(data["expert"]), stringValue(data["tool_name"])),
+		)
+	}
+}
+
+func stageStatusFromValue(value any) string {
+	switch strings.TrimSpace(stringValue(value)) {
+	case "completed", "success":
+		return "success"
+	case "failed", "error", "blocked", "cancelled", "rejected":
+		return "error"
+	default:
+		return "loading"
+	}
+}
+
 func emitDeltaChunks(emit StreamEmitter, meta events.EventMeta, content string) {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -419,6 +551,38 @@ func emitDeltaChunks(emit StreamEmitter, meta events.EventMeta, content string) 
 			"contentChunk":  chunk,
 		})
 	}
+}
+
+func buildFinalAnswerMessages(message string, plan *planner.ExecutionPlan, result *executor.Result, summaryOut summarizer.SummaryOutput) []*schema.Message {
+	goal := strings.TrimSpace(message)
+	if plan != nil && strings.TrimSpace(plan.Goal) != "" {
+		goal = strings.TrimSpace(plan.Goal)
+	}
+	payload := map[string]any{
+		"user_message": message,
+		"goal":         goal,
+		"summary":      summaryOut,
+	}
+	if plan != nil {
+		payload["plan"] = plan
+	}
+	if result != nil {
+		payload["steps"] = result.Steps
+		payload["execution_status"] = result.State.Status
+	}
+	body, _ := eventsJSON(payload)
+	return []*schema.Message{
+		schema.SystemMessage("You are the final answer generator for OpsPilot. Produce the assistant's final user-facing answer as it is being streamed. Be concise, factual, and directly grounded in the provided summary and step results. Do not repeat ThoughtChain stage titles. Do not mention internal fields like need_more_investigation or replan_hint unless they materially affect the user-facing answer. If uncertainty remains, state it plainly."),
+		schema.UserMessage(body),
+	}
+}
+
+func eventsJSON(v any) (string, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func deriveSessionTitle(message string) string {
@@ -442,14 +606,41 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func approvalMessage(approved bool) string {
-	if approved {
-		return "审批已记录，执行链路可继续恢复"
+func stringValue(value any) string {
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
 	}
-	return "审批已拒绝，当前执行已保持中断"
+	return ""
 }
 
-func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result) summarizer.SummaryOutput {
+func resumeStatusMessage(status string, approved bool) string {
+	switch strings.TrimSpace(status) {
+	case "approved", "approval_granted":
+		return "审批已通过，待审批步骤会继续执行。"
+	case "rejected":
+		return "审批已拒绝，待审批步骤不会执行，相关下游步骤已被取消或阻断。"
+	case "cancelled":
+		return "当前执行已取消，后续步骤不会继续执行。"
+	case "idempotent":
+		if approved {
+			return "重复的审批通过请求已忽略，系统不会重复执行该步骤。"
+		}
+		return "重复的审批拒绝请求已忽略，系统不会再次取消该步骤。"
+	case "noop":
+		return "当前没有可恢复的待审批步骤。"
+	case "missing":
+		return "未找到对应的执行状态，无法恢复该步骤。"
+	case "unavailable":
+		return "当前恢复能力不可用。"
+	default:
+		if approved {
+			return "审批已记录，执行链路可继续恢复。"
+		}
+		return "审批已拒绝，当前待审批步骤不会继续执行。"
+	}
+}
+
+func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result, onDelta func(string)) summarizer.SummaryOutput {
 	if result == nil {
 		return summarizer.SummaryOutput{
 			Summary:   "当前执行结果不可用。",
@@ -465,12 +656,12 @@ func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, p
 		})
 		return fallback
 	}
-	out, err := o.summarizer.Summarize(ctx, summarizer.Input{
+	out, err := o.summarizer.SummarizeStream(ctx, summarizer.Input{
 		Message: message,
 		Plan:    plan,
 		State:   result.State,
 		Steps:   result.Steps,
-	})
+	}, onDelta)
 	if err != nil {
 		fallback, _ := summarizer.New(nil).Summarize(context.Background(), summarizer.Input{
 			Message: message,

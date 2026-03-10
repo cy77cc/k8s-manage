@@ -29,12 +29,13 @@ func NewWithADK(ctx context.Context, model einomodel.BaseChatModel) (*Rewriter, 
 	}, nil
 }
 
-func runADKRewrite(ctx context.Context, runner *adk.Runner, input string) (string, error) {
+func runADKRewrite(ctx context.Context, runner *adk.Runner, input string, onDelta func(string)) (string, error) {
 	if runner == nil {
 		return "", fmt.Errorf("rewrite ADK runner is not configured")
 	}
 	iter := runner.Query(ctx, input)
 	var last string
+	var streamed string
 	for {
 		event, ok := iter.Next()
 		if !ok {
@@ -51,11 +52,32 @@ func runADKRewrite(ctx context.Context, runner *adk.Runner, input string) (strin
 			continue
 		}
 		if msg.Role == schema.Assistant {
-			last = strings.TrimSpace(msg.Content)
+			content := strings.TrimSpace(msg.Content)
+			last = content
+			streamed = emitContentDelta(streamed, content, onDelta)
 		}
 	}
 	if last == "" {
 		return "", fmt.Errorf("rewrite stage produced empty output")
 	}
 	return last, nil
+}
+
+func emitContentDelta(previous, current string, onDelta func(string)) string {
+	if onDelta == nil {
+		return current
+	}
+	current = strings.TrimSpace(current)
+	previous = strings.TrimSpace(previous)
+	if current == "" || current == previous {
+		return current
+	}
+	if previous != "" && strings.HasPrefix(current, previous) {
+		if delta := strings.TrimSpace(current[len(previous):]); delta != "" {
+			onDelta(delta)
+		}
+		return current
+	}
+	onDelta(current)
+	return current
 }

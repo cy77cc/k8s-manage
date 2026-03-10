@@ -197,6 +197,48 @@ func TestNormalizeDecisionPropagatesSelectedResourceIDsIntoStepInput(t *testing.
 	}
 }
 
+func TestNormalizeDecisionKeepsValidK8sPlanFromModelOutput(t *testing.T) {
+	raw := `{"narrative":"用户请求查看 local 集群 kube-system 命名空间下 cilium-87f2m Pod 的最近 100 条日志并分析运行状况。已解析到集群 ID 为 1。计划分为两步：首先获取 Pod 日志，然后基于日志内容分析运行健康状态。","plan":{"plan_id":"plan-logs-cilium-87f2m","goal":"Retrieve last 100 log lines from pod cilium-87f2m in namespace kube-system on cluster local and evaluate its operational health.","resolved":{"cluster_id":1,"namespace":"kube-system","pod_name":"cilium-87f2m"},"narrative":"Target cluster 'local' resolved to ID 1. Pod name and namespace are explicitly provided. Execution will fetch logs and perform health analysis.","steps":[{"step_id":"step-1","title":"Fetch Pod Logs","expert":"k8s","intent":"Retrieve the last 100 lines of logs from the specified pod.","task":"Fetch logs for pod cilium-87f2m in namespace kube-system on cluster 1, limiting to last 100 entries.","depends_on":[],"mode":"readonly","risk":"low","narrative":"Use k8s interface to pull recent logs from the target pod."},{"step_id":"step-2","title":"Analyze Pod Health","expert":"observability","intent":"Evaluate pod running status based on retrieved logs.","task":"Analyze the fetched logs for error patterns, restart indicators, or readiness issues to determine health status.","depends_on":["step-1"],"mode":"readonly","risk":"low","narrative":"Inspect log content for anomalies to assess operational health."}]},"type":"plan"}`
+
+	parsed, err := ParseDecision(raw)
+	if err != nil {
+		t.Fatalf("ParseDecision() error = %v", err)
+	}
+	base := buildBaseDecision(Input{
+		Message: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志，分析运行状况",
+		Rewrite: rewrite.Output{
+			NormalizedGoal: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志，分析运行状况",
+			OperationMode:  "query",
+			ResourceHints: rewrite.ResourceHints{
+				ClusterName: "local",
+				Namespace:   "kube-system",
+			},
+			NormalizedRequest: rewrite.NormalizedRequest{
+				Targets: []rewrite.RequestTarget{
+					{Type: "pod", Name: "cilium-87f2m"},
+				},
+			},
+		},
+	})
+
+	out := normalizeDecision(base, parsed)
+	if out.Type != DecisionPlan {
+		t.Fatalf("Type = %s, want %s", out.Type, DecisionPlan)
+	}
+	if out.Plan == nil {
+		t.Fatalf("normalized plan is nil")
+	}
+	if got := looseIntValue(out.Plan.Steps[0].Input["cluster_id"]); got != 1 {
+		t.Fatalf("step 1 cluster_id = %d, want 1", got)
+	}
+	if got := looseStringValue(out.Plan.Steps[0].Input["namespace"]); got != "kube-system" {
+		t.Fatalf("step 1 namespace = %q, want kube-system", got)
+	}
+	if got := looseStringValue(out.Plan.Steps[0].Input["pod"]); got != "cilium-87f2m" {
+		t.Fatalf("step 1 pod = %q, want cilium-87f2m", got)
+	}
+}
+
 func TestBuildBaseDecisionCarriesPodTargetIntoResolvedResources(t *testing.T) {
 	out := buildBaseDecision(Input{
 		Message: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志",
@@ -222,38 +264,6 @@ func TestBuildBaseDecisionCarriesPodTargetIntoResolvedResources(t *testing.T) {
 	}
 }
 
-func TestNormalizeClarifyDecisionDoesNotAskForKnownPodAgain(t *testing.T) {
-	base := buildBaseDecision(Input{
-		Message: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志",
-		Rewrite: rewrite.Output{
-			NormalizedGoal: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志",
-			OperationMode:  "query",
-			ResourceHints: rewrite.ResourceHints{
-				ClusterName: "local",
-				Namespace:   "kube-system",
-			},
-			NormalizedRequest: rewrite.NormalizedRequest{
-				Targets: []rewrite.RequestTarget{
-					{Type: "pod", Name: "cilium-87f2m"},
-				},
-			},
-		},
-	})
-	parsed := Decision{
-		Type:      DecisionClarify,
-		Message:   "需要先明确目标 Pod 名称后才能继续执行。",
-		Narrative: "缺少 pod 信息。",
-	}
-
-	out := normalizeDecision(base, parsed)
-	if out.Type != DecisionClarify {
-		t.Fatalf("Type = %s, want %s", out.Type, DecisionClarify)
-	}
-	if out.Message != "需要先明确目标集群后才能继续执行。" {
-		t.Fatalf("clarify message = %q", out.Message)
-	}
-}
-
 func TestValidatePlanPrerequisitesUsesStructuredTargetTypeInsteadOfKeyword(t *testing.T) {
 	plan := &ExecutionPlan{
 		PlanID: "plan-4",
@@ -276,10 +286,7 @@ func TestValidatePlanPrerequisitesUsesStructuredTargetTypeInsteadOfKeyword(t *te
 	}
 
 	out := validatePlanPrerequisites(plan)
-	if out.Type != DecisionClarify {
-		t.Fatalf("Type = %s, want %s", out.Type, DecisionClarify)
-	}
-	if out.Message != "需要先明确目标 Pod 名称后才能继续执行。" {
-		t.Fatalf("Message = %q", out.Message)
+	if out.Type != "" {
+		t.Fatalf("Type = %s, want empty decision", out.Type)
 	}
 }

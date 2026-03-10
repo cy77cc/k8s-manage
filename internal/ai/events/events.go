@@ -16,6 +16,7 @@ const (
 	RewriteResult    Name = "rewrite_result"
 	PlannerState     Name = "planner_state"
 	PlanCreated      Name = "plan_created"
+	StageDelta       Name = "stage_delta"
 	StepUpdate       Name = "step_update"
 	ApprovalRequired Name = "approval_required"
 	ClarifyRequired  Name = "clarify_required"

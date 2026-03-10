@@ -217,17 +217,17 @@
 ### 8.1 Resume Model
 - [x] 将恢复接口收敛到 `session_id + plan_id + step_id`
 - [x] 明确前端审批请求模型
-- [ ] 明确 rejected/cancelled 的用户可见语义
+- [x] 明确 rejected/cancelled 的用户可见语义
 - [x] 明确重复恢复请求的幂等响应语义
 
 ### 8.2 Gateway Alignment
 - [x] 对齐 `/api/v1/ai/chat`
 - [x] 定义规范的 step-resume 接口，并将 `/api/v1/ai/approval/respond` 映射到该语义
-- [ ] 为 `/api/v1/ai/adk/resume` 定义兼容策略，避免继续暴露旧 checkpoint 心智模型
+- [x] 为 `/api/v1/ai/adk/resume` 定义兼容策略，避免继续暴露旧 checkpoint 心智模型
 - [x] 统一 route 层与 orchestrator host 的请求映射
 
 ### 8.3 Model Guardrails
-- [ ] 补充运行时和 prompt 约束，避免模型在 Rewrite / Planner / Expert / Summarizer 阶段跑偏
+- [x] 补充运行时和 prompt 约束，避免模型在 Rewrite / Planner / Expert / Summarizer 阶段跑偏
 
 #### Rewrite Guardrails
 - [x] 明确 Rewrite MUST NOT 伪造资源 ID、权限结果、执行结论

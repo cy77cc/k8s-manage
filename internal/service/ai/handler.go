@@ -100,32 +100,51 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 }
 
 func (h *HTTPHandler) ChatRespond(c *gin.Context) {
-	h.HandleApprovalResponse(c)
+	h.handleResume(c, false)
 }
 
 func (h *HTTPHandler) ResumeStep(c *gin.Context) {
-	h.HandleApprovalResponse(c)
+	h.handleResume(c, false)
 }
 
 func (h *HTTPHandler) HandleApprovalResponse(c *gin.Context) {
+	h.handleResume(c, false)
+}
+
+func (h *HTTPHandler) handleResume(c *gin.Context, legacyADK bool) {
 	var req approvalResponseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BindErr(c, err)
 		return
 	}
-	res, err := h.orchestrator.Resume(c.Request.Context(), coreai.ResumeRequest{
+	res, err := h.orchestrator.Resume(c.Request.Context(), buildResumeRequest(req))
+	if err != nil {
+		httpx.ServerErr(c, err)
+		return
+	}
+	httpx.OK(c, buildResumeResponse(res, legacyADK))
+}
+
+func (h *HTTPHandler) ResumeADKApproval(c *gin.Context) {
+	h.handleResume(c, true)
+}
+
+func buildResumeRequest(req approvalResponseRequest) coreai.ResumeRequest {
+	return coreai.ResumeRequest{
 		SessionID: req.SessionID,
 		PlanID:    req.PlanID,
 		StepID:    firstNonEmpty(req.StepID, req.Target, req.CheckpointID),
 		Target:    firstNonEmpty(req.Target, req.CheckpointID),
 		Approved:  req.Approved,
 		Reason:    req.Reason,
-	})
-	if err != nil {
-		httpx.ServerErr(c, err)
-		return
 	}
-	httpx.OK(c, gin.H{
+}
+
+func buildResumeResponse(res *coreai.ResumeResult, legacyADK bool) gin.H {
+	if res == nil {
+		res = &coreai.ResumeResult{}
+	}
+	payload := gin.H{
 		"resumed":           res.Resumed,
 		"interrupted":       res.Interrupted,
 		"sessionId":         res.SessionID,
@@ -136,11 +155,24 @@ func (h *HTTPHandler) HandleApprovalResponse(c *gin.Context) {
 		"status":            res.Status,
 		"interrupt_error":   "",
 		"approval_required": false,
-	})
+	}
+	if legacyADK {
+		payload["deprecated"] = true
+		payload["compat_mode"] = "legacy_adk_resume"
+		payload["message"] = legacyResumeMessage(res.Message)
+	}
+	return payload
 }
 
-func (h *HTTPHandler) ResumeADKApproval(c *gin.Context) {
-	h.HandleApprovalResponse(c)
+func legacyResumeMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "旧版恢复请求已按 step resume 语义处理。"
+	}
+	if strings.Contains(message, "/api/v1/ai/resume/step") {
+		return message
+	}
+	return message + " 请迁移到 /api/v1/ai/resume/step，并使用 session_id + plan_id + step_id。"
 }
 
 func (h *HTTPHandler) SubmitFeedback(c *gin.Context) {

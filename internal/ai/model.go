@@ -58,6 +58,14 @@ func NewSummarizerChatModel(ctx context.Context) (einomodel.BaseChatModel, error
 	})
 }
 
+func NewAnswerChatModel(ctx context.Context) (einomodel.BaseChatModel, error) {
+	return newChatModel(ctx, chatModelOptions{
+		timeout:  summaryChatModelTimeout,
+		thinking: false,
+		temp:     float32(config.CFG.LLM.Temperature),
+	})
+}
+
 func newChatModel(ctx context.Context, opts chatModelOptions) (einomodel.ToolCallingChatModel, error) {
 	if !config.CFG.LLM.Enable {
 		return nil, fmt.Errorf("llm disabled")

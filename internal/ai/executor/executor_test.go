@@ -133,6 +133,67 @@ func TestExecutorReadonlyStepRequiresExpertRunner(t *testing.T) {
 	}
 }
 
+func TestExecutorRejectApprovalUsesCancelledAndBlockedSummaries(t *testing.T) {
+	store := newExecutionStore(t)
+	exec := New(store, WithStepRunner(&stubStepRunner{}))
+	ctx := context.Background()
+
+	result, err := exec.Run(ctx, Request{
+		TraceID:   "trace-reject",
+		SessionID: "session-reject",
+		Message:   "deploy payment-api",
+		Plan: planner.ExecutionPlan{
+			PlanID: "plan-reject",
+			Goal:   "deploy payment-api",
+			Steps: []planner.PlanStep{
+				{
+					StepID: "step-1",
+					Title:  "发布服务",
+					Expert: "service",
+					Mode:   "mutating",
+					Risk:   "high",
+				},
+				{
+					StepID:    "step-2",
+					Title:     "验证结果",
+					Expert:    "observability",
+					Mode:      "readonly",
+					Risk:      "low",
+					DependsOn: []string{"step-1"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.State.PendingApproval == nil {
+		t.Fatalf("expected pending approval")
+	}
+
+	rejected, err := exec.Resume(ctx, ResumeRequest{
+		SessionID: "session-reject",
+		PlanID:    "plan-reject",
+		StepID:    "step-1",
+		Approved:  false,
+	})
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if got := rejected.State.Steps["step-1"].Status; got != runtime.StepCancelled {
+		t.Fatalf("step-1 status = %s, want %s", got, runtime.StepCancelled)
+	}
+	if got := rejected.State.Steps["step-1"].UserVisibleSummary; got != "审批已拒绝，当前步骤不会执行。" {
+		t.Fatalf("step-1 summary = %q", got)
+	}
+	if got := rejected.State.Steps["step-2"].Status; got != runtime.StepBlocked {
+		t.Fatalf("step-2 status = %s, want %s", got, runtime.StepBlocked)
+	}
+	if got := rejected.State.Steps["step-2"].UserVisibleSummary; got != "上游步骤已取消，当前步骤不会继续执行。" {
+		t.Fatalf("step-2 summary = %q", got)
+	}
+}
+
 func TestExecutorInvokesExpertRunnerForReadonlyStep(t *testing.T) {
 	store := newExecutionStore(t)
 	runner := &stubStepRunner{

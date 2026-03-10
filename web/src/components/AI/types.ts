@@ -150,6 +150,7 @@ export type SSEEventType =
   | 'rewrite_result'
   | 'planner_state'
   | 'plan_created'
+  | 'stage_delta'
   | 'step_update'
   | 'delta'
   | 'message'

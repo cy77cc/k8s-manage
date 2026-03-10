@@ -77,12 +77,20 @@ func New(runner *adk.Runner) *Planner {
 }
 
 func (p *Planner) Plan(ctx context.Context, in Input) (Decision, error) {
+	return p.plan(ctx, in, nil)
+}
+
+func (p *Planner) PlanStream(ctx context.Context, in Input, onDelta func(string)) (Decision, error) {
+	return p.plan(ctx, in, onDelta)
+}
+
+func (p *Planner) plan(ctx context.Context, in Input, onDelta func(string)) (Decision, error) {
 	base := buildBaseDecision(in)
 
 	if p == nil || p.runner == nil {
 		return base, nil
 	}
-	raw, err := runADKPlanner(ctx, p.runner, buildPromptInput(in))
+	raw, err := runADKPlanner(ctx, p.runner, buildPromptInput(in), onDelta)
 	if err != nil {
 		return base, nil
 	}
@@ -182,6 +190,20 @@ func buildPromptInput(in Input) string {
 }
 
 func normalizeDecision(base, parsed Decision) Decision {
+	parsed = canonicalizeDecision(base, parsed)
+	if parsed.Type == "" {
+		return base
+	}
+	if parsed.Type == DecisionPlan {
+		parsed.Plan = canonicalizePlan(base.Plan, parsed.Plan)
+		if clarify := validatePlanPrerequisites(parsed.Plan); clarify.Type != "" {
+			return clarify
+		}
+	}
+	return parsed
+}
+
+func canonicalizeDecision(base, parsed Decision) Decision {
 	if parsed.Type == "" {
 		return base
 	}
@@ -197,19 +219,10 @@ func normalizeDecision(base, parsed Decision) Decision {
 	if parsed.Type == DecisionDirectReply && strings.TrimSpace(parsed.Message) == "" {
 		parsed.Message = base.Message
 	}
-	if parsed.Type == DecisionClarify {
-		parsed = normalizeClarifyDecision(base, parsed)
-	}
-	if parsed.Type == DecisionPlan {
-		parsed.Plan = normalizePlan(base.Plan, parsed.Plan)
-		if clarify := validatePlanPrerequisites(parsed.Plan); clarify.Type != "" {
-			return clarify
-		}
-	}
 	return parsed
 }
 
-func normalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
+func canonicalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
 	if parsed == nil {
 		return base
 	}
@@ -244,6 +257,7 @@ func normalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
 	if len(parsed.Steps) == 0 {
 		parsed.Steps = base.Steps
 	}
+	commonInput := baseStepInput(base)
 	for i := range parsed.Steps {
 		step := parsed.Steps[i]
 		if strings.TrimSpace(step.StepID) == "" {
@@ -268,10 +282,26 @@ func normalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
 		if strings.TrimSpace(step.Narrative) == "" {
 			step.Narrative = firstNonEmpty(step.Task, step.Title)
 		}
+		step.Input = mergeStepInput(commonInput, step.Input)
 		step.Input = populateStepInput(step, parsed.Resolved)
 		parsed.Steps[i] = step
 	}
 	return parsed
+}
+
+func baseStepInput(base *ExecutionPlan) map[string]any {
+	if base == nil || len(base.Steps) == 0 {
+		return map[string]any{}
+	}
+	return cloneInput(base.Steps[0].Input)
+}
+
+func mergeStepInput(base, step map[string]any) map[string]any {
+	out := cloneInput(base)
+	for key, value := range step {
+		out[key] = value
+	}
+	return out
 }
 
 func parseExecutionPlan(value any) (*ExecutionPlan, error) {
@@ -559,18 +589,14 @@ func validatePlanPrerequisites(plan *ExecutionPlan) Decision {
 	for _, step := range plan.Steps {
 		switch step.Expert {
 		case "k8s":
-			clusterID := looseIntValue(step.Input["cluster_id"])
-			if clusterID <= 0 {
-				clusterID = plan.Resolved.ClusterID
-			}
-			if clusterID <= 0 {
+			if resolvedClusterID(step, plan.Resolved) <= 0 {
 				return Decision{
 					Type:      DecisionClarify,
 					Message:   "需要先明确目标集群后才能执行 Kubernetes 相关步骤。",
 					Narrative: "Kubernetes 步骤缺少 cluster_id，Planner 不能继续交给 Executor。",
 				}
 			}
-			if requiresK8sPodTarget(step, plan.Resolved) && strings.TrimSpace(looseStringValue(step.Input["pod"])) == "" {
+			if requiresK8sPodTarget(step, plan.Resolved) && resolvedPodName(step, plan.Resolved) == "" {
 				return Decision{
 					Type:      DecisionClarify,
 					Message:   "需要先明确目标 Pod 名称后才能继续执行。",
@@ -578,14 +604,14 @@ func validatePlanPrerequisites(plan *ExecutionPlan) Decision {
 				}
 			}
 		case "service":
-			if requiresServiceID(step) && looseIntValue(step.Input["service_id"]) <= 0 {
+			if requiresServiceID(step) && resolvedServiceID(step, plan.Resolved) <= 0 {
 				return Decision{
 					Type:      DecisionClarify,
 					Message:   "需要先明确目标服务后才能继续执行服务相关步骤。",
 					Narrative: "Service 步骤缺少 service_id。",
 				}
 			}
-			if requiresClusterID(step) && looseIntValue(step.Input["cluster_id"]) <= 0 {
+			if requiresClusterID(step) && resolvedClusterID(step, plan.Resolved) <= 0 {
 				return Decision{
 					Type:      DecisionClarify,
 					Message:   "需要先明确目标集群后才能执行服务部署相关步骤。",
@@ -593,7 +619,7 @@ func validatePlanPrerequisites(plan *ExecutionPlan) Decision {
 				}
 			}
 		case "hostops":
-			if requiresHostTarget(step, plan.Resolved) && looseIntValue(step.Input["host_id"]) <= 0 && len(intSliceValue(step.Input["host_ids"])) == 0 {
+			if requiresHostTarget(step, plan.Resolved) && len(resolvedHostIDs(step, plan.Resolved)) == 0 {
 				return Decision{
 					Type:      DecisionClarify,
 					Message:   "需要先明确目标主机后才能继续执行主机相关步骤。",
@@ -610,28 +636,63 @@ func requiresServiceID(step PlanStep) bool {
 }
 
 func requiresClusterID(step PlanStep) bool {
-	text := strings.ToLower(strings.Join([]string{step.Title, step.Intent, step.Task, step.Narrative, step.Mode}, " "))
-	return strings.Contains(text, "deploy") || strings.Contains(text, "release") || strings.Contains(text, "cluster") || step.Mode == "mutating"
+	return step.Expert == "service" && step.Mode == "mutating"
 }
 
 func requiresK8sPodTarget(step PlanStep, resolved ResolvedResources) bool {
-	if strings.TrimSpace(looseStringValue(step.Input["pod"])) != "" {
-		return true
-	}
-	if strings.TrimSpace(resolved.PodName) != "" {
+	if resolvedPodName(step, resolved) != "" {
 		return true
 	}
 	return hasTargetType(step, "pod")
 }
 
 func requiresHostTarget(step PlanStep, resolved ResolvedResources) bool {
-	if looseIntValue(step.Input["host_id"]) > 0 || len(intSliceValue(step.Input["host_ids"])) > 0 {
+	if len(resolvedHostIDs(step, resolved)) > 0 {
 		return true
 	}
 	if len(resolved.HostIDs) > 0 || len(resolved.HostNames) > 0 {
 		return true
 	}
 	return hasTargetType(step, "host")
+}
+
+func resolvedClusterID(step PlanStep, resolved ResolvedResources) int {
+	if clusterID := looseIntValue(step.Input["cluster_id"]); clusterID > 0 {
+		return clusterID
+	}
+	return resolved.ClusterID
+}
+
+func resolvedServiceID(step PlanStep, resolved ResolvedResources) int {
+	if serviceID := looseIntValue(step.Input["service_id"]); serviceID > 0 {
+		return serviceID
+	}
+	return resolved.ServiceID
+}
+
+func resolvedPodName(step PlanStep, resolved ResolvedResources) string {
+	if pod := strings.TrimSpace(looseStringValue(step.Input["pod"])); pod != "" {
+		return pod
+	}
+	if pod := strings.TrimSpace(resolved.PodName); pod != "" {
+		return pod
+	}
+	return targetNameForType(step, "pod")
+}
+
+func resolvedHostIDs(step PlanStep, resolved ResolvedResources) []int {
+	if hostID := looseIntValue(step.Input["host_id"]); hostID > 0 {
+		return []int{hostID}
+	}
+	if hostIDs := intSliceValue(step.Input["host_ids"]); len(hostIDs) > 0 {
+		return hostIDs
+	}
+	if len(resolved.HostIDs) > 0 {
+		hostIDs := make([]int, len(resolved.HostIDs))
+		copy(hostIDs, resolved.HostIDs)
+		return hostIDs
+	}
+	return nil
 }
 
 func hasTargetType(step PlanStep, want string) bool {
@@ -653,6 +714,27 @@ func hasTargetType(step PlanStep, want string) bool {
 		}
 	}
 	return false
+}
+
+func targetNameForType(step PlanStep, want string) string {
+	raw, ok := step.Input["normalized_request"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	targets, ok := raw["targets"].([]any)
+	if !ok {
+		return ""
+	}
+	for _, target := range targets {
+		item, ok := target.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(looseStringValue(item["type"])), strings.TrimSpace(want)) {
+			return strings.TrimSpace(looseStringValue(item["name"]))
+		}
+	}
+	return ""
 }
 
 func buildClarifyCandidates(ambiguities []string) []map[string]any {
@@ -735,27 +817,6 @@ func collectPodName(r rewrite.Output) string {
 		}
 	}
 	return ""
-}
-
-func normalizeClarifyDecision(base, parsed Decision) Decision {
-	if parsed.Type != DecisionClarify {
-		return parsed
-	}
-	message := strings.TrimSpace(parsed.Message)
-	if message == "" || base.Plan == nil {
-		return parsed
-	}
-	lower := strings.ToLower(message)
-	if strings.Contains(lower, "pod") && strings.Contains(lower, "名称") && strings.TrimSpace(base.Plan.Resolved.PodName) != "" {
-		if base.Plan.Resolved.ClusterID <= 0 {
-			parsed.Message = "需要先明确目标集群后才能继续执行。"
-			parsed.Narrative = "目标 Pod 已明确，但缺少可执行的集群上下文。"
-			return parsed
-		}
-		parsed.Message = "需要补充其他执行上下文后才能继续。"
-		parsed.Narrative = "目标 Pod 已明确，原始 clarify 与已解析资源矛盾。"
-	}
-	return parsed
 }
 
 func firstNonEmpty(values ...string) string {
