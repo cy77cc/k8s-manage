@@ -9,6 +9,7 @@ import (
 
 	v1 "github.com/cy77cc/OpsPilot/api/ai/v1"
 	coreai "github.com/cy77cc/OpsPilot/internal/ai"
+	"github.com/cy77cc/OpsPilot/internal/ai/events"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
 	aistate "github.com/cy77cc/OpsPilot/internal/ai/state"
 	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
@@ -22,6 +23,7 @@ import (
 type HTTPHandler struct {
 	svcCtx       *svc.ServiceContext
 	sessions     *aistate.SessionState
+	chatStore    *aistate.ChatStore
 	orchestrator *coreai.Orchestrator
 }
 
@@ -56,8 +58,9 @@ func NewHTTPHandler(svcCtx *svc.ServiceContext) *HTTPHandler {
 	sessionState := aistate.NewSessionState(svcCtx.Rdb, "ai:session:")
 	executionStore := runtime.NewExecutionStore(svcCtx.Rdb, "ai:execution:")
 	return &HTTPHandler{
-		svcCtx:   svcCtx,
-		sessions: sessionState,
+		svcCtx:    svcCtx,
+		sessions:  sessionState,
+		chatStore: aistate.NewChatStore(svcCtx.DB),
 		orchestrator: coreai.NewOrchestrator(sessionState, executionStore, common.PlatformDeps{
 			DB: svcCtx.DB,
 		}),
@@ -83,8 +86,20 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
 
+	scene := normalizedScene(req.Context["scene"])
+	recorder := newChatRecorder(h.chatStore, httpx.UIDFromCtx(c), scene, req.Message)
 	emit := func(evt coreai.StreamEvent) bool {
-		return writeSSE(c, flusher, string(evt.Type), evt.Data)
+		payload := evt.Data
+		if recorder != nil {
+			payload = cloneMap(evt.Data)
+			recorder.HandleEvent(c.Request.Context(), evt.Type, payload)
+			if evt.Type == events.Done {
+				if sessionPayload := recorder.SessionPayload(c.Request.Context()); sessionPayload != nil {
+					payload["session"] = sessionPayload
+				}
+			}
+		}
+		return writeSSE(c, flusher, string(evt.Type), payload)
 	}
 
 	runReq := coreai.RunRequest{
@@ -192,7 +207,7 @@ func (h *HTTPHandler) SubmitFeedback(c *gin.Context) {
 }
 
 func (h *HTTPHandler) ListSessions(c *gin.Context) {
-	rows, err := h.sessions.List(c.Request.Context())
+	rows, err := h.chatStore.ListSessions(c.Request.Context(), httpx.UIDFromCtx(c), normalizedScene(c.Query("scene")))
 	if err != nil {
 		httpx.ServerErr(c, err)
 		return
@@ -205,20 +220,20 @@ func (h *HTTPHandler) ListSessions(c *gin.Context) {
 }
 
 func (h *HTTPHandler) CurrentSession(c *gin.Context) {
-	rows, err := h.sessions.List(c.Request.Context())
+	row, err := h.chatStore.CurrentSession(c.Request.Context(), httpx.UIDFromCtx(c), normalizedScene(c.Query("scene")), true)
 	if err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
-	if len(rows) == 0 {
+	if row == nil {
 		httpx.OK(c, nil)
 		return
 	}
-	httpx.OK(c, toAPISession(rows[0], true))
+	httpx.OK(c, toAPISession(*row, true))
 }
 
 func (h *HTTPHandler) GetSession(c *gin.Context) {
-	row, err := h.sessions.Load(c.Request.Context(), c.Param("id"))
+	row, err := h.chatStore.GetSession(c.Request.Context(), httpx.UIDFromCtx(c), strings.TrimSpace(c.Query("scene")), c.Param("id"), true)
 	if err != nil {
 		httpx.ServerErr(c, err)
 		return
@@ -233,7 +248,7 @@ func (h *HTTPHandler) GetSession(c *gin.Context) {
 func (h *HTTPHandler) BranchSession(c *gin.Context) {
 	var req branchSessionRequest
 	_ = c.ShouldBindJSON(&req)
-	row, err := h.sessions.Clone(c.Request.Context(), c.Param("id"), uuid.NewString(), req.Title)
+	row, err := h.chatStore.Clone(c.Request.Context(), httpx.UIDFromCtx(c), c.Param("id"), uuid.NewString(), req.Title)
 	if err != nil {
 		httpx.ServerErr(c, err)
 		return
@@ -251,11 +266,11 @@ func (h *HTTPHandler) UpdateSessionTitle(c *gin.Context) {
 		httpx.BindErr(c, err)
 		return
 	}
-	if err := h.sessions.UpdateTitle(c.Request.Context(), c.Param("id"), req.Title); err != nil {
+	if err := h.chatStore.UpdateTitle(c.Request.Context(), httpx.UIDFromCtx(c), c.Param("id"), req.Title); err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
-	row, err := h.sessions.Load(c.Request.Context(), c.Param("id"))
+	row, err := h.chatStore.GetSession(c.Request.Context(), httpx.UIDFromCtx(c), "", c.Param("id"), true)
 	if err != nil {
 		httpx.ServerErr(c, err)
 		return
@@ -268,7 +283,7 @@ func (h *HTTPHandler) UpdateSessionTitle(c *gin.Context) {
 }
 
 func (h *HTTPHandler) DeleteSession(c *gin.Context) {
-	if err := h.sessions.Delete(c.Request.Context(), c.Param("id")); err != nil {
+	if err := h.chatStore.Delete(c.Request.Context(), httpx.UIDFromCtx(c), c.Param("id")); err != nil {
 		httpx.ServerErr(c, err)
 		return
 	}
@@ -326,21 +341,43 @@ func toSelectedResources(items []any) []coreai.SelectedResource {
 	return out
 }
 
-func toAPISession(snapshot aistate.SessionSnapshot, includeMessages bool) v1.AISession {
+func toAPISession(snapshot aistate.ChatSessionRecord, includeMessages bool) v1.AISession {
 	msgs := make([]map[string]any, 0, len(snapshot.Messages))
 	if includeMessages {
-		for i, msg := range snapshot.Messages {
-			msgs = append(msgs, map[string]any{
-				"id":        fmt.Sprintf("%s-%d", snapshot.SessionID, i+1),
+		for _, msg := range snapshot.Messages {
+			payload := map[string]any{
+				"id":        msg.ID,
 				"role":      msg.Role,
 				"content":   msg.Content,
-				"timestamp": msg.Timestamp.Format(time.RFC3339),
+				"thinking":  msg.Thinking,
+				"status":    msg.Status,
+				"timestamp": msg.CreatedAt.Format(time.RFC3339),
+			}
+			if msg.TraceID != "" {
+				payload["traceId"] = msg.TraceID
+			}
+			if len(msg.ThoughtChain) > 0 {
+				payload["thoughtChain"] = msg.ThoughtChain
+			}
+			if len(msg.Recommendations) > 0 {
+				payload["recommendations"] = msg.Recommendations
+			}
+			msgs = append(msgs, map[string]any{
+				"id":              payload["id"],
+				"role":            payload["role"],
+				"content":         payload["content"],
+				"thinking":        payload["thinking"],
+				"status":          payload["status"],
+				"traceId":         payload["traceId"],
+				"thoughtChain":    payload["thoughtChain"],
+				"recommendations": payload["recommendations"],
+				"timestamp":       payload["timestamp"],
 			})
 		}
 	}
 	return v1.AISession{
-		ID:        snapshot.SessionID,
-		Scene:     stringify(snapshot.Context["scene"]),
+		ID:        snapshot.ID,
+		Scene:     snapshot.Scene,
 		Title:     firstNonEmpty(snapshot.Title, "新对话"),
 		Messages:  msgs,
 		CreatedAt: snapshot.CreatedAt,
@@ -367,6 +404,26 @@ func firstNonNil(values ...any) any {
 		}
 	}
 	return nil
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func normalizedScene(raw any) string {
+	if text, ok := raw.(string); ok {
+		if strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return "global"
 }
 
 func stringify(value any) string {

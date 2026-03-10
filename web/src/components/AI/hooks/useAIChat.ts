@@ -236,7 +236,7 @@ export function useAIChat(options: UseAIChatOptions) {
    */
   const switchConversation = useCallback(async (id: string) => {
     try {
-      const res = await aiApi.getSessionDetail(id);
+      const res = await aiApi.getSessionDetail(id, scene);
       const session = res.data;
 
       setCurrentSessionId(session.id);

@@ -16,12 +16,15 @@ func (AIChatSession) TableName() string { return "ai_chat_sessions" }
 
 // AIChatMessage stores each message item under a session.
 type AIChatMessage struct {
-	ID        string    `gorm:"column:id;type:varchar(64);primaryKey" json:"id"`
-	SessionID string    `gorm:"column:session_id;type:varchar(64);index:idx_ai_msg_session_created" json:"session_id"`
-	Role      string    `gorm:"column:role;type:varchar(32);index" json:"role"`
-	Content   string    `gorm:"column:content;type:longtext" json:"content"`
-	Thinking  string    `gorm:"column:thinking;type:longtext" json:"thinking"`
-	CreatedAt time.Time `gorm:"column:created_at;index:idx_ai_msg_session_created;autoCreateTime" json:"created_at"`
+	ID           string    `gorm:"column:id;type:varchar(64);primaryKey" json:"id"`
+	SessionID    string    `gorm:"column:session_id;type:varchar(64);index:idx_ai_msg_session_created" json:"session_id"`
+	Role         string    `gorm:"column:role;type:varchar(32);index" json:"role"`
+	Content      string    `gorm:"column:content;type:longtext" json:"content"`
+	Thinking     string    `gorm:"column:thinking;type:longtext" json:"thinking"`
+	Status       string    `gorm:"column:status;type:varchar(32);default:''" json:"status"`
+	MetadataJSON string    `gorm:"column:metadata_json;type:longtext" json:"metadata_json"`
+	CreatedAt    time.Time `gorm:"column:created_at;index:idx_ai_msg_session_created;autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (AIChatMessage) TableName() string { return "ai_chat_messages" }

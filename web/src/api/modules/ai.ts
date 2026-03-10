@@ -9,6 +9,9 @@ export interface AIMessage {
   thinking?: string;
   traces?: ToolTrace[];
   recommendations?: EmbeddedRecommendation[];
+  thoughtChain?: Array<Record<string, any>>;
+  traceId?: string;
+  status?: string;
   timestamp: string;
 }
 
@@ -577,8 +580,8 @@ export const aiApi = {
   },
 
   // 获取对话会话详情
-  async getSessionDetail(id: string): Promise<ApiResponse<AISession>> {
-    return apiService.get(`/ai/sessions/${id}`);
+  async getSessionDetail(id: string, scene?: string): Promise<ApiResponse<AISession>> {
+    return apiService.get(`/ai/sessions/${id}`, scene ? { params: { scene } } : undefined);
   },
 
   // 从指定消息创建会话分支

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { aiApi } from '../../../api/modules/ai';
 import type { AISession } from '../../../api/modules/ai';
+import type { EmbeddedRecommendation, ThoughtStageItem } from '../types';
 
 export interface RestoredConversation {
   id: string;
@@ -10,6 +11,10 @@ export interface RestoredConversation {
     role: 'user' | 'assistant';
     content: string;
     thinking?: string;
+    traceId?: string;
+    thoughtChain?: ThoughtStageItem[];
+    recommendations?: EmbeddedRecommendation[];
+    status?: string;
     createdAt: string;
   }>;
 }
@@ -50,17 +55,7 @@ export function useConversationRestore(options: UseConversationRestoreOptions): 
       if (currentRes.data) {
         const session = currentRes.data;
         setRestoredSessionId(session.id);
-        onRestore?.({
-          id: session.id,
-          title: session.title || 'AI Session',
-          messages: (session.messages || []).map(m => ({
-            id: m.id,
-            role: m.role as 'user' | 'assistant',
-            content: m.content,
-            thinking: m.thinking,
-            createdAt: m.timestamp,
-          })),
-        });
+        onRestore?.(toRestoredConversation(session));
         return;
       }
 
@@ -68,21 +63,11 @@ export function useConversationRestore(options: UseConversationRestoreOptions): 
       const listRes = await aiApi.getSessions(scene);
       if (listRes.data && listRes.data.length > 0) {
         const recentSession = listRes.data[0];
-        const detailRes = await aiApi.getSessionDetail(recentSession.id);
+        const detailRes = await aiApi.getSessionDetail(recentSession.id, scene);
         if (detailRes.data) {
           const session = detailRes.data;
           setRestoredSessionId(session.id);
-          onRestore?.({
-            id: session.id,
-            title: session.title || 'AI Session',
-            messages: (session.messages || []).map(m => ({
-              id: m.id,
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              thinking: m.thinking,
-              createdAt: m.timestamp,
-            })),
-          });
+          onRestore?.(toRestoredConversation(session));
         }
       }
     } catch (err) {
@@ -103,5 +88,23 @@ export function useConversationRestore(options: UseConversationRestoreOptions): 
     error,
     restoredSessionId,
     restore,
+  };
+}
+
+function toRestoredConversation(session: AISession): RestoredConversation {
+  return {
+    id: session.id,
+    title: session.title || 'AI Session',
+    messages: (session.messages || []).map(m => ({
+      id: m.id,
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+      thinking: m.thinking,
+      traceId: m.traceId,
+      thoughtChain: (m.thoughtChain || []) as ThoughtStageItem[],
+      recommendations: (m.recommendations || []) as EmbeddedRecommendation[],
+      status: m.status,
+      createdAt: m.timestamp,
+    })),
   };
 }

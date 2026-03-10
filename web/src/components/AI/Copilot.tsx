@@ -2,7 +2,7 @@
  * Copilot 组件
  * 使用 @ant-design/x 组件实现的 AI 助手
  */
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   CloseOutlined,
   CommentOutlined,
@@ -396,7 +396,15 @@ export const Copilot: React.FC<CopilotProps> = ({
     };
     setConversations([restoredItem]);
     setActiveKey(restored.id);
+    setSessionId(restored.id);
   }, []);
+
+  useEffect(() => {
+    setConversations([{ key: 'default', label: '新对话', group: '今天', messages: [] }]);
+    setActiveKey('default');
+    setSessionId(undefined);
+    setIsLoading(false);
+  }, [scene]);
 
   // 使用会话恢复 hook
   const { isRestoring } = useConversationRestore({
