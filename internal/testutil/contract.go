@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 )
 
 // APIResponse represents the standard API response format.

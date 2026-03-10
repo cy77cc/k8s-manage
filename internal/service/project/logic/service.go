@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	v1 "github.com/cy77cc/k8s-manage/api/project/v1"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	v1 "github.com/cy77cc/OpsPilot/api/project/v1"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"

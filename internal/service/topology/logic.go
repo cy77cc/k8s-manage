@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 type Logic struct {

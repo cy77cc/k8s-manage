@@ -25,7 +25,7 @@
 
 ### 1.4 Rollout Foundation
 - [x] 定义新编排链路的 feature flag / rollout 开关
-- [ ] 定义灰度启用与回滚门槛
+- [x] 定义灰度启用与回滚门槛
 - [x] 定义旧链路兼容与回退路径
 
 ## Stage 2: Rewrite Stage
@@ -33,113 +33,113 @@
 目标：增加入口 Rewrite，将用户口语化输入规整为可规划的半结构化任务表达。
 
 ### 2.1 Rewrite Contract
-- [ ] 定义 `rewrite.Output`
-- [ ] 定义 `normalized_goal / operation_mode / resource_hints / domain_hints / ambiguity_flags / narrative`
-- [ ] 约束 Rewrite 输出为半结构化协议
-- [ ] 明确 Rewrite 不负责最终 resolve / permission / execution plan
+- [x] 定义 `rewrite.Output`
+- [x] 定义 `normalized_goal / operation_mode / resource_hints / domain_hints / ambiguity_flags / narrative`
+- [x] 约束 Rewrite 输出为半结构化协议
+- [x] 明确 Rewrite 不负责最终 resolve / permission / execution plan
 
 ### 2.2 Rewrite Runtime
-- [ ] 创建 `internal/ai/rewrite/` 目录
-- [ ] 实现 `internal/ai/rewrite/rewrite.go`
-- [ ] 实现 `internal/ai/rewrite/prompt.go`
-- [ ] 选择 Eino `v0.8.0` 中适合的 Agent / middleware 装配方式
-- [ ] 输出面向前端的 `rewrite_result` 事件
+- [x] 创建 `internal/ai/rewrite/` 目录
+- [x] 实现 `internal/ai/rewrite/rewrite.go`
+- [x] 实现 `internal/ai/rewrite/prompt.go`
+- [x] 选择 Eino `v0.8.0` 中适合的 Agent / middleware 装配方式
+- [x] 输出面向前端的 `rewrite_result` 事件
 
 ## Stage 3: Planner
 
 目标：让 Planner 在 Rewrite 之后稳定地产出半结构化决策与执行计划。
 
 ### 3.1 Planner Contract
-- [ ] 定义 `PlannerDecision`
-- [ ] 定义 `ExecutionPlan`
-- [ ] 定义 `PlanStep`
-- [ ] 为 `PlannerDecision` 和 `ExecutionPlan` 增加 `narrative`
-- [ ] 明确 `clarify/reject/direct_reply/plan` 四类决策
-- [ ] 约束 `mode/risk` 进入 `PlanStep`
+- [x] 定义 `PlannerDecision`
+- [x] 定义 `ExecutionPlan`
+- [x] 定义 `PlanStep`
+- [x] 为 `PlannerDecision` 和 `ExecutionPlan` 增加 `narrative`
+- [x] 明确 `clarify/reject/direct_reply/plan` 四类决策
+- [x] 约束 `mode/risk` 进入 `PlanStep`
 
 ### 3.2 Planner Tools
-- [ ] 实现 `resolve_service`
-- [ ] 实现 `resolve_cluster`
-- [ ] 实现 `resolve_host`
-- [ ] 实现 `check_permission`
-- [ ] 实现 `get_user_context`
-- [ ] 统一 `ResolveResult / ResolveCandidate / ResolveStatus`
-- [ ] 约束 `resolve_*` 复用 inventory 数据源
-- [ ] 约束 `get_user_context` 返回标准化上下文
+- [x] 实现 `resolve_service`
+- [x] 实现 `resolve_cluster`
+- [x] 实现 `resolve_host`
+- [x] 实现 `check_permission`
+- [x] 实现 `get_user_context`
+- [x] 统一 `ResolveResult / ResolveCandidate / ResolveStatus`
+- [x] 约束 `resolve_*` 复用 inventory 数据源
+- [x] 约束 `get_user_context` 返回标准化上下文
 
 ### 3.3 Planner Runtime
-- [ ] 创建 `internal/ai/planner/` 目录
-- [ ] 实现 `internal/ai/planner/planner.go`
-- [ ] 实现 `internal/ai/planner/prompt.go`
-- [ ] 实现 Planner 结构化输出解析
-- [ ] 输出 `planner_state / plan_created / clarify_required`
+- [x] 创建 `internal/ai/planner/` 目录
+- [x] 实现 `internal/ai/planner/planner.go`
+- [x] 实现 `internal/ai/planner/prompt.go`
+- [x] 实现 Planner 结构化输出解析
+- [x] 输出 `planner_state / plan_created / clarify_required`
 
 ## Stage 4: Experts As Agent Tools
 
 目标：完成各领域专家隔离，并统一通过 Agent Tool 接入执行层。
 
 ### 4.1 Expert Registry
-- [ ] 创建 `internal/ai/experts/registry.go`
-- [ ] 定义 `Expert` 接口
-- [ ] 定义 `AsTool()` 导出约定
-- [ ] 统一专家注册与目录输出
+- [x] 创建 `internal/ai/experts/registry.go`
+- [x] 定义 `Expert` 接口
+- [x] 定义 `AsTool()` 导出约定
+- [x] 统一专家注册与目录输出
 
 ### 4.2 HostOpsExpert
-- [ ] 创建 `internal/ai/experts/hostops/`
-- [ ] 实现 HostOpsExpert
-- [ ] 迁移 `os_* / host_*` 相关工具
-- [ ] 明确只读与写入类工具的风险元数据
+- [x] 创建 `internal/ai/experts/hostops/`
+- [x] 实现 HostOpsExpert
+- [x] 迁移 `os_* / host_*` 相关工具
+- [x] 明确只读与写入类工具的风险元数据
 
 ### 4.3 K8sExpert
-- [ ] 创建 `internal/ai/experts/k8s/`
-- [ ] 实现 K8sExpert
-- [ ] 迁移 `k8s_*` 相关工具
-- [ ] 明确工具风险元数据
+- [x] 创建 `internal/ai/experts/k8s/`
+- [x] 实现 K8sExpert
+- [x] 迁移 `k8s_*` 相关工具
+- [x] 明确工具风险元数据
 
 ### 4.4 ServiceExpert
-- [ ] 创建 `internal/ai/experts/service/`
-- [ ] 实现 ServiceExpert
-- [ ] 迁移 `service_* / deployment_* / credential_* / config_*`
-- [ ] 明确工具风险元数据
+- [x] 创建 `internal/ai/experts/service/`
+- [x] 实现 ServiceExpert
+- [x] 迁移 `service_* / deployment_* / credential_* / config_*`
+- [x] 明确工具风险元数据
 
 ### 4.5 DeliveryExpert
-- [ ] 创建 `internal/ai/experts/delivery/`
-- [ ] 实现 DeliveryExpert
-- [ ] 迁移 `cicd_* / job_*`
-- [ ] 明确工具风险元数据
+- [x] 创建 `internal/ai/experts/delivery/`
+- [x] 实现 DeliveryExpert
+- [x] 迁移 `cicd_* / job_*`
+- [x] 明确工具风险元数据
 
 ### 4.6 ObservabilityExpert
-- [ ] 创建 `internal/ai/experts/observability/`
-- [ ] 实现 ObservabilityExpert
-- [ ] 迁移 `monitor_* / topology_* / audit_*`
-- [ ] 明确工具风险元数据
+- [x] 创建 `internal/ai/experts/observability/`
+- [x] 实现 ObservabilityExpert
+- [x] 迁移 `monitor_* / topology_* / audit_*`
+- [x] 明确工具风险元数据
 
 ### 4.7 Planner Support Tool Cleanup
-- [ ] 将 `host_list_inventory` 归入 Planner support tools
-- [ ] 将 `service_list_inventory` 归入 Planner support tools
-- [ ] 将 `cluster_list_inventory` 归入 Planner support tools
-- [ ] 将 `permission_check` 归入 Planner support tools
-- [ ] 评估 `user_list / role_list` 是否仅保留在 Planner support tools
-- [ ] 将 `service_deploy / host_batch` 收敛为兼容入口
+- [x] 将 `host_list_inventory` 归入 Planner support tools
+- [x] 将 `service_list_inventory` 归入 Planner support tools
+- [x] 将 `cluster_list_inventory` 归入 Planner support tools
+- [x] 将 `permission_check` 归入 Planner support tools
+- [x] 评估 `user_list / role_list` 是否仅保留在 Planner support tools
+- [x] 将 `service_deploy / host_batch` 收敛为兼容入口
 
 ## Stage 5: Executor Runtime
 
 目标：建立确定性执行层，管理 step 调度、状态机、审批和恢复。
 
 ### 5.1 Runtime Core
-- [ ] 创建 `internal/ai/executor/` 目录
-- [ ] 实现 `executor.go`
-- [ ] 实现 `scheduler.go`
-- [ ] 定义 `executor.Request / executor.Result / executor.ResumeRequest`
-- [ ] 实现代码驱动的 DAG 调度
-- [ ] 使用稳定 `step_id` 管理依赖和状态
+- [x] 创建 `internal/ai/executor/` 目录
+- [x] 实现 `executor.go`
+- [x] 实现 `scheduler.go`
+- [x] 定义 `executor.Request / executor.Result / executor.ResumeRequest`
+- [x] 实现代码驱动的 DAG 调度
+- [x] 使用稳定 `step_id` 管理依赖和状态
 
 ### 5.2 Step State Machine
-- [ ] 定义 `pending/ready/running/waiting_approval/completed/failed/blocked/cancelled`
-- [ ] 实现状态流转校验
-- [ ] 实现 blocked dependency 处理
-- [ ] 实现单 step 恢复流程
-- [ ] 定义 `StepError` 与错误码
+- [x] 定义 `pending/ready/running/waiting_approval/completed/failed/blocked/cancelled`
+- [x] 实现状态流转校验
+- [x] 实现 blocked dependency 处理
+- [x] 实现单 step 恢复流程
+- [x] 定义 `StepError` 与错误码
 
 ### 5.3 Approval And Retry
 - [ ] 定义 `ApprovalDecision`
@@ -152,10 +152,10 @@
 - [ ] 明确“重复批准请求不得重复执行副作用”
 
 ### 5.4 Step Output
-- [ ] 定义 `StepResult`
-- [ ] 定义 `Evidence`
-- [ ] 为 Step 输出增加 `summary`
-- [ ] 为前端事件增加 `user_visible_summary`
+- [x] 定义 `StepResult`
+- [x] 定义 `Evidence`
+- [x] 为 Step 输出增加 `summary`
+- [x] 为前端事件增加 `user_visible_summary`
 
 ## Stage 6: Summarizer
 

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/google/uuid"
 )
 

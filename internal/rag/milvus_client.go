@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/config"
 	milvusclient "github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 )

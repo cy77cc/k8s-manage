@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cy77cc/k8s-manage/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

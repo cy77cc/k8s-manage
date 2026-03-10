@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 type NotificationPayload struct {

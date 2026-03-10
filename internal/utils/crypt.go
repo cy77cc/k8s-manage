@@ -3,7 +3,7 @@ package utils
 import (
 	"fmt"
 
-	"github.com/cy77cc/k8s-manage/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/config"
 	"golang.org/x/crypto/scrypt"
 )
 

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	sshclient "github.com/cy77cc/OpsPilot/internal/client/ssh"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/gin-gonic/gin"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )

@@ -4,10 +4,10 @@ import (
 	"errors"
 	"io"
 
-	v1 "github.com/cy77cc/k8s-manage/api/user/v1"
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	userLogic "github.com/cy77cc/k8s-manage/internal/service/user/logic"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	v1 "github.com/cy77cc/OpsPilot/api/user/v1"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	userLogic "github.com/cy77cc/OpsPilot/internal/service/user/logic"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
 

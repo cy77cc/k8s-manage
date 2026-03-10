@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/logger"
-	"github.com/cy77cc/k8s-manage/internal/service"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/logger"
+	"github.com/cy77cc/OpsPilot/internal/service"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 
@@ -27,7 +27,6 @@ import (
 
 // @host      localhost:8080
 // @BasePath  /api/v1
-
 
 // Start 启动 HTTP 服务器
 func Start(ctx context.Context) error {

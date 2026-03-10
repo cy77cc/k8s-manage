@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 func (h *Handler) listRiskFindings(ctx context.Context) ([]model.RiskFinding, error) {
 	var findings []model.RiskFinding
-	
+
 	// 先尝试从数据库获取
 	if err := h.svcCtx.DB.WithContext(ctx).
 		Where("resolved_at IS NULL").
@@ -18,18 +18,18 @@ func (h *Handler) listRiskFindings(ctx context.Context) ([]model.RiskFinding, er
 		Find(&findings).Error; err != nil {
 		return nil, err
 	}
-	
+
 	// 如果数据库没有数据，返回基于规则的分析结果
 	if len(findings) == 0 {
 		findings = h.generateSampleRiskFindings()
 	}
-	
+
 	return findings, nil
 }
 
 func (h *Handler) listAnomalies(ctx context.Context) ([]model.Anomaly, error) {
 	var anomalies []model.Anomaly
-	
+
 	if err := h.svcCtx.DB.WithContext(ctx).
 		Where("resolved_at IS NULL").
 		Order("detected_at desc").
@@ -37,17 +37,17 @@ func (h *Handler) listAnomalies(ctx context.Context) ([]model.Anomaly, error) {
 		Find(&anomalies).Error; err != nil {
 		return nil, err
 	}
-	
+
 	if len(anomalies) == 0 {
 		anomalies = h.generateSampleAnomalies()
 	}
-	
+
 	return anomalies, nil
 }
 
 func (h *Handler) listSuggestions(ctx context.Context) ([]model.Suggestion, error) {
 	var suggestions []model.Suggestion
-	
+
 	if err := h.svcCtx.DB.WithContext(ctx).
 		Where("applied_at IS NULL").
 		Order("created_at desc").
@@ -55,11 +55,11 @@ func (h *Handler) listSuggestions(ctx context.Context) ([]model.Suggestion, erro
 		Find(&suggestions).Error; err != nil {
 		return nil, err
 	}
-	
+
 	if len(suggestions) == 0 {
 		suggestions = h.generateSampleSuggestions()
 	}
-	
+
 	return suggestions, nil
 }
 

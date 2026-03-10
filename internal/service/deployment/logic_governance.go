@@ -3,7 +3,7 @@ package deployment
 import (
 	"context"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 func (l *Logic) GetGovernance(ctx context.Context, serviceID uint, env string) (*model.ServiceGovernancePolicy, error) {

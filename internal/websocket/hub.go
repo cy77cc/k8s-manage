@@ -6,28 +6,28 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/gorilla/websocket"
 )
 
 // WSMessage WebSocket 消息格式
 type WSMessage struct {
-	Type         string             `json:"type"`
+	Type         string              `json:"type"`
 	Notification *UserNotificationWS `json:"notification,omitempty"`
-	ID           string             `json:"id,omitempty"`
-	ReadAt       string             `json:"read_at,omitempty"`
-	DismissedAt  string             `json:"dismissed_at,omitempty"`
-	ConfirmedAt  string             `json:"confirmed_at,omitempty"`
+	ID           string              `json:"id,omitempty"`
+	ReadAt       string              `json:"read_at,omitempty"`
+	DismissedAt  string              `json:"dismissed_at,omitempty"`
+	ConfirmedAt  string              `json:"confirmed_at,omitempty"`
 }
 
 // UserNotificationWS WebSocket 通知格式
 type UserNotificationWS struct {
-	ID             uint              `json:"id"`
-	UserID         uint64            `json:"user_id"`
-	NotificationID uint              `json:"notification_id"`
-	ReadAt         *time.Time        `json:"read_at"`
-	DismissedAt    *time.Time        `json:"dismissed_at"`
-	ConfirmedAt    *time.Time        `json:"confirmed_at"`
+	ID             uint               `json:"id"`
+	UserID         uint64             `json:"user_id"`
+	NotificationID uint               `json:"notification_id"`
+	ReadAt         *time.Time         `json:"read_at"`
+	DismissedAt    *time.Time         `json:"dismissed_at"`
+	ConfirmedAt    *time.Time         `json:"confirmed_at"`
 	Notification   model.Notification `json:"notification"`
 }
 
@@ -74,7 +74,7 @@ func GetHub() *Hub {
 // Run 启动 Hub
 func (h *Hub) Run() {
 	ticker := time.NewTicker(30 * time.Second)
-	defer func ()  {
+	defer func() {
 		if err := recover(); err != nil {
 			log.Println("[websocket] hub panic:", err)
 		}

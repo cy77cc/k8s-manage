@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/cloudwego/eino/components/embedding"
-	"github.com/cy77cc/k8s-manage/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/config"
 )
 
 type fakeEinoEmbedder struct{}

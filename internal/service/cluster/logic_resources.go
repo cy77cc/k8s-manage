@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/gin-gonic/gin"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,56 +15,56 @@ import (
 
 // NamespaceInfo represents namespace information
 type NamespaceInfo struct {
-	Name        string `json:"name"`
-	Status      string `json:"status"`
-	Labels      map[string]string `json:"labels"`
-	CreatedAt   string `json:"created_at"`
+	Name      string            `json:"name"`
+	Status    string            `json:"status"`
+	Labels    map[string]string `json:"labels"`
+	CreatedAt string            `json:"created_at"`
 }
 
 // PodInfo represents pod information
 type PodInfo struct {
-	Name         string            `json:"name"`
-	Namespace    string            `json:"namespace"`
-	Status       string            `json:"status"`
-	PodIP        string            `json:"pod_ip"`
-	NodeName     string            `json:"node_name"`
-	Ready        string            `json:"ready"`
-	Restarts     int32             `json:"restarts"`
-	Age          string            `json:"age"`
-	Labels       map[string]string `json:"labels"`
-	CreatedAt    string            `json:"created_at"`
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Status    string            `json:"status"`
+	PodIP     string            `json:"pod_ip"`
+	NodeName  string            `json:"node_name"`
+	Ready     string            `json:"ready"`
+	Restarts  int32             `json:"restarts"`
+	Age       string            `json:"age"`
+	Labels    map[string]string `json:"labels"`
+	CreatedAt string            `json:"created_at"`
 }
 
 // DeploymentInfo represents deployment information
 type DeploymentInfo struct {
-	Name        string `json:"name"`
-	Namespace   string `json:"namespace"`
-	Replicas    int32  `json:"replicas"`
-	Ready       int32  `json:"ready"`
-	Updated     int32  `json:"updated"`
-	Available   int32  `json:"available"`
-	Age         string `json:"age"`
-	CreatedAt   string `json:"created_at"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Replicas  int32  `json:"replicas"`
+	Ready     int32  `json:"ready"`
+	Updated   int32  `json:"updated"`
+	Available int32  `json:"available"`
+	Age       string `json:"age"`
+	CreatedAt string `json:"created_at"`
 }
 
 // StatefulSetInfo represents statefulset information
 type StatefulSetInfo struct {
-	Name        string `json:"name"`
-	Namespace   string `json:"namespace"`
-	Replicas    int32  `json:"replicas"`
-	Ready       int32  `json:"ready"`
-	Age         string `json:"age"`
-	CreatedAt   string `json:"created_at"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Replicas  int32  `json:"replicas"`
+	Ready     int32  `json:"ready"`
+	Age       string `json:"age"`
+	CreatedAt string `json:"created_at"`
 }
 
 // DaemonSetInfo represents daemonset information
 type DaemonSetInfo struct {
-	Name          string `json:"name"`
-	Namespace     string `json:"namespace"`
-	Desired       int32  `json:"desired"`
-	Ready         int32  `json:"ready"`
-	Age           string `json:"age"`
-	CreatedAt     string `json:"created_at"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Desired   int32  `json:"desired"`
+	Ready     int32  `json:"ready"`
+	Age       string `json:"age"`
+	CreatedAt string `json:"created_at"`
 }
 
 // JobInfo represents job information
@@ -81,14 +81,14 @@ type JobInfo struct {
 
 // ServiceInfo represents service information
 type ServiceInfo struct {
-	Name       string            `json:"name"`
-	Namespace  string            `json:"namespace"`
-	Type       string            `json:"type"`
-	ClusterIP  string            `json:"cluster_ip"`
-	Ports      []ServicePort     `json:"ports"`
-	Selector   map[string]string `json:"selector"`
-	Age        string            `json:"age"`
-	CreatedAt  string            `json:"created_at"`
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Type      string            `json:"type"`
+	ClusterIP string            `json:"cluster_ip"`
+	Ports     []ServicePort     `json:"ports"`
+	Selector  map[string]string `json:"selector"`
+	Age       string            `json:"age"`
+	CreatedAt string            `json:"created_at"`
 }
 
 // ServicePort represents service port
@@ -101,11 +101,11 @@ type ServicePort struct {
 
 // IngressInfo represents ingress information
 type IngressInfo struct {
-	Name       string           `json:"name"`
-	Namespace  string           `json:"namespace"`
-	Hosts      []IngressHost    `json:"hosts"`
-	Age        string           `json:"age"`
-	CreatedAt  string           `json:"created_at"`
+	Name      string        `json:"name"`
+	Namespace string        `json:"namespace"`
+	Hosts     []IngressHost `json:"hosts"`
+	Age       string        `json:"age"`
+	CreatedAt string        `json:"created_at"`
 }
 
 // IngressHost represents ingress host
@@ -116,46 +116,46 @@ type IngressHost struct {
 
 // ConfigMapInfo represents configmap information
 type ConfigMapInfo struct {
-	Name       string `json:"name"`
-	Namespace  string `json:"namespace"`
-	DataKeys   []string `json:"data_keys"`
-	Age        string `json:"age"`
-	CreatedAt  string `json:"created_at"`
+	Name      string   `json:"name"`
+	Namespace string   `json:"namespace"`
+	DataKeys  []string `json:"data_keys"`
+	Age       string   `json:"age"`
+	CreatedAt string   `json:"created_at"`
 }
 
 // SecretInfo represents secret information (metadata only)
 type SecretInfo struct {
-	Name       string `json:"name"`
-	Namespace  string `json:"namespace"`
-	Type       string `json:"type"`
-	DataKeys   []string `json:"data_keys"`
-	Age        string `json:"age"`
-	CreatedAt  string `json:"created_at"`
+	Name      string   `json:"name"`
+	Namespace string   `json:"namespace"`
+	Type      string   `json:"type"`
+	DataKeys  []string `json:"data_keys"`
+	Age       string   `json:"age"`
+	CreatedAt string   `json:"created_at"`
 }
 
 // PVCInfo represents PVC information
 type PVCInfo struct {
-	Name        string `json:"name"`
-	Namespace   string `json:"namespace"`
-	Status      string `json:"status"`
-	Capacity    string `json:"capacity"`
-	AccessModes string `json:"access_modes"`
+	Name         string `json:"name"`
+	Namespace    string `json:"namespace"`
+	Status       string `json:"status"`
+	Capacity     string `json:"capacity"`
+	AccessModes  string `json:"access_modes"`
 	StorageClass string `json:"storage_class"`
-	VolumeName  string `json:"volume_name"`
-	Age         string `json:"age"`
-	CreatedAt   string `json:"created_at"`
+	VolumeName   string `json:"volume_name"`
+	Age          string `json:"age"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // PVInfo represents PV information
 type PVInfo struct {
-	Name          string `json:"name"`
-	Status        string `json:"status"`
-	Capacity      string `json:"capacity"`
-	AccessModes   string `json:"access_modes"`
-	StorageClass  string `json:"storage_class"`
-	ClaimRef      string `json:"claim_ref"`
-	Age           string `json:"age"`
-	CreatedAt     string `json:"created_at"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Capacity     string `json:"capacity"`
+	AccessModes  string `json:"access_modes"`
+	StorageClass string `json:"storage_class"`
+	ClaimRef     string `json:"claim_ref"`
+	Age          string `json:"age"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // getClusterClient returns a kubernetes client for the cluster

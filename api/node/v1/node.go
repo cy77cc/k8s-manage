@@ -3,7 +3,7 @@ package v1
 import (
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 // -------------------- Node APIs --------------------
@@ -38,27 +38,27 @@ type UpdateNodeReq struct {
 
 // NodeResp 节点响应
 type NodeResp struct {
-	ID          model.NodeID      `json:"id"`
-	Name        string            `json:"name"`
-	Hostname    string            `json:"hostname"`
-	Description string            `json:"description"`
-	IP          string            `json:"ip"`
-	Port        int               `json:"port"`
-	SSHUser     string            `json:"ssh_user"`
-	SSHKeyID    model.NodeID      `json:"ssh_key_id"`
-	OS          string            `json:"os"`
-	Arch        string            `json:"arch"`
-	Kernel      string            `json:"kernel"`
-	CPUCores    int               `json:"cpu_cores"`
-	MemoryMB    int               `json:"memory_mb"`
-	DiskGB      int               `json:"disk_gb"`
-	Status      string            `json:"status"`
-	Role        string            `json:"role"`
-	ClusterID   int64             `json:"cluster_id"`
-	Labels      string `json:"labels"`
-	LastCheckAt time.Time         `json:"last_check_at"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID          model.NodeID `json:"id"`
+	Name        string       `json:"name"`
+	Hostname    string       `json:"hostname"`
+	Description string       `json:"description"`
+	IP          string       `json:"ip"`
+	Port        int          `json:"port"`
+	SSHUser     string       `json:"ssh_user"`
+	SSHKeyID    model.NodeID `json:"ssh_key_id"`
+	OS          string       `json:"os"`
+	Arch        string       `json:"arch"`
+	Kernel      string       `json:"kernel"`
+	CPUCores    int          `json:"cpu_cores"`
+	MemoryMB    int          `json:"memory_mb"`
+	DiskGB      int          `json:"disk_gb"`
+	Status      string       `json:"status"`
+	Role        string       `json:"role"`
+	ClusterID   int64        `json:"cluster_id"`
+	Labels      string       `json:"labels"`
+	LastCheckAt time.Time    `json:"last_check_at"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
 // ListNodeReq 节点列表请求

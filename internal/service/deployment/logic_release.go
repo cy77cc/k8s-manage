@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	projectlogic "github.com/cy77cc/k8s-manage/internal/service/project/logic"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	projectlogic "github.com/cy77cc/OpsPilot/internal/service/project/logic"
 )
 
 const (

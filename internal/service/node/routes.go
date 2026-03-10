@@ -1,10 +1,10 @@
 package node
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/middleware"
-	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
-	"github.com/cy77cc/k8s-manage/internal/service/node/handler"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/middleware"
+	hostlogic "github.com/cy77cc/OpsPilot/internal/service/host/logic"
+	"github.com/cy77cc/OpsPilot/internal/service/node/handler"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 

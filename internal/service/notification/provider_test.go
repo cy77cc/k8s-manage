@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 func TestProviderRegistryRegisterAndGet(t *testing.T) {

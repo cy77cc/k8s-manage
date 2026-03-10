@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,7 +79,7 @@ func DeployToCluster(ctx context.Context, cluster *model.Cluster, yamlContent st
 		// (Unstructured MarshalJSON should include them)
 
 		_, err = dr.Patch(ctx, obj.GetName(), types.ApplyPatchType, data, metav1.PatchOptions{
-			FieldManager: "k8s-manage",
+			FieldManager: "OpsPilot",
 		})
 		if err != nil {
 			return err

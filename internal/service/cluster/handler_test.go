@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/internal/testutil"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/testutil"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"k8s.io/client-go/tools/clientcmd"
@@ -58,7 +58,7 @@ users:
 		},
 		{
 			name:       "invalid yaml syntax",
-			kubeconfig: "this is not: valid: yaml: [[[" ,
+			kubeconfig: "this is not: valid: yaml: [[[",
 			wantErr:    true,
 			errContain: "yaml",
 		},
@@ -241,8 +241,8 @@ func TestImportCluster_InvalidKubeconfig(t *testing.T) {
 		{
 			name: "invalid yaml format",
 			req: ClusterCreateReq{
-				Name:        "test-cluster",
-				Kubeconfig:  "this is not valid yaml: [[[" ,
+				Name:       "test-cluster",
+				Kubeconfig: "this is not valid yaml: [[[",
 			},
 			errContain: "invalid kubeconfig",
 		},
@@ -266,8 +266,8 @@ func TestImportCluster_InvalidKubeconfig(t *testing.T) {
 		{
 			name: "missing certificates for cert auth",
 			req: ClusterCreateReq{
-				Name:     "test-cluster",
-				Endpoint: "https://localhost:6443",
+				Name:       "test-cluster",
+				Endpoint:   "https://localhost:6443",
 				AuthMethod: "certificate",
 			},
 			errContain: "required",

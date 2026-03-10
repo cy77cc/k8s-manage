@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 type Logic struct {
@@ -246,10 +246,10 @@ func (l *Logic) simulateExecution(jobID uint, executionID uint) {
 
 	// 更新执行记录
 	l.svcCtx.DB.WithContext(ctx).Model(&model.JobExecution{}).Where("id = ?", executionID).Updates(map[string]any{
-		"status":   "success",
+		"status":    "success",
 		"exit_code": 0,
-		"output":   "Task completed successfully",
-		"end_time": now,
+		"output":    "Task completed successfully",
+		"end_time":  now,
 	})
 
 	// 更新任务状态

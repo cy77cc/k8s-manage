@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/cache"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/internal/testutil"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	"github.com/cy77cc/OpsPilot/internal/cache"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/testutil"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/gin-gonic/gin"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"gorm.io/driver/sqlite"
@@ -362,14 +362,14 @@ func TestClusterDetail_ResponseStructure(t *testing.T) {
 
 	// Verify expected fields and types
 	expectedFields := map[string]bool{
-		"id":          true,
-		"name":        true,
-		"status":      true,
-		"source":      true,
-		"type":        true,
-		"endpoint":    true,
-		"created_at":  true,
-		"updated_at":  true,
+		"id":         true,
+		"name":       true,
+		"status":     true,
+		"source":     true,
+		"type":       true,
+		"endpoint":   true,
+		"created_at": true,
+		"updated_at": true,
 	}
 
 	for field := range expectedFields {

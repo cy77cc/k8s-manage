@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/logger"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	notifsvc "github.com/cy77cc/k8s-manage/internal/service/notification"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/logger"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	notifsvc "github.com/cy77cc/OpsPilot/internal/service/notification"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 // AlertmanagerWebhook is the payload format sent by Alertmanager webhook receiver.

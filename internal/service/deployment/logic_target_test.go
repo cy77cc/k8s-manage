@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/internal/testutil"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/testutil"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -66,10 +66,10 @@ func (s *targetTestSuite) createTestCluster(t *testing.T) *model.Cluster {
 func (s *targetTestSuite) createTestCredential(t *testing.T, clusterID uint) *model.ClusterCredential {
 	t.Helper()
 	cred := &model.ClusterCredential{
-		Name:       "test-cred",
-		ClusterID:  clusterID,
-		Endpoint:   "https://127.0.0.1:6443",
-		Status:     "active",
+		Name:        "test-cred",
+		ClusterID:   clusterID,
+		Endpoint:    "https://127.0.0.1:6443",
+		Status:      "active",
 		RuntimeType: "k8s",
 	}
 	if err := s.db.Create(cred).Error; err != nil {

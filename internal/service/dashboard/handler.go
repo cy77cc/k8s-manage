@@ -3,10 +3,10 @@ package dashboard
 import (
 	"strings"
 
-	dashboardv1 "github.com/cy77cc/k8s-manage/api/dashboard/v1"
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	dashboardv1 "github.com/cy77cc/OpsPilot/api/dashboard/v1"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
 

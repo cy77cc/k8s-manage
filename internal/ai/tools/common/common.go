@@ -6,14 +6,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"gorm.io/gorm"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
 // 定义一些通用的协议
-
 type PlatformDeps struct {
 	DB *gorm.DB
 }

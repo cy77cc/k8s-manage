@@ -1,9 +1,8 @@
 package ai
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/middleware"
-	aiHandler "github.com/cy77cc/k8s-manage/internal/service/ai/handler"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/middleware"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,7 +12,7 @@ func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 }
 
 func registerHandlers(g *gin.RouterGroup, svcCtx *svc.ServiceContext) {
-	h := aiHandler.NewHTTPHandler(svcCtx)
+	h := NewHTTPHandler(svcCtx)
 	g.POST("/chat", h.Chat)
 	g.POST("/chat/respond", h.ChatRespond)
 	g.POST("/feedback", h.SubmitFeedback)

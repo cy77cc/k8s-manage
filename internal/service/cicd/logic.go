@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	cicdv1 "github.com/cy77cc/k8s-manage/api/cicd/v1"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/service/cicd/repo"
-	deploymentlogic "github.com/cy77cc/k8s-manage/internal/service/deployment"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	cicdv1 "github.com/cy77cc/OpsPilot/api/cicd/v1"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/service/cicd/repo"
+	deploymentlogic "github.com/cy77cc/OpsPilot/internal/service/deployment"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"gorm.io/gorm"
 )
 

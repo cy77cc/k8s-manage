@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/ai/tools/common"
-	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
+	sshclient "github.com/cy77cc/OpsPilot/internal/client/ssh"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 func runLocalCommand(ctx context.Context, timeout time.Duration, name string, args ...string) (string, error) {

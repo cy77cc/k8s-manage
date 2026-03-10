@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
-	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
-	"github.com/cy77cc/k8s-manage/internal/utils"
+	sshclient "github.com/cy77cc/OpsPilot/internal/client/ssh"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	hostlogic "github.com/cy77cc/OpsPilot/internal/service/host/logic"
+	"github.com/cy77cc/OpsPilot/internal/utils"
 )
 
 func (l *Logic) applyComposeRelease(ctx context.Context, target *model.DeploymentTarget, releaseID uint, manifest string) (string, error) {

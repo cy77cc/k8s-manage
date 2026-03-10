@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	hostlogic "github.com/cy77cc/OpsPilot/internal/service/host/logic"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 type Logic struct {

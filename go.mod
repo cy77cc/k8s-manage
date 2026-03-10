@@ -1,4 +1,4 @@
-module github.com/cy77cc/k8s-manage
+module github.com/cy77cc/OpsPilot
 
 go 1.26.1
 

@@ -3,9 +3,9 @@ package logic
 import (
 	"context"
 
-	v1 "github.com/cy77cc/k8s-manage/api/project/v1"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	v1 "github.com/cy77cc/OpsPilot/api/project/v1"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 type ProjectLogic struct {

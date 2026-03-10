@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 // ValidateEnvMatch validates that the service environment matches the cluster environment type.

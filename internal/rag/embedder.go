@@ -11,7 +11,7 @@ import (
 	ollamaembedding "github.com/cloudwego/eino-ext/components/embedding/ollama"
 	openaicl "github.com/cloudwego/eino-ext/libs/acl/openai"
 	"github.com/cloudwego/eino/components/embedding"
-	"github.com/cy77cc/k8s-manage/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/config"
 )
 
 const (

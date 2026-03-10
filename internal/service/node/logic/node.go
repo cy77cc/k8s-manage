@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"strings"
 
-	v1 "github.com/cy77cc/k8s-manage/api/node/v1"
-	client "github.com/cy77cc/k8s-manage/internal/client/ssh"
-	"github.com/cy77cc/k8s-manage/internal/dao/node"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/internal/utils"
+	v1 "github.com/cy77cc/OpsPilot/api/node/v1"
+	client "github.com/cy77cc/OpsPilot/internal/client/ssh"
+	"github.com/cy77cc/OpsPilot/internal/dao/node"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/utils"
 	"golang.org/x/crypto/ssh"
 )
 

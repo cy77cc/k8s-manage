@@ -3,7 +3,7 @@ package middleware
 import (
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/xctx"
+	"github.com/cy77cc/OpsPilot/internal/xctx"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )

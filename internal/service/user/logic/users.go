@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	v1 "github.com/cy77cc/k8s-manage/api/user/v1"
-	dao "github.com/cy77cc/k8s-manage/internal/dao/user"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	v1 "github.com/cy77cc/OpsPilot/api/user/v1"
+	dao "github.com/cy77cc/OpsPilot/internal/dao/user"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 type UserLogic struct {

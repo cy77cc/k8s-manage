@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/casbin/casbin/v2"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
 

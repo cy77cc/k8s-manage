@@ -1,9 +1,9 @@
 package rbac
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/middleware"
-	rbachandler "github.com/cy77cc/k8s-manage/internal/service/rbac/handler"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/middleware"
+	rbachandler "github.com/cy77cc/OpsPilot/internal/service/rbac/handler"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 

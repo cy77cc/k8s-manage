@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
-	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	deploymentlogic "github.com/cy77cc/k8s-manage/internal/service/deployment"
-	"github.com/cy77cc/k8s-manage/internal/utils"
+	sshclient "github.com/cy77cc/OpsPilot/internal/client/ssh"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	deploymentlogic "github.com/cy77cc/OpsPilot/internal/service/deployment"
+	"github.com/cy77cc/OpsPilot/internal/utils"
 	"gorm.io/gorm"
 )
 

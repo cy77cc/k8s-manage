@@ -3,7 +3,7 @@ package deployment
 import (
 	"strings"
 
-	"github.com/cy77cc/k8s-manage/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
 	"github.com/gin-gonic/gin"
 )
 

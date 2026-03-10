@@ -1,10 +1,10 @@
 package user
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/middleware"
-	userHandler "github.com/cy77cc/k8s-manage/internal/service/user/handler"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/middleware"
+	userHandler "github.com/cy77cc/OpsPilot/internal/service/user/handler"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 

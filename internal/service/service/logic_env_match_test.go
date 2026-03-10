@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/testutil"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/testutil"
 )
 
 func TestValidateEnvMatch_Match(t *testing.T) {

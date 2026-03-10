@@ -3,8 +3,8 @@ package testutil
 import (
 	"testing"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

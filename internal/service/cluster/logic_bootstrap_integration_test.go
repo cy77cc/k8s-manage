@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 func TestBuildBootstrapSteps_ContainsNewPrechecksAndEndpointSteps(t *testing.T) {

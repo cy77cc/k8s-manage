@@ -1,6 +1,6 @@
 package service
 
-import "github.com/cy77cc/k8s-manage/internal/svc"
+import "github.com/cy77cc/OpsPilot/internal/svc"
 
 type Logic struct {
 	svcCtx *svc.ServiceContext

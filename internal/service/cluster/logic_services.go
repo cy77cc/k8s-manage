@@ -1,8 +1,8 @@
 package cluster
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/gin-gonic/gin"
 )
 

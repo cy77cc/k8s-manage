@@ -1,11 +1,11 @@
 package handler
 
 import (
-	v1 "github.com/cy77cc/k8s-manage/api/project/v1"
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/service/project/logic"
-	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	v1 "github.com/cy77cc/OpsPilot/api/project/v1"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/service/project/logic"
+	"github.com/cy77cc/OpsPilot/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
 

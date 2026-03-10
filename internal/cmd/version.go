@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/cy77cc/k8s-manage/version"
+	"github.com/cy77cc/OpsPilot/version"
 	"github.com/spf13/cobra"
 )
 

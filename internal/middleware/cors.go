@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/utils"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 

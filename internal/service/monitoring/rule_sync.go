@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
@@ -81,7 +81,7 @@ func (s *RuleSyncService) SyncRules(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	file := promRulesFile{Groups: []promRuleGroup{{Name: "k8s-manage-alerts", Rules: make([]promRule, 0, len(rules))}}}
+	file := promRulesFile{Groups: []promRuleGroup{{Name: "OpsPilot-alerts", Rules: make([]promRule, 0, len(rules))}}}
 	for _, r := range rules {
 		pr, err := convertRuleToPrometheus(r)
 		if err != nil {

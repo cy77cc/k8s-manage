@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/cy77cc/k8s-manage/internal/utils"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	"github.com/cy77cc/OpsPilot/internal/utils"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
 

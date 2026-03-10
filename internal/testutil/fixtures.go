@@ -1,8 +1,8 @@
 package testutil
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/utils"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/utils"
 	"github.com/google/uuid"
 )
 
@@ -130,11 +130,11 @@ type ClusterBuilder struct {
 func NewClusterBuilder() *ClusterBuilder {
 	return &ClusterBuilder{
 		cluster: &model.Cluster{
-			Name:        "test-cluster-" + uuid.New().String()[:8],
-			Endpoint:    "https://127.0.0.1:6443",
-			Status:      "active",
-			Type:        "kubernetes",
-			AuthMethod:  "token",
+			Name:       "test-cluster-" + uuid.New().String()[:8],
+			Endpoint:   "https://127.0.0.1:6443",
+			Status:     "active",
+			Type:       "kubernetes",
+			AuthMethod: "token",
 		},
 	}
 }

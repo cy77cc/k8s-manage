@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/constants"
+	"github.com/cy77cc/OpsPilot/internal/constants"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"

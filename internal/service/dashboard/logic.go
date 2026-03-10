@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	dashboardv1 "github.com/cy77cc/k8s-manage/api/dashboard/v1"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	dashboardv1 "github.com/cy77cc/OpsPilot/api/dashboard/v1"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"golang.org/x/sync/errgroup"
 )
 

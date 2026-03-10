@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
-	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	hostlogic "github.com/cy77cc/OpsPilot/internal/service/host/logic"
 	"gorm.io/gorm"
 )
 

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	sshclient "github.com/cy77cc/OpsPilot/internal/client/ssh"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/gin-gonic/gin"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -31,55 +31,55 @@ type EventInfo struct {
 
 // HPAInfo represents Horizontal Pod Autoscaler information
 type HPAInfo struct {
-	Name         string           `json:"name"`
-	Namespace    string           `json:"namespace"`
-	Reference    string           `json:"reference"`
-	MinReplicas  int32            `json:"min_replicas"`
-	MaxReplicas  int32            `json:"max_replicas"`
-	CurrentCPU   string           `json:"current_cpu"`
-	TargetCPU    string           `json:"target_cpu"`
-	CurrentMem   string           `json:"current_mem"`
-	TargetMem    string           `json:"target_mem"`
-	Replicas     int32            `json:"replicas"`
-	Metrics      []HPAMetricInfo  `json:"metrics"`
-	Age          string           `json:"age"`
-	CreatedAt    string           `json:"created_at"`
+	Name        string          `json:"name"`
+	Namespace   string          `json:"namespace"`
+	Reference   string          `json:"reference"`
+	MinReplicas int32           `json:"min_replicas"`
+	MaxReplicas int32           `json:"max_replicas"`
+	CurrentCPU  string          `json:"current_cpu"`
+	TargetCPU   string          `json:"target_cpu"`
+	CurrentMem  string          `json:"current_mem"`
+	TargetMem   string          `json:"target_mem"`
+	Replicas    int32           `json:"replicas"`
+	Metrics     []HPAMetricInfo `json:"metrics"`
+	Age         string          `json:"age"`
+	CreatedAt   string          `json:"created_at"`
 }
 
 // HPAMetricInfo represents HPA metric information
 type HPAMetricInfo struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Current  string `json:"current"`
-	Target   string `json:"target"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Current string `json:"current"`
+	Target  string `json:"target"`
 }
 
 // ResourceQuotaInfo represents ResourceQuota information
 type ResourceQuotaInfo struct {
-	Name       string            `json:"name"`
-	Namespace  string            `json:"namespace"`
-	Hard       map[string]string `json:"hard"`
-	Used       map[string]string `json:"used"`
-	Age        string            `json:"age"`
-	CreatedAt  string            `json:"created_at"`
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Hard      map[string]string `json:"hard"`
+	Used      map[string]string `json:"used"`
+	Age       string            `json:"age"`
+	CreatedAt string            `json:"created_at"`
 }
 
 // LimitRangeInfo represents LimitRange information
 type LimitRangeInfo struct {
-	Name       string           `json:"name"`
-	Namespace  string           `json:"namespace"`
-	Type       string           `json:"type"`
-	Limits     []LimitRangeItem `json:"limits"`
-	Age        string           `json:"age"`
-	CreatedAt  string           `json:"created_at"`
+	Name      string           `json:"name"`
+	Namespace string           `json:"namespace"`
+	Type      string           `json:"type"`
+	Limits    []LimitRangeItem `json:"limits"`
+	Age       string           `json:"age"`
+	CreatedAt string           `json:"created_at"`
 }
 
 // LimitRangeItem represents a limit range item
 type LimitRangeItem struct {
-	Type          string            `json:"type"`
-	Max           map[string]string `json:"max"`
-	Min           map[string]string `json:"min"`
-	Default       map[string]string `json:"default"`
+	Type           string            `json:"type"`
+	Max            map[string]string `json:"max"`
+	Min            map[string]string `json:"min"`
+	Default        map[string]string `json:"default"`
 	DefaultRequest map[string]string `json:"default_request"`
 }
 
@@ -102,10 +102,10 @@ type ClusterUpgradePlan struct {
 
 // CertificateInfo represents certificate information
 type CertificateInfo struct {
-	Name        string `json:"name"`
-	ExpiresAt   string `json:"expires_at"`
-	DaysLeft    int    `json:"days_left"`
-	CA          bool   `json:"ca"`
+	Name           string   `json:"name"`
+	ExpiresAt      string   `json:"expires_at"`
+	DaysLeft       int      `json:"days_left"`
+	CA             bool     `json:"ca"`
 	AlternateNames []string `json:"alternate_names"`
 }
 
@@ -446,10 +446,10 @@ func (h *Handler) GetCertificates(c *gin.Context) {
 		}
 
 		items = append(items, CertificateInfo{
-			Name:          secret.Name,
-			ExpiresAt:     expiresAt,
-			DaysLeft:      daysLeft,
-			CA:            secret.Name == "ca" || secret.Name == "etcd-ca",
+			Name:           secret.Name,
+			ExpiresAt:      expiresAt,
+			DaysLeft:       daysLeft,
+			CA:             secret.Name == "ca" || secret.Name == "etcd-ca",
 			AlternateNames: altNames,
 		})
 	}
@@ -526,12 +526,12 @@ type UpgradeClusterReq struct {
 
 // UpgradeClusterResult represents the result of a cluster upgrade
 type UpgradeClusterResult struct {
-	ClusterID     uint     `json:"cluster_id"`
-	FromVersion   string   `json:"from_version"`
-	ToVersion     string   `json:"to_version"`
-	Status        string   `json:"status"`
-	Message       string   `json:"message"`
-	UpgradeSteps  []string `json:"upgrade_steps"`
+	ClusterID    uint     `json:"cluster_id"`
+	FromVersion  string   `json:"from_version"`
+	ToVersion    string   `json:"to_version"`
+	Status       string   `json:"status"`
+	Message      string   `json:"message"`
+	UpgradeSteps []string `json:"upgrade_steps"`
 }
 
 // UpgradeCluster upgrades a platform-managed cluster

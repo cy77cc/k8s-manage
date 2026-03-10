@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/constants"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/utils"
+	"github.com/cy77cc/OpsPilot/internal/constants"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/utils"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"

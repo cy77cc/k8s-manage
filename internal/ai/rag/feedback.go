@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	aistate "github.com/cy77cc/k8s-manage/internal/ai/state"
+	aistate "github.com/cy77cc/OpsPilot/internal/ai/state"
 )
 
 type Feedback struct {

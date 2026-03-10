@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	v1 "github.com/cy77cc/k8s-manage/api/user/v1"
-	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/utils"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	v1 "github.com/cy77cc/OpsPilot/api/user/v1"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/utils"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"gorm.io/gorm"
 )
 

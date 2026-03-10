@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	cmdbv1 "github.com/cy77cc/k8s-manage/api/cmdb/v1"
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	cmdbv1 "github.com/cy77cc/OpsPilot/api/cmdb/v1"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
 

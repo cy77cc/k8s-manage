@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	hostlogic "github.com/cy77cc/OpsPilot/internal/service/host/logic"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/gin-gonic/gin"
 )
 

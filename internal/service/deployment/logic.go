@@ -1,7 +1,7 @@
 package deployment
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 type Logic struct {

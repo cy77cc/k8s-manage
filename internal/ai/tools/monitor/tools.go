@@ -8,8 +8,8 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	einoutils "github.com/cloudwego/eino/components/tool/utils"
-	"github.com/cy77cc/k8s-manage/internal/ai/tools/common"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 // Input types

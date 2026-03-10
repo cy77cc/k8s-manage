@@ -1,8 +1,8 @@
 package project
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/service/project/handler"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/service/project/handler"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 

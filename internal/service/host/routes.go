@@ -1,10 +1,10 @@
 package host
 
 import (
-	"github.com/cy77cc/k8s-manage/internal/httpx"
-	"github.com/cy77cc/k8s-manage/internal/middleware"
-	"github.com/cy77cc/k8s-manage/internal/service/host/handler"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/middleware"
+	"github.com/cy77cc/OpsPilot/internal/service/host/handler"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/gin-gonic/gin"
 )
 

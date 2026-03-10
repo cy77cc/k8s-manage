@@ -10,8 +10,12 @@ import (
 	qwenmodel "github.com/cloudwego/eino-ext/components/model/qwen"
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	"github.com/cy77cc/k8s-manage/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/config"
 )
+
+func NewBaseChatModel(ctx context.Context) (einomodel.BaseChatModel, error) {
+	return NewToolCallingChatModel(ctx)
+}
 
 // NewToolCallingChatModel 创建支持工具调用的聊天模型。
 // 根据配置文件中的 Provider 选择 Ollama 或 Qwen 模型。

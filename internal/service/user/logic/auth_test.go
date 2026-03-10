@@ -5,15 +5,15 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/cy77cc/k8s-manage/api/user/v1"
-	"github.com/cy77cc/k8s-manage/internal/config"
-	dao "github.com/cy77cc/k8s-manage/internal/dao/user"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/svc"
-	"github.com/cy77cc/k8s-manage/internal/testutil"
-	"github.com/cy77cc/k8s-manage/internal/utils"
-	"github.com/cy77cc/k8s-manage/internal/xcode"
 	"github.com/alicebob/miniredis/v2"
+	v1 "github.com/cy77cc/OpsPilot/api/user/v1"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	dao "github.com/cy77cc/OpsPilot/internal/dao/user"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/svc"
+	"github.com/cy77cc/OpsPilot/internal/testutil"
+	"github.com/cy77cc/OpsPilot/internal/utils"
+	"github.com/cy77cc/OpsPilot/internal/xcode"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -38,7 +38,7 @@ func newAuthTestSuite(t *testing.T) *authTestSuite {
 	config.CFG = config.Config{
 		JWT: config.JWT{
 			Secret:        "test-secret-key-for-auth-tests",
-			Issuer:        "k8s-manage-test",
+			Issuer:        "OpsPilot-test",
 			Expire:        time.Hour,
 			RefreshExpire: time.Hour * 24 * 7,
 		},

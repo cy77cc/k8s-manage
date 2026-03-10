@@ -3,10 +3,10 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/cy77cc/k8s-manage/internal/config"
-	"github.com/cy77cc/k8s-manage/internal/logger"
-	"github.com/cy77cc/k8s-manage/storage"
-	"github.com/cy77cc/k8s-manage/storage/migration"
+	"github.com/cy77cc/OpsPilot/internal/config"
+	"github.com/cy77cc/OpsPilot/internal/logger"
+	"github.com/cy77cc/OpsPilot/storage"
+	"github.com/cy77cc/OpsPilot/storage/migration"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )

@@ -12,7 +12,7 @@ import (
 	einoembedding "github.com/cloudwego/eino/components/embedding"
 	einoindexer "github.com/cloudwego/eino/components/indexer"
 	"github.com/cloudwego/eino/schema"
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 	"gorm.io/gorm"
 )
@@ -61,8 +61,8 @@ type IngestionService struct {
 func NewIngestionService(db *gorm.DB, store vectorStore, embedder any) *IngestionService {
 	einoEmb := asEinoEmbedder(embedder)
 	return &IngestionService{
-		db:          db,
-		toolIndexer: newMilvusDocumentIndexer(CollectionToolExamples, store, einoEmb, toolExampleRowBuilder),
+		db:           db,
+		toolIndexer:  newMilvusDocumentIndexer(CollectionToolExamples, store, einoEmb, toolExampleRowBuilder),
 		assetIndexer: newMilvusDocumentIndexer(CollectionPlatformAssets, store, einoEmb, platformAssetRowBuilder),
 		caseIndexer:  newMilvusDocumentIndexer(CollectionTroubleshooting, store, einoEmb, troubleshootingRowBuilder),
 		checkpoints:  make(map[string]time.Time),

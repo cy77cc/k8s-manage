@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/cy77cc/k8s-manage/api/project/v1"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	v1 "github.com/cy77cc/OpsPilot/api/project/v1"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 func TestServiceLogic_generateK8sYAML(t *testing.T) {

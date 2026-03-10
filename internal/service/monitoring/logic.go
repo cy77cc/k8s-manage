@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	prominfra "github.com/cy77cc/k8s-manage/internal/infra/prometheus"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	"github.com/cy77cc/k8s-manage/internal/service/notification"
-	"github.com/cy77cc/k8s-manage/internal/svc"
+	prominfra "github.com/cy77cc/OpsPilot/internal/infra/prometheus"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/service/notification"
+	"github.com/cy77cc/OpsPilot/internal/svc"
 )
 
 type Logic struct {

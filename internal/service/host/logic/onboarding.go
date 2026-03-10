@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cy77cc/k8s-manage/internal/model"
+	"github.com/cy77cc/OpsPilot/internal/model"
 )
 
 func (s *HostService) CreateWithProbe(ctx context.Context, userID uint64, isAdmin bool, req CreateReq) (*model.Node, error) {

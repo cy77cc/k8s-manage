@@ -1,6 +1,6 @@
 package cicd
 
-import cicdv1 "github.com/cy77cc/k8s-manage/api/cicd/v1"
+import cicdv1 "github.com/cy77cc/OpsPilot/api/cicd/v1"
 
 type UpsertServiceCIConfigReq = cicdv1.UpsertServiceCIConfigReq
 

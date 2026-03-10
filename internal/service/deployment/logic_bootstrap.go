@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	sshclient "github.com/cy77cc/k8s-manage/internal/client/ssh"
-	"github.com/cy77cc/k8s-manage/internal/model"
-	hostlogic "github.com/cy77cc/k8s-manage/internal/service/host/logic"
+	sshclient "github.com/cy77cc/OpsPilot/internal/client/ssh"
+	"github.com/cy77cc/OpsPilot/internal/model"
+	hostlogic "github.com/cy77cc/OpsPilot/internal/service/host/logic"
 )
 
 func (l *Logic) PreviewClusterBootstrap(ctx context.Context, req ClusterBootstrapPreviewReq) (ClusterBootstrapPreviewResp, error) {
