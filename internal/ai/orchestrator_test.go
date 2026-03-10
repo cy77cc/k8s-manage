@@ -78,3 +78,39 @@ func TestResumeReturnsIdempotentStatus(t *testing.T) {
 		t.Fatalf("second resume status = %s, want idempotent", second.Status)
 	}
 }
+
+func TestResumeDoesNotPanicWhenPendingApprovalAlreadyCleared(t *testing.T) {
+	store := newExecutionStoreForOrchestrator(t)
+	ctx := context.Background()
+	if err := store.Save(ctx, runtime.ExecutionState{
+		SessionID: "session-3",
+		PlanID:    "plan-3",
+		Status:    runtime.ExecutionStatusCompleted,
+		Phase:     "executor_completed",
+		Steps: map[string]runtime.StepState{
+			"step-3": {
+				StepID: "step-3",
+				Status: runtime.StepCompleted,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	orch := NewOrchestrator(nil, store, common.PlatformDeps{})
+	res, err := orch.Resume(ctx, ResumeRequest{
+		SessionID: "session-3",
+		PlanID:    "plan-3",
+		StepID:    "step-3",
+		Approved:  true,
+	})
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if res == nil {
+		t.Fatalf("Resume() returned nil result")
+	}
+	if res.StepID != "step-3" {
+		t.Fatalf("StepID = %q, want step-3", res.StepID)
+	}
+}

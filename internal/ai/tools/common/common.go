@@ -3,6 +3,7 @@ package common
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -17,7 +18,6 @@ type PlatformDeps struct {
 	DB *gorm.DB
 }
 
-
 // ResolveK8sClient 解析 Kubernetes 客户端，根据参数和依赖项选择合适的客户端。
 //
 // 参数:
@@ -31,9 +31,12 @@ type PlatformDeps struct {
 func ResolveK8sClient(deps PlatformDeps, params map[string]any) (*kubernetes.Clientset, string, error) {
 	// 从参数中获取 cluster_id 并转换为整数
 	clusterID := toInt(params["cluster_id"])
+	if clusterID <= 0 {
+		return nil, "missing_cluster_id", errors.New("k8s client unavailable: cluster_id is required")
+	}
 
 	// 首先尝试从数据库中获取指定集群的客户端
-	if clusterID > 0 && deps.DB != nil {
+	if deps.DB != nil {
 		var cluster model.Cluster
 		// 从数据库中查询集群信息
 		if err := deps.DB.First(&cluster, clusterID).Error; err == nil && strings.TrimSpace(cluster.KubeConfig) != "" {
@@ -55,7 +58,7 @@ func ResolveK8sClient(deps PlatformDeps, params map[string]any) (*kubernetes.Cli
 	}
 
 	// 如果所有尝试都失败，返回错误
-	return nil, "fallback", errors.New("k8s client unavailable")
+	return nil, "fallback", fmt.Errorf("k8s client unavailable: cluster %d has no usable kubeconfig or db access", clusterID)
 }
 
 func toInt(v any) int {

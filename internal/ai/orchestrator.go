@@ -229,8 +229,14 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 			Message:   "no pending approval for this session",
 		}, nil
 	}
-	stepID := firstNonEmpty(req.StepID, req.Target, result.State.PendingApproval.StepID)
-	planID := firstNonEmpty(req.PlanID, result.State.PlanID, result.State.PendingApproval.PlanID)
+	pendingStepID := ""
+	pendingPlanID := ""
+	if result.State.PendingApproval != nil {
+		pendingStepID = result.State.PendingApproval.StepID
+		pendingPlanID = result.State.PendingApproval.PlanID
+	}
+	stepID := firstNonEmpty(req.StepID, req.Target, pendingStepID)
+	planID := firstNonEmpty(req.PlanID, result.State.PlanID, pendingPlanID)
 	status := firstNonEmpty(result.State.Phase)
 	if result.PendingApproval != nil && result.PendingApproval.Status != "" {
 		status = result.PendingApproval.Status
@@ -292,19 +298,26 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 						})
 						if execErr == nil && executed != nil {
 							for _, step := range executed.Steps {
+								stepState, ok := executed.State.Steps[step.StepID]
+								if !ok {
+									stepState = runtime.StepState{StepID: step.StepID}
+								}
 								stepMeta := meta
 								stepMeta.StepID = step.StepID
 								emitEvent(emit, events.StepUpdate, stepMeta, map[string]any{
 									"plan_id":              executed.State.PlanID,
 									"step_id":              step.StepID,
 									"status":               step.Status,
-									"title":                executed.State.Steps[step.StepID].Title,
-									"expert":               executed.State.Steps[step.StepID].Expert,
+									"title":                stepState.Title,
+									"expert":               stepState.Expert,
 									"user_visible_summary": step.Summary,
 								})
 							}
 							if executed.PendingApproval != nil {
-								stepState := executed.State.Steps[executed.PendingApproval.StepID]
+								stepState, ok := executed.State.Steps[executed.PendingApproval.StepID]
+								if !ok {
+									stepState = runtime.StepState{StepID: executed.PendingApproval.StepID}
+								}
 								emitEvent(emit, events.ApprovalRequired, meta, map[string]any{
 									"session_id":           sessionID,
 									"plan_id":              executed.State.PlanID,

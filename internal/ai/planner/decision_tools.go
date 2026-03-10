@@ -46,7 +46,7 @@ func decisionTools() []tool.BaseTool {
 				Desc:     "natural language explanation of why clarify is needed",
 			},
 		}),
-		newDecisionTool("reject", "Emit a final reject decision when the request should not proceed.", map[string]*schema.ParameterInfo{
+		newDecisionTool("reject", "Emit a final reject decision only when planning determines the request should not proceed at all.", map[string]*schema.ParameterInfo{
 			"type": {
 				Type:     schema.String,
 				Required: true,

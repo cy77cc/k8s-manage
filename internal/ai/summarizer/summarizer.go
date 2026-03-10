@@ -43,63 +43,37 @@ func New(runner *adk.Runner) *Summarizer {
 }
 
 func (s *Summarizer) Summarize(ctx context.Context, in Input) (SummaryOutput, error) {
-	out := heuristicSummary(in)
+	base := buildBaseSummary(in)
 	if s == nil || s.runner == nil {
-		return out, nil
+		return base, nil
 	}
 	raw, err := runADKSummarizer(ctx, s.runner, buildPromptInput(in))
 	if err != nil {
-		return out, nil
+		return base, nil
 	}
 	var parsed SummaryOutput
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed); err != nil {
-		return out, nil
+		return base, nil
 	}
-	if strings.TrimSpace(parsed.Summary) == "" {
-		return out, nil
-	}
-	if strings.TrimSpace(parsed.Narrative) == "" {
-		parsed.Narrative = out.Narrative
-	}
-	if strings.TrimSpace(parsed.Conclusion) == "" {
-		parsed.Conclusion = out.Conclusion
-	}
-	if len(parsed.NextActions) == 0 {
-		parsed.NextActions = out.NextActions
-	}
-	if parsed.ReplanHint == nil {
-		parsed.ReplanHint = out.ReplanHint
-	}
-	return parsed, nil
+	return normalizeSummary(base, parsed), nil
 }
 
-func heuristicSummary(in Input) SummaryOutput {
+func buildBaseSummary(in Input) SummaryOutput {
 	output := SummaryOutput{
-		Summary:   "本轮 AI 编排已生成阶段结果。",
-		Narrative: "Summarizer 基于当前步骤结果生成结构化结论，并保留不确定性说明。",
+		Summary:    "本轮执行已结束，结果已交给 Summarizer 生成结构化结论。",
+		Conclusion: "可继续查看正文回答获取自然语言结论。",
+		Narrative:  "Summarizer 模型不可用时，使用当前执行状态生成最小结构化摘要。",
 	}
 	if in.State.PendingApproval != nil && in.State.PendingApproval.Status == "pending" {
 		title := firstNonEmpty(in.State.PendingApproval.Title, in.State.PendingApproval.StepID)
 		output.Summary = fmt.Sprintf("步骤 %q 正在等待审批。", title)
 		output.Conclusion = "当前计划已暂停，等待你确认后继续执行。"
-		output.NextActions = []string{"确认当前审批请求", "如有需要补充审批原因"}
-		output.Narrative = "执行链已到达需要用户决策的节点，因此先向用户回报当前状态，而不是伪造完成结论。"
+		output.NextActions = []string{"确认当前审批请求"}
+		output.Narrative = "执行链到达审批节点，当前只能回报暂停状态。"
 		return output
 	}
 
-	completed := 0
-	failed := 0
-	blocked := 0
-	for _, step := range in.Steps {
-		switch step.Status {
-		case runtime.StepCompleted:
-			completed++
-		case runtime.StepFailed:
-			failed++
-		case runtime.StepBlocked, runtime.StepCancelled:
-			blocked++
-		}
-	}
+	completed, failed, blocked := summarizeStepCounts(in.Steps)
 
 	if failed > 0 || blocked > 0 {
 		output.Summary = "当前证据不足以形成稳定结论。"
@@ -111,7 +85,7 @@ func heuristicSummary(in Input) SummaryOutput {
 			Focus:           "补充失败步骤所需的资源信息或调查证据",
 			MissingEvidence: []string{"failed_or_blocked_step_evidence"},
 		}
-		output.Narrative = "Summarizer 发现执行链中仍有失败或阻断步骤，因此明确标记 need_more_investigation=true。"
+		output.Narrative = "当前执行状态显示仍有失败或阻断步骤。"
 		return output
 	}
 
@@ -121,7 +95,7 @@ func heuristicSummary(in Input) SummaryOutput {
 	}
 	output.Summary = fmt.Sprintf("已围绕目标“%s”完成 %d 个步骤。", goal, completed)
 	output.Conclusion = "当前执行链已经完成本轮计划，可继续查看正文回答获取自然语言说明。"
-	output.NextActions = []string{"查看最终结论正文", "如需更深入调查，可继续追加问题"}
+	output.NextActions = []string{"查看最终结论正文"}
 	return output
 }
 
@@ -138,4 +112,41 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeSummary(base, parsed SummaryOutput) SummaryOutput {
+	if strings.TrimSpace(parsed.Summary) == "" {
+		parsed.Summary = base.Summary
+	}
+	if strings.TrimSpace(parsed.Conclusion) == "" {
+		parsed.Conclusion = base.Conclusion
+	}
+	if len(parsed.NextActions) == 0 {
+		parsed.NextActions = base.NextActions
+	}
+	if strings.TrimSpace(parsed.Narrative) == "" {
+		parsed.Narrative = base.Narrative
+	}
+	if parsed.ReplanHint == nil && base.ReplanHint != nil {
+		parsed.ReplanHint = base.ReplanHint
+	}
+	if parsed.NeedMoreInvestigation {
+		return parsed
+	}
+	parsed.NeedMoreInvestigation = base.NeedMoreInvestigation
+	return parsed
+}
+
+func summarizeStepCounts(steps []executor.StepResult) (completed, failed, blocked int) {
+	for _, step := range steps {
+		switch step.Status {
+		case runtime.StepCompleted:
+			completed++
+		case runtime.StepFailed:
+			failed++
+		case runtime.StepBlocked, runtime.StepCancelled:
+			blocked++
+		}
+	}
+	return completed, failed, blocked
 }
