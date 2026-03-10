@@ -13,10 +13,6 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/config"
 )
 
-func NewBaseChatModel(ctx context.Context) (einomodel.BaseChatModel, error) {
-	return NewToolCallingChatModel(ctx)
-}
-
 // NewToolCallingChatModel 创建支持工具调用的聊天模型。
 // 根据配置文件中的 Provider 选择 Ollama 或 Qwen 模型。
 //

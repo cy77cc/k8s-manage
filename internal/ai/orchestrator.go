@@ -6,16 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"github.com/cy77cc/OpsPilot/internal/ai/adkstage"
 	"github.com/cy77cc/OpsPilot/internal/ai/events"
 	"github.com/cy77cc/OpsPilot/internal/ai/executor"
 	"github.com/cy77cc/OpsPilot/internal/ai/planner"
 	"github.com/cy77cc/OpsPilot/internal/ai/rewrite"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
 	"github.com/cy77cc/OpsPilot/internal/ai/state"
+	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
 	"github.com/google/uuid"
 )
 
@@ -29,27 +27,24 @@ type Orchestrator struct {
 	executor   *executor.Executor
 }
 
-func NewOrchestrator(sessions *state.SessionState, executions *runtime.ExecutionStore) *Orchestrator {
-	return &Orchestrator{
+func NewOrchestrator(sessions *state.SessionState, executions *runtime.ExecutionStore, deps common.PlatformDeps) *Orchestrator {
+	out := &Orchestrator{
 		sessions:   sessions,
 		executions: executions,
-		rewriter: rewrite.New(adkstage.New(adkstage.Config{
-			Name:         "rewrite-stage",
-			Description:  "Rewrite user requests into a stable semi-structured task draft.",
-			Instruction:  rewrite.SystemPrompt(),
-			ModelFactory: NewBaseChatModel,
-		})),
-		planner: planner.New(adkstage.New(adkstage.Config{
-			Name:        "planner-stage",
-			Description: "Plan clarified AI operations tasks into structured decisions and steps.",
-			Instruction: planner.SystemPrompt(),
-			ToolsConfig: compose.ToolsNodeConfig{
-				Tools: []tool.BaseTool{},
-			},
-			ModelFactory: NewBaseChatModel,
-		})),
-		executor: executor.New(executions),
+		executor:   executor.New(executions),
 	}
+	bootstrapCtx := context.Background()
+	if rewriteModel, err := NewToolCallingChatModel(bootstrapCtx); err == nil {
+		if stageRunner, stageErr := rewrite.NewADKRunner(bootstrapCtx, rewriteModel); stageErr == nil {
+			out.rewriter = rewrite.New(stageRunner)
+		}
+	}
+	if plannerModel, err := NewToolCallingChatModel(bootstrapCtx); err == nil {
+		if stageRunner, stageErr := planner.NewADKRunner(bootstrapCtx, plannerModel, deps); stageErr == nil {
+			out.planner = planner.New(stageRunner)
+		}
+	}
+	return out
 }
 
 func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitter) error {

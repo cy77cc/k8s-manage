@@ -11,6 +11,7 @@ import (
 	coreai "github.com/cy77cc/OpsPilot/internal/ai"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
 	aistate "github.com/cy77cc/OpsPilot/internal/ai/state"
+	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
 	"github.com/cy77cc/OpsPilot/internal/httpx"
 	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/cy77cc/OpsPilot/internal/xcode"
@@ -55,9 +56,11 @@ func NewHTTPHandler(svcCtx *svc.ServiceContext) *HTTPHandler {
 	sessionState := aistate.NewSessionState(svcCtx.Rdb, "ai:session:")
 	executionStore := runtime.NewExecutionStore(svcCtx.Rdb, "ai:execution:")
 	return &HTTPHandler{
-		svcCtx:       svcCtx,
-		sessions:     sessionState,
-		orchestrator: coreai.NewOrchestrator(sessionState, executionStore),
+		svcCtx:   svcCtx,
+		sessions: sessionState,
+		orchestrator: coreai.NewOrchestrator(sessionState, executionStore, common.PlatformDeps{
+			DB: svcCtx.DB,
+		}),
 	}
 }
 
