@@ -27,7 +27,6 @@ const (
 	Error            Name = "error"
 	ToolCall         Name = "tool_call"
 	ToolResult       Name = "tool_result"
-	Confirmation     Name = "confirmation_required"
 	Heartbeat        Name = "heartbeat"
 )
 

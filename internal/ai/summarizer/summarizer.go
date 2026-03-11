@@ -27,7 +27,12 @@ type ReplanHint struct {
 
 type SummaryOutput struct {
 	Summary               string      `json:"summary"`
+	Headline              string      `json:"headline,omitempty"`
 	Conclusion            string      `json:"conclusion,omitempty"`
+	KeyFindings           []string    `json:"key_findings,omitempty"`
+	ResourceSummaries     []string    `json:"resource_summaries,omitempty"`
+	Recommendations       []string    `json:"recommendations,omitempty"`
+	RawOutputPolicy       string      `json:"raw_output_policy,omitempty"`
 	NextActions           []string    `json:"next_actions,omitempty"`
 	NeedMoreInvestigation bool        `json:"need_more_investigation"`
 	Narrative             string      `json:"narrative"`
@@ -68,14 +73,21 @@ func (s *Summarizer) summarize(ctx context.Context, in Input, onDelta func(strin
 
 func buildBaseSummary(in Input) SummaryOutput {
 	output := SummaryOutput{
-		Summary:    "本轮执行已结束，结果已交给 Summarizer 生成结构化结论。",
-		Conclusion: "可继续查看正文回答获取自然语言结论。",
-		Narrative:  "Summarizer 模型不可用时，使用当前执行状态生成最小结构化摘要。",
+		Summary:         "本轮执行已结束，结果已交给 Summarizer 生成结构化结论。",
+		Headline:        "已完成本轮执行汇总",
+		Conclusion:      "可继续查看正文回答获取自然语言结论。",
+		KeyFindings:     []string{"当前结果已完成结构化汇总。"},
+		Recommendations: []string{"查看最终结论正文"},
+		RawOutputPolicy: "summary_only",
+		Narrative:       "Summarizer 模型不可用时，使用当前执行状态生成最小结构化摘要。",
 	}
 	if in.State.PendingApproval != nil && in.State.PendingApproval.Status == "pending" {
 		title := firstNonEmpty(in.State.PendingApproval.Title, in.State.PendingApproval.StepID)
 		output.Summary = fmt.Sprintf("步骤 %q 正在等待审批。", title)
+		output.Headline = "当前执行正在等待审批"
 		output.Conclusion = "当前计划已暂停，等待你确认后继续执行。"
+		output.KeyFindings = []string{fmt.Sprintf("待审批步骤：%s", title)}
+		output.Recommendations = []string{"确认当前审批请求"}
 		output.NextActions = []string{"确认当前审批请求"}
 		output.Narrative = "执行链到达审批节点，当前只能回报暂停状态。"
 		return output
@@ -86,7 +98,14 @@ func buildBaseSummary(in Input) SummaryOutput {
 
 	if failed > 0 || blocked > 0 {
 		output.Summary = "当前证据不足以形成稳定结论。"
+		output.Headline = "当前执行存在失败或阻断步骤"
 		output.Conclusion = "执行链中存在失败或阻断步骤，建议补充调查后再继续决策。"
+		output.KeyFindings = []string{
+			fmt.Sprintf("已完成步骤 %d 个", completed),
+			fmt.Sprintf("失败步骤 %d 个", failed),
+			fmt.Sprintf("阻断步骤 %d 个", blocked),
+		}
+		output.Recommendations = []string{"检查失败步骤的错误详情", "补充缺失证据后重新规划"}
 		output.NextActions = []string{"检查失败步骤的错误详情", "补充缺失证据后重新规划"}
 		output.NeedMoreInvestigation = true
 		output.ReplanHint = &ReplanHint{
@@ -99,7 +118,13 @@ func buildBaseSummary(in Input) SummaryOutput {
 	}
 	if completed > 0 && evidenceCount == 0 {
 		output.Summary = fmt.Sprintf("已完成 %d 个步骤，但还没有收集到足够的执行证据。", completed)
+		output.Headline = "已完成执行，但证据不足"
 		output.Conclusion = "当前只能给出初步判断，仍需补充执行证据后再确认结论。"
+		output.KeyFindings = []string{
+			fmt.Sprintf("已完成步骤 %d 个", completed),
+			"当前没有可用于支撑结论的执行证据。",
+		}
+		output.Recommendations = []string{"补充关键步骤的执行证据", "基于新增证据重新总结结论"}
 		output.NextActions = []string{"补充关键步骤的执行证据", "基于新增证据重新总结结论"}
 		output.NeedMoreInvestigation = true
 		output.ReplanHint = &ReplanHint{
@@ -116,7 +141,13 @@ func buildBaseSummary(in Input) SummaryOutput {
 		goal = strings.TrimSpace(in.Plan.Goal)
 	}
 	output.Summary = fmt.Sprintf("已围绕目标“%s”完成 %d 个步骤，并收集到 %d 条执行证据。", goal, completed, evidenceCount)
+	output.Headline = "已完成本轮排查"
 	output.Conclusion = "当前结论基于已执行步骤及其证据生成，可继续查看正文回答获取自然语言说明。"
+	output.KeyFindings = []string{
+		fmt.Sprintf("已完成步骤 %d 个", completed),
+		fmt.Sprintf("收集执行证据 %d 条", evidenceCount),
+	}
+	output.Recommendations = []string{"查看最终结论正文"}
 	output.NextActions = []string{"查看最终结论正文"}
 	output.Narrative = "当前总结基于 StepResult 与执行证据汇总得出。"
 	return output
@@ -141,8 +172,23 @@ func normalizeSummary(base, parsed SummaryOutput) SummaryOutput {
 	if strings.TrimSpace(parsed.Summary) == "" {
 		parsed.Summary = base.Summary
 	}
+	if strings.TrimSpace(parsed.Headline) == "" {
+		parsed.Headline = firstNonEmpty(base.Headline, parsed.Summary)
+	}
 	if strings.TrimSpace(parsed.Conclusion) == "" {
 		parsed.Conclusion = base.Conclusion
+	}
+	if len(parsed.KeyFindings) == 0 {
+		parsed.KeyFindings = append([]string(nil), base.KeyFindings...)
+	}
+	if len(parsed.ResourceSummaries) == 0 {
+		parsed.ResourceSummaries = append([]string(nil), base.ResourceSummaries...)
+	}
+	if len(parsed.Recommendations) == 0 {
+		parsed.Recommendations = append([]string(nil), base.Recommendations...)
+	}
+	if strings.TrimSpace(parsed.RawOutputPolicy) == "" {
+		parsed.RawOutputPolicy = firstNonEmpty(base.RawOutputPolicy, "summary_only")
 	}
 	if len(parsed.NextActions) == 0 {
 		parsed.NextActions = base.NextActions
@@ -156,6 +202,7 @@ func normalizeSummary(base, parsed SummaryOutput) SummaryOutput {
 	if parsed.NeedMoreInvestigation {
 		parsed.Conclusion = qualifyUncertainConclusion(parsed.Conclusion)
 		parsed.Narrative = qualifyUncertainNarrative(parsed.Narrative)
+		parsed.Headline = qualifyHeadline(parsed.Headline)
 		return parsed
 	}
 	parsed.NeedMoreInvestigation = base.NeedMoreInvestigation
@@ -165,6 +212,7 @@ func normalizeSummary(base, parsed SummaryOutput) SummaryOutput {
 		}
 		parsed.Conclusion = qualifyUncertainConclusion(parsed.Conclusion)
 		parsed.Narrative = qualifyUncertainNarrative(parsed.Narrative)
+		parsed.Headline = qualifyHeadline(parsed.Headline)
 	}
 	return parsed
 }
@@ -217,6 +265,17 @@ func qualifyUncertainNarrative(text string) string {
 		text += " 仍存在待确认的不确定性。"
 	}
 	return strings.TrimSpace(text)
+}
+
+func qualifyHeadline(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "当前仅能给出初步判断"
+	}
+	if containsUncertaintyMarker(text) {
+		return text
+	}
+	return text + "（初步判断）"
 }
 
 func containsUncertaintyMarker(text string) bool {

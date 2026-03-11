@@ -275,23 +275,23 @@
 - [x] ThoughtChain 事件对接测试
 
 ### 9.3 Evaluation
-- [ ] 定义 Rewrite 质量评估指标
-- [ ] 定义 Planner clarify 率 / plan 可执行率指标
-- [ ] 定义 Resume 成功率 / 重复恢复拦截率指标
-- [ ] 定义 ThoughtChain 事件完整率与前端渲染一致性指标
+- [x] 定义 Rewrite 质量评估指标
+- [x] 定义 Planner clarify 率 / plan 可执行率指标
+- [x] 定义 Resume 成功率 / 重复恢复拦截率指标
+- [x] 定义 ThoughtChain 事件完整率与前端渲染一致性指标
 
 ## Stage 10: Cleanup And Migration
 
 目标：清理旧假设、保留兼容入口、补全文档，完成迁移收口。
 
 ### 10.1 Cleanup
-- [ ] 删除旧 proposal/design 不再适配的实现假设
-- [ ] 清理旧 handler 依赖残留
-- [ ] 清理旧单体 Agent 主链路的过时绑定
-- [ ] 清理与新事件模型冲突的旧 SSE 假设
+- [x] 删除旧 proposal/design 不再适配的实现假设
+- [x] 清理旧 handler 依赖残留
+- [x] 清理旧单体 Agent 主链路的过时绑定
+- [x] 清理与新事件模型冲突的旧 SSE 假设
 
 ### 10.2 Migration Docs
-- [ ] 更新 API 文档
-- [ ] 更新架构文档
-- [ ] 补充前端 ThoughtChain 对接说明
-- [ ] 补充旧链路到新链路的迁移说明
+- [x] 更新 API 文档
+- [x] 更新架构文档
+- [x] 补充前端 ThoughtChain 对接说明
+- [x] 补充旧链路到新链路的迁移说明

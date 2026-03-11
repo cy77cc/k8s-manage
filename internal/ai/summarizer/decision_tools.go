@@ -34,6 +34,32 @@ func summaryDecisionTool() tool.BaseTool {
 					Type: schema.String,
 					Desc: "high-level conclusion for the user",
 				},
+				"headline": {
+					Type: schema.String,
+					Desc: "one-line final headline for user-facing rendering",
+				},
+				"key_findings": {
+					Type: schema.Array,
+					ElemInfo: &schema.ParameterInfo{
+						Type: schema.String,
+					},
+				},
+				"resource_summaries": {
+					Type: schema.Array,
+					ElemInfo: &schema.ParameterInfo{
+						Type: schema.String,
+					},
+				},
+				"recommendations": {
+					Type: schema.Array,
+					ElemInfo: &schema.ParameterInfo{
+						Type: schema.String,
+					},
+				},
+				"raw_output_policy": {
+					Type: schema.String,
+					Desc: "expected raw output rendering policy such as summary_only or excerpt_allowed",
+				},
 				"next_actions": {
 					Type: schema.Array,
 					ElemInfo: &schema.ParameterInfo{

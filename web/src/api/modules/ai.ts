@@ -36,17 +36,15 @@ export interface EmbeddedRecommendation {
 
 export interface ToolTrace {
   id: string;
-  type: 'tool_call' | 'tool_result' | 'approval_required' | 'confirmation_required' | 'tool_missing';
+  type: 'tool_call' | 'tool_result' | 'approval_required' | 'tool_missing';
   payload: Record<string, any>;
   timestamp: string;
 }
 
 export interface AIInterruptApprovalResponse {
-  checkpoint_id?: string;
   session_id?: string;
   plan_id?: string;
   step_id?: string;
-  target?: string;
   approved: boolean;
   reason?: string;
 }
@@ -215,14 +213,6 @@ interface SSEThinkingEvent {
   turn_id?: string;
 }
 
-export interface SSEExpertProgressEvent {
-  expert: string;
-  status: 'running' | 'done';
-  task?: string;
-  duration_ms?: number;
-  turn_id?: string;
-}
-
 export interface AIChatStreamHandlers {
   onMeta?: (payload: SSEMetaEvent) => void;
   onRewriteResult?: (payload: SSERewriteResultEvent) => void;
@@ -239,10 +229,7 @@ export interface AIChatStreamHandlers {
   onToolCall?: (payload: { turn_id?: string; call_id?: string; tool?: string; payload?: Record<string, any>; ts?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }) => void;
   onToolResult?: (payload: { turn_id?: string; call_id?: string; tool?: string; payload?: Record<string, any>; result?: { ok: boolean; data?: any; error?: string; error_code?: string; source?: string; latency_ms?: number }; ts?: string }) => void;
   onApprovalRequired?: (payload: ApprovalTicket & { turn_id?: string; approval_required?: boolean; previewDiff?: string }) => void;
-  onConfirmationRequired?: (payload: { turn_id?: string; tool?: string; confirmation_token?: string; expiresAt?: string; preview?: Record<string, any>; message?: string }) => void;
-  onToolIntentUnresolved?: (payload: { turn_id?: string; tool?: string; message?: string }) => void;
   onHeartbeat?: (payload: { turn_id?: string; status?: string }) => void;
-  onExpertProgress?: (payload: SSEExpertProgressEvent) => void;
 }
 
 export type RiskLevel = 'low' | 'medium' | 'high';
@@ -530,17 +517,9 @@ export const aiApi = {
         handlers.onReplanStarted?.(payload as SSEReplanStartedEvent);
       } else if (eventType === 'summary') {
         handlers.onSummary?.(payload as SSESummaryEvent);
-      } else if (eventType === 'confirmation_required') {
-        handlers.onConfirmationRequired?.(payload as { turn_id?: string; tool?: string; confirmation_token?: string; expiresAt?: string; preview?: Record<string, any>; message?: string });
-        toolPending = false;
-        clearToolTimer();
-      } else if (eventType === 'tool_intent_unresolved') {
-        handlers.onToolIntentUnresolved?.(payload as { turn_id?: string; tool?: string; message?: string });
       } else if (eventType === 'heartbeat') {
         handlers.onHeartbeat?.(payload as { turn_id?: string; status?: string });
         touchActivity();
-      } else if (eventType === 'expert_progress') {
-        handlers.onExpertProgress?.(payload as SSEExpertProgressEvent);
       }
     };
 

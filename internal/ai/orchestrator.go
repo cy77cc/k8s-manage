@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -30,6 +29,8 @@ type Orchestrator struct {
 	planner    *planner.Planner
 	executor   *executor.Executor
 	summarizer *summarizer.Summarizer
+	renderer   *finalAnswerRenderer
+	metrics    *AIMetrics
 	maxIters   int
 }
 
@@ -38,6 +39,8 @@ func NewOrchestrator(sessions *state.SessionState, executions *runtime.Execution
 		sessions:   sessions,
 		executions: executions,
 		executor:   executor.New(executions),
+		renderer:   newFinalAnswerRenderer(),
+		metrics:    NewAIMetrics(),
 		maxIters:   2,
 	}
 	bootstrapCtx := context.Background()
@@ -79,6 +82,20 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		Iteration: 1,
 		Timestamp: time.Now().UTC(),
 	}
+	streamEmit := emit
+	if o.metrics != nil {
+		thoughtRun := o.metrics.StartThoughtChainRun()
+		if thoughtRun != nil {
+			defer thoughtRun.Finalize()
+			streamEmit = func(evt StreamEvent) bool {
+				thoughtRun.Observe(evt)
+				if emit == nil {
+					return true
+				}
+				return emit(evt)
+			}
+		}
+	}
 
 	if o.sessions != nil {
 		if err := o.sessions.AppendMessage(ctx, sessionID, schema.UserMessage(message)); err != nil {
@@ -114,7 +131,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		}
 	}
 
-	emitEvent(emit, events.Meta, meta, map[string]any{
+	emitEvent(streamEmit, events.Meta, meta, map[string]any{
 		"session_id": sessionID,
 		"sessionId":  sessionID,
 		"trace_id":   traceID,
@@ -124,7 +141,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 
 	var rewriteOut rewrite.Output
 	if o.rewriter != nil {
-		emitStageDelta(emit, meta, "rewrite", "loading", "开始理解你的问题并提取目标线索。", "", "")
+		emitStageDelta(streamEmit, meta, "rewrite", "loading", "开始理解你的问题并提取目标线索。", "", "")
 		var err error
 		rewriteOut, err = o.rewriter.RewriteStream(ctx, rewrite.Input{
 			Message:           message,
@@ -132,21 +149,24 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 			CurrentPage:       req.RuntimeContext.CurrentPage,
 			SelectedResources: toRewriteResources(req.RuntimeContext.SelectedResources),
 		}, func(chunk string) {
-			emitStageDelta(emit, meta, "rewrite", "loading", chunk, "", "")
+			emitStageDelta(streamEmit, meta, "rewrite", "loading", chunk, "", "")
 		})
 		if err == nil {
-			emitEvent(emit, events.RewriteResult, meta, map[string]any{
+			if o.metrics != nil {
+				o.metrics.RecordRewrite(rewriteOut)
+			}
+			emitEvent(streamEmit, events.RewriteResult, meta, map[string]any{
 				"rewrite":              rewriteOut,
 				"user_visible_summary": rewriteOut.Narrative,
 			})
-			emitStageDelta(emit, meta, "rewrite", "success", rewriteOut.Narrative, "", "")
+			emitStageDelta(streamEmit, meta, "rewrite", "success", rewriteOut.Narrative, "", "")
 		}
 	}
 
-	reply, genErr := o.planAndReply(ctx, message, rewriteOut, req.RuntimeContext, meta, emit, sessionID)
+	reply, genErr := o.planAndReply(ctx, message, rewriteOut, req.RuntimeContext, meta, streamEmit, sessionID)
 	if genErr != nil {
 		reply = fmt.Sprintf("AI 编排入口已经切换到新的宿主边界，但当前模型暂不可用：%s", genErr.Error())
-		emitDeltaChunks(emit, meta, reply)
+		emitDeltaChunks(streamEmit, meta, reply)
 	}
 
 	if o.sessions != nil {
@@ -162,7 +182,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		"createdAt": meta.Timestamp.Format(time.RFC3339),
 		"updatedAt": time.Now().UTC().Format(time.RFC3339),
 	}
-	emitEvent(emit, events.Done, meta, map[string]any{
+	emitEvent(streamEmit, events.Done, meta, map[string]any{
 		"session": sessionPayload,
 	})
 
@@ -198,14 +218,18 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 			planID := firstNonEmpty(req.PlanID, st.PlanID, st.PendingApproval.PlanID)
 			decisionHash := runtime.ApprovalDecisionHash(planID, stepID, req.Approved)
 			if st.PendingApproval.DecisionHash == decisionHash {
-				return &ResumeResult{
+				result := &ResumeResult{
 					Resumed:   true,
 					SessionID: sessionID,
 					PlanID:    planID,
 					StepID:    stepID,
 					Status:    "idempotent",
 					Message:   "duplicate approval request ignored",
-				}, nil
+				}
+				if o.metrics != nil {
+					o.metrics.RecordResume(result.Status, nil)
+				}
+				return result, nil
 			}
 		}
 	}
@@ -217,25 +241,36 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 		Reason:    req.Reason,
 	})
 	if err != nil {
+		if o.metrics != nil {
+			o.metrics.RecordResume("", err)
+		}
 		return nil, err
 	}
 	if result == nil {
-		return &ResumeResult{
+		res := &ResumeResult{
 			Resumed:   false,
 			SessionID: sessionID,
 			Status:    "missing",
 			Message:   "execution state not found",
-		}, nil
+		}
+		if o.metrics != nil {
+			o.metrics.RecordResume(res.Status, nil)
+		}
+		return res, nil
 	}
 	if result.State.SessionID == "" {
-		return &ResumeResult{
+		res := &ResumeResult{
 			Resumed:   false,
 			SessionID: sessionID,
 			PlanID:    req.PlanID,
 			StepID:    firstNonEmpty(req.StepID, req.Target),
 			Status:    "noop",
 			Message:   "no pending approval for this session",
-		}, nil
+		}
+		if o.metrics != nil {
+			o.metrics.RecordResume(res.Status, nil)
+		}
+		return res, nil
 	}
 	pendingStepID := ""
 	pendingPlanID := ""
@@ -250,7 +285,7 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 		status = approval.Status
 	}
 
-	return &ResumeResult{
+	res := &ResumeResult{
 		Resumed:     req.Approved,
 		Interrupted: !req.Approved,
 		SessionID:   sessionID,
@@ -258,7 +293,18 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 		StepID:      stepID,
 		Status:      status,
 		Message:     resumeStatusMessage(status, req.Approved),
-	}, nil
+	}
+	if o.metrics != nil {
+		o.metrics.RecordResume(res.Status, nil)
+	}
+	return res, nil
+}
+
+func (o *Orchestrator) MetricsSnapshot() AIMetricsSnapshot {
+	if o == nil || o.metrics == nil {
+		return AIMetricsSnapshot{}
+	}
+	return o.metrics.Snapshot()
 }
 
 func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritten rewrite.Output, runtimeCtx RuntimeContext, meta events.EventMeta, emit StreamEmitter, sessionID string) (string, error) {
@@ -275,6 +321,9 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 			emitStageDelta(emit, meta, "plan", "loading", chunk, "", "")
 		})
 		if err == nil {
+			if o.metrics != nil {
+				o.metrics.RecordPlanner(decision)
+			}
 			switch decision.Type {
 			case planner.DecisionClarify:
 				emitEvent(emit, events.ClarifyRequired, meta, map[string]any{
@@ -357,11 +406,7 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 									"previous_plan_id": executed.State.PlanID,
 								})
 							}
-							if body, streamErr := o.streamFinalAnswer(ctx, message, decision.Plan, executed, summaryOut, emit, meta); streamErr == nil && body != "" {
-								return body, nil
-							}
-							if body := firstNonEmpty(summaryOut.Conclusion, summaryOut.Summary); body != "" {
-								emitDeltaChunks(emit, meta, body)
+							if body := o.renderAndEmitFinalAnswer(decision.Plan, executed, summaryOut, emit, meta); body != "" {
 								return body, nil
 							}
 						}
@@ -396,40 +441,33 @@ func (o *Orchestrator) generateReply(ctx context.Context, message string) (strin
 	return content, nil
 }
 
-func (o *Orchestrator) streamFinalAnswer(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result, summaryOut summarizer.SummaryOutput, emit StreamEmitter, meta events.EventMeta) (string, error) {
-	model, err := NewAnswerChatModel(ctx)
-	if err != nil {
-		return "", err
+func (o *Orchestrator) renderAndEmitFinalAnswer(plan *planner.ExecutionPlan, result *executor.Result, summaryOut summarizer.SummaryOutput, emit StreamEmitter, meta events.EventMeta) string {
+	if o == nil || o.renderer == nil {
+		body := firstNonEmpty(summaryOut.Headline, summaryOut.Conclusion, summaryOut.Summary)
+		emitDeltaChunks(emit, meta, body)
+		return strings.TrimSpace(body)
 	}
-	stream, err := model.Stream(ctx, buildFinalAnswerMessages(message, plan, result, summaryOut))
-	if err != nil {
-		return "", err
-	}
-	defer stream.Close()
-
+	paragraphs := o.renderer.Render("", plan, result, summaryOut)
 	var builder strings.Builder
-	for {
-		msg, recvErr := stream.Recv()
-		if recvErr == io.EOF {
-			break
-		}
-		if recvErr != nil {
-			return builder.String(), recvErr
-		}
-		if msg == nil {
+	for i, paragraph := range paragraphs {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" {
 			continue
 		}
-		chunk := strings.TrimSpace(msg.Content)
-		if chunk == "" {
-			continue
+		if builder.Len() > 0 {
+			builder.WriteString("\n\n")
 		}
-		builder.WriteString(chunk)
+		builder.WriteString(paragraph)
+		chunk := paragraph
+		if i < len(paragraphs)-1 {
+			chunk += "\n\n"
+		}
 		emitEvent(emit, events.Delta, meta, map[string]any{
 			"content_chunk": chunk,
 			"contentChunk":  chunk,
 		})
 	}
-	return strings.TrimSpace(builder.String()), nil
+	return strings.TrimSpace(builder.String())
 }
 
 func (o *Orchestrator) sessionMessages(ctx context.Context, sessionID string) []map[string]any {
@@ -550,30 +588,6 @@ func emitDeltaChunks(emit StreamEmitter, meta events.EventMeta, content string) 
 			"content_chunk": chunk,
 			"contentChunk":  chunk,
 		})
-	}
-}
-
-func buildFinalAnswerMessages(message string, plan *planner.ExecutionPlan, result *executor.Result, summaryOut summarizer.SummaryOutput) []*schema.Message {
-	goal := strings.TrimSpace(message)
-	if plan != nil && strings.TrimSpace(plan.Goal) != "" {
-		goal = strings.TrimSpace(plan.Goal)
-	}
-	payload := map[string]any{
-		"user_message": message,
-		"goal":         goal,
-		"summary":      summaryOut,
-	}
-	if plan != nil {
-		payload["plan"] = plan
-	}
-	if result != nil {
-		payload["steps"] = result.Steps
-		payload["execution_status"] = result.State.Status
-	}
-	body, _ := eventsJSON(payload)
-	return []*schema.Message{
-		schema.SystemMessage("You are the final answer generator for OpsPilot. Produce the assistant's final user-facing answer as it is being streamed. Be concise, factual, and directly grounded in the provided summary and step results. Do not repeat ThoughtChain stage titles. Do not mention internal fields like need_more_investigation or replan_hint unless they materially affect the user-facing answer. If uncertainty remains, state it plainly."),
-		schema.UserMessage(body),
 	}
 }
 

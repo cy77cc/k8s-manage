@@ -114,15 +114,7 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 	}
 }
 
-func (h *HTTPHandler) ChatRespond(c *gin.Context) {
-	h.handleResume(c, false)
-}
-
 func (h *HTTPHandler) ResumeStep(c *gin.Context) {
-	h.handleResume(c, false)
-}
-
-func (h *HTTPHandler) HandleApprovalResponse(c *gin.Context) {
 	h.handleResume(c, false)
 }
 

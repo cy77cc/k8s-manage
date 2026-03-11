@@ -161,9 +161,6 @@ export type SSEEventType =
   | 'clarify_required'
   | 'replan_started'
   | 'summary'
-  | 'confirmation_required'
-  | 'tool_intent_unresolved'
-  | 'expert_progress'
   | 'done'
   | 'error'
   | 'heartbeat';

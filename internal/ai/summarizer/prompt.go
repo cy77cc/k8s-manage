@@ -35,8 +35,13 @@ Reasoning rules:
 
 Field guidance:
 - summary: concise factual summary of what executor actually found or completed
+- headline: one-line conclusion-first headline for the final renderer
 - conclusion: best supported conclusion based on the evidence; explicitly qualify uncertainty when needed
-- next_actions: concrete, relevant, and minimal follow-up actions
+- key_findings: short factual bullets that can support the final answer
+- resource_summaries: optional per-resource summary bullets; use this for host or pod lists
+- recommendations: concrete, relevant, and minimal follow-up actions
+- next_actions: compatibility field; keep it aligned with recommendations
+- raw_output_policy: set to "summary_only" unless raw command output is truly necessary for the final answer
 - narrative: short explanation that clearly separates facts, inferences, and uncertainty
 - replan_hint: required when need_more_investigation=true; explain what is missing and what the next planning focus should be
 
@@ -62,7 +67,12 @@ Do not omit required fields.
 Call emit_summary with JSON arguments shaped exactly like:
 {
   "summary": "...",
+  "headline": "...",
   "conclusion": "...",
+  "key_findings": ["..."],
+  "resource_summaries": ["..."],
+  "recommendations": ["..."],
+  "raw_output_policy": "summary_only",
   "next_actions": ["..."],
   "need_more_investigation": false,
   "narrative": "...",
@@ -76,7 +86,10 @@ Call emit_summary with JSON arguments shaped exactly like:
 Additional constraints:
 - If need_more_investigation=false, set replan_hint to null
 - If need_more_investigation=true, replan_hint must be present and specific
-- next_actions must be actionable and derived from the findings, not generic advice
+- recommendations and next_actions must be actionable and derived from the findings, not generic advice
+- prefer short factual bullets over long report-style prose
+- do not paste raw stdout/stderr into conclusion, key_findings, or narrative
+- for fleet-scope healthy results, do not recommend routine restart or maintenance unless the evidence explicitly justifies it
 - Keep the structured fields authoritative; narrative is explanatory only
 - Keep the result concise, precise, and operationally useful`
 }

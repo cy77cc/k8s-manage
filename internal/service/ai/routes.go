@@ -14,10 +14,10 @@ func RegisterAIHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 func registerHandlers(g *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	h := NewHTTPHandler(svcCtx)
 	g.POST("/chat", h.Chat)
-	g.POST("/chat/respond", h.ChatRespond)
+	g.POST("/chat/respond", h.Chat)
 	g.POST("/feedback", h.SubmitFeedback)
-	g.POST("/approval/respond", h.HandleApprovalResponse)
 	g.POST("/resume/step", h.ResumeStep)
+	g.POST("/approval/respond", h.ResumeStep)
 	g.POST("/adk/resume", h.ResumeADKApproval)
 	g.GET("/sessions", h.ListSessions)
 	g.GET("/sessions/current", h.CurrentSession)

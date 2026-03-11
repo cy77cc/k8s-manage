@@ -20,7 +20,6 @@ export { ChatInput } from './components/ChatInput';
 export { useResizableDrawer } from './hooks/useResizableDrawer';
 export { useSceneDetector, useHasSceneSupport, useSceneConfig } from './hooks/useSceneDetector';
 export { useAutoScene } from './hooks/useAutoScene';
-export { useSSEAdapter } from './hooks/useSSEAdapter';
 export { useAIChat } from './hooks/useAIChat';
 
 // Provider
