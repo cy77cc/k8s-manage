@@ -9,7 +9,6 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/planner"
 	"github.com/cy77cc/OpsPilot/internal/ai/rewrite"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
-	"github.com/cy77cc/OpsPilot/internal/ai/summarizer"
 )
 
 // RewriteResultPayload 改写结果事件载荷。
@@ -84,7 +83,7 @@ type DeltaPayload struct {
 
 // SummaryPayload 总结结果事件载荷。
 type SummaryPayload struct {
-	Output summarizer.SummaryOutput `json:"output"`
+	Summary string `json:"summary,omitempty"`
 }
 
 // ErrorPayload 错误事件载荷。

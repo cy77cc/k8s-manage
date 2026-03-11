@@ -14,10 +14,10 @@
 //	└─────────────────────────────────────────────────────────────┘
 //
 // 执行流程:
-//   1. Rewrite: 将口语化输入改写为结构化目标
-//   2. Plan: 解析资源并生成执行计划
-//   3. Execute: 调用专家 Agent 执行各步骤
-//   4. Summarize: 汇总结果生成最终答案
+//  1. Rewrite: 将口语化输入改写为结构化目标
+//  2. Plan: 解析资源并生成执行计划
+//  3. Execute: 调用专家 Agent 执行各步骤
+//  4. Summarize: 汇总结果生成最终答案
 //
 // 主要入口:
 //   - NewOrchestrator: 创建编排器实例
@@ -60,21 +60,19 @@ type StreamEmitter func(StreamEvent) bool
 //   - planner: 任务规划阶段，生成执行计划
 //   - executor: 任务执行阶段，调用专家 Agent
 //   - summarizer: 结果总结阶段，生成最终答案
-//   - renderer: 最终答案渲染器，格式化输出
 //   - metrics: 指标收集器，用于监控和统计
 //   - maxIters: 最大迭代次数，防止无限重规划
 //   - heartbeatInterval: 心跳间隔，保持长连接活跃
 type Orchestrator struct {
-	sessions          *state.SessionState    // 会话状态存储
+	sessions          *state.SessionState     // 会话状态存储
 	executions        *runtime.ExecutionStore // 执行状态存储
-	rewriter          *rewrite.Rewriter      // 输入改写阶段
-	planner           *planner.Planner       // 任务规划阶段
-	executor          *executor.Executor     // 任务执行阶段
-	summarizer        *summarizer.Summarizer // 结果总结阶段
-	renderer          *finalAnswerRenderer   // 最终答案渲染器
-	metrics           *AIMetrics             // 指标收集器
-	maxIters          int                    // 最大迭代次数
-	heartbeatInterval time.Duration          // 心跳间隔
+	rewriter          *rewrite.Rewriter       // 输入改写阶段
+	planner           *planner.Planner        // 任务规划阶段
+	executor          *executor.Executor      // 任务执行阶段
+	summarizer        *summarizer.Summarizer  // 结果总结阶段
+	metrics           *AIMetrics              // 指标收集器
+	maxIters          int                     // 最大迭代次数
+	heartbeatInterval time.Duration           // 心跳间隔
 }
 
 // NewOrchestrator 创建编排器实例，初始化所有阶段。
@@ -93,7 +91,6 @@ func NewOrchestrator(sessions *state.SessionState, executions *runtime.Execution
 		sessions:          sessions,
 		executions:        executions,
 		executor:          executor.New(executions),
-		renderer:          newFinalAnswerRenderer(),
 		metrics:           NewAIMetrics(),
 		maxIters:          2,
 		heartbeatInterval: 10 * time.Second,
@@ -550,24 +547,18 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 					},
 				})
 				if execErr == nil && executed != nil {
-					summaryOut, summaryErr := o.summarizeExecution(ctx, message, decision.Plan, executed, func(chunk string) {
+					summaryText, summaryErr := o.summarizeExecution(ctx, message, decision.Plan, executed, func(chunk string) {
 						emitStageDelta(emit, meta, "summary", "loading", chunk, "", "")
+						emitEvent(emit, events.Delta, meta, map[string]any{
+							"content_chunk": chunk,
+							"contentChunk":  chunk,
+						})
 					})
 					emitEvent(emit, events.Summary, meta, map[string]any{
-						"output": summaryOut,
+						"summary": summaryText,
 					})
-					emitStageDelta(emit, meta, "summary", summaryStageStatus(summaryErr), firstNonEmpty(summaryOut.Summary, summaryOut.Headline), "", "")
-					if summaryOut.NeedMoreInvestigation && meta.Iteration < o.maxIters {
-						reason := ""
-						if summaryOut.ReplanHint != nil {
-							reason = summaryOut.ReplanHint.Reason
-						}
-						emitEvent(emit, events.ReplanStarted, meta, map[string]any{
-							"reason":           reason,
-							"previous_plan_id": executed.State.PlanID,
-						})
-					}
-					if body := o.renderAndEmitFinalAnswer(decision.Plan, executed, summaryOut, emit, meta); body != "" {
+					emitStageDelta(emit, meta, "summary", summaryStageStatus(summaryErr), summaryText, "", "")
+					if body := o.renderAndEmitFinalAnswer(decision.Plan, executed, summaryText, emit, meta); body != "" {
 						return body, nil
 					}
 				}
@@ -578,34 +569,13 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 }
 
 // renderAndEmitFinalAnswer 渲染并发送最终答案。
-// 将执行计划和结果格式化为用户可读的回复文本。
-func (o *Orchestrator) renderAndEmitFinalAnswer(plan *planner.ExecutionPlan, result *executor.Result, summaryOut summarizer.SummaryOutput, emit StreamEmitter, meta events.EventMeta) string {
-	if o == nil || o.renderer == nil {
-		body := firstNonEmpty(summaryOut.Headline, summaryOut.Conclusion, summaryOut.Summary)
-		emitDeltaChunks(emit, meta, body)
-		return strings.TrimSpace(body)
-	}
-	paragraphs := o.renderer.Render("", plan, result, summaryOut)
-	var builder strings.Builder
-	for i, paragraph := range paragraphs {
-		paragraph = strings.TrimSpace(paragraph)
-		if paragraph == "" {
-			continue
-		}
-		if builder.Len() > 0 {
-			builder.WriteString("\n\n")
-		}
-		builder.WriteString(paragraph)
-		chunk := paragraph
-		if i < len(paragraphs)-1 {
-			chunk += "\n\n"
-		}
-		emitEvent(emit, events.Delta, meta, map[string]any{
-			"content_chunk": chunk,
-			"contentChunk":  chunk,
-		})
-	}
-	return strings.TrimSpace(builder.String())
+// 最终正文直接透传 summary 阶段产出的完整结果。
+func (o *Orchestrator) renderAndEmitFinalAnswer(plan *planner.ExecutionPlan, result *executor.Result, summaryText string, emit StreamEmitter, meta events.EventMeta) string {
+	_ = plan
+	_ = result
+	_ = emit
+	_ = meta
+	return strings.TrimSpace(summaryText)
 }
 
 // sessionMessages 获取会话的所有消息列表。
@@ -896,7 +866,7 @@ func resumeStatusMessage(status string, approved bool) string {
 //   - onDelta: 流式输出回调
 //
 // 返回: 总结输出和可能的错误
-func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result, onDelta func(string)) (summarizer.SummaryOutput, error) {
+func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result, onDelta func(string)) (string, error) {
 	if o.summarizer == nil {
 		return summarizerUnavailableSummary(nil), &summarizer.UnavailableError{
 			Code:              "summarizer_runner_unavailable",
@@ -917,21 +887,13 @@ func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, p
 
 // summarizerUnavailableSummary 当 Summarizer 不可用时生成降级总结。
 // 提示用户查看原始执行证据。
-func summarizerUnavailableSummary(err error) summarizer.SummaryOutput {
+func summarizerUnavailableSummary(err error) string {
 	message := availability.UnavailableMessage(availability.LayerSummarizer)
 	var unavailable *summarizer.UnavailableError
 	if errors.As(err, &unavailable) {
 		message = unavailable.UserVisibleMessage()
 	}
-	return summarizer.SummaryOutput{
-		Summary:         message,
-		Headline:        "AI 总结模块当前不可用",
-		Conclusion:      "执行已经完成，但当前无法生成最终 AI 总结。请直接查看原始执行证据。",
-		KeyFindings:     []string{"本轮执行已完成，但总结阶段不可用。"},
-		Recommendations: []string{"查看原始执行证据"},
-		RawOutputPolicy: "include_evidence",
-		Narrative:       message,
-	}
+	return strings.TrimSpace(message)
 }
 
 // summaryStageStatus 根据错误判断总结阶段状态。

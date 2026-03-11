@@ -149,16 +149,6 @@ function normalizeThoughtStatus(status: string | undefined, fallback: ThoughtSta
   }
 }
 
-function collectRawEvidenceFromThoughtChain(stages: ThoughtStageItem[] | undefined): string[] {
-  const executeStage = (stages || []).find((item) => item.key === 'execute');
-  if (!executeStage?.details?.length) {
-    return [];
-  }
-  return executeStage.details
-    .map((detail) => (detail.content || detail.label || '').trim())
-    .filter(Boolean);
-}
-
 function resolveThoughtStageTitle(stage: string | undefined): ThoughtStageItem['title'] {
   switch (stage) {
     case 'rewrite':
@@ -178,7 +168,6 @@ function resolveThoughtStageTitle(stage: string | undefined): ThoughtStageItem['
 const AssistantMessage: React.FC<{
   content: string;
   thinking?: string;
-  summaryOutput?: Record<string, unknown>;
   recommendations?: EmbeddedRecommendation[];
   thoughtChain?: ThoughtStageItem[];
   rawEvidence?: string[];
@@ -187,16 +176,15 @@ const AssistantMessage: React.FC<{
   onRegenerate?: () => void;
   onRecommendationSelect?: (prompt: string) => void;
   isLoading?: boolean;
-}> = ({ content, thinking, summaryOutput, recommendations, thoughtChain, rawEvidence, isStreaming, showActions = true, onRegenerate, onRecommendationSelect, isLoading }) => {
+}> = ({ content, thinking, recommendations, thoughtChain, rawEvidence, isStreaming, showActions = true, onRegenerate, onRecommendationSelect, isLoading }) => {
   const { token } = theme.useToken();
   const blocks = useMemo(() => normalizeAssistantMessage({
     content,
     thinking,
-    summaryOutput,
     rawEvidence,
     recommendations,
     isStreaming,
-  }), [content, thinking, summaryOutput, rawEvidence, recommendations, isStreaming]);
+  }), [content, thinking, rawEvidence, recommendations, isStreaming]);
 
   return (
     <div>
@@ -668,18 +656,13 @@ export const Copilot: React.FC<CopilotProps> = ({
               break;
 
             case 'summary': {
-              const output = (data.output as Record<string, unknown> | undefined) || {};
               setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
                 ...message,
-                summaryOutput: output,
-                rawEvidence: String(output.raw_output_policy || '').toLowerCase() === 'include_evidence'
-                  ? collectRawEvidenceFromThoughtChain(message.thoughtChain)
-                  : message.rawEvidence,
                 thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'summary',
                   title: '生成结论',
                   status: 'success',
-                  description: String(output.summary || '已生成结构化结论'),
+                  description: String(data.summary || '已生成最终结论'),
                 }),
               })));
               break;
@@ -696,11 +679,9 @@ export const Copilot: React.FC<CopilotProps> = ({
                 assistantContent ||= String(finalAssistant?.content || '');
                 assistantThinking ||= String(finalAssistant?.thinking || '');
                 assistantRecommendations ||= (finalAssistant?.recommendations as EmbeddedRecommendation[] | undefined);
-                const finalSummaryOutput = (finalAssistant?.summaryOutput as Record<string, unknown> | undefined) || undefined;
                 const finalRawEvidence = (finalAssistant?.rawEvidence as string[] | undefined) || undefined;
                 setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
                   ...message,
-                  summaryOutput: finalSummaryOutput || message.summaryOutput,
                   rawEvidence: finalRawEvidence || message.rawEvidence,
                 })));
                 if (session.id) {
@@ -902,7 +883,6 @@ export const Copilot: React.FC<CopilotProps> = ({
       <AssistantMessage
         content={msg.content}
         thinking={msg.thinking}
-        summaryOutput={msg.summaryOutput}
         recommendations={msg.recommendations}
         thoughtChain={msg.thoughtChain}
         rawEvidence={msg.rawEvidence}

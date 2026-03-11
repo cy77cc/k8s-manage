@@ -49,7 +49,7 @@ describe('aiApi.chatStream', () => {
         'event: rewrite_result\ndata: {"user_visible_summary":"rewrite ok"}\n\n',
         'event: plan_created\ndata: {"user_visible_summary":"plan ok"}\n\n',
         'event: step_update\ndata: {"step_id":"step-1","status":"running","user_visible_summary":"executing"}\n\n',
-        'event: summary\ndata: {"output":{"summary":"done","conclusion":"finished"}}\n\n',
+        'event: summary\ndata: {"summary":"done"}\n\n',
       ]),
     } as Response);
 
@@ -66,7 +66,7 @@ describe('aiApi.chatStream', () => {
     expect(onRewriteResult).toHaveBeenCalledWith(expect.objectContaining({ user_visible_summary: 'rewrite ok' }));
     expect(onPlanCreated).toHaveBeenCalledWith(expect.objectContaining({ user_visible_summary: 'plan ok' }));
     expect(onStepUpdate).toHaveBeenCalledWith(expect.objectContaining({ step_id: 'step-1', status: 'running' }));
-    expect(onSummary).toHaveBeenCalledWith(expect.objectContaining({ output: expect.objectContaining({ summary: 'done' }) }));
+    expect(onSummary).toHaveBeenCalledWith(expect.objectContaining({ summary: 'done' }));
   });
 
   it('preserves stage-aware error payloads', async () => {

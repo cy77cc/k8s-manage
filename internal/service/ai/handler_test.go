@@ -94,9 +94,6 @@ func TestSessionHandlersRespectSceneAndExposeThoughtChain(t *testing.T) {
 		ThoughtChain: []map[string]any{
 			{"key": "rewrite", "title": "理解你的问题", "status": "success"},
 		},
-		SummaryOutput: map[string]any{
-			"headline": "服务当前运行正常",
-		},
 		RawEvidence: []string{"命令执行成功"},
 	}); err != nil {
 		t.Fatalf("UpdateAssistantMessage(global) error = %v", err)
@@ -152,9 +149,6 @@ func TestSessionHandlersRespectSceneAndExposeThoughtChain(t *testing.T) {
 		}
 		if _, ok := resp.Data.Messages[1]["thoughtChain"]; !ok {
 			t.Fatalf("assistant message missing thoughtChain: %#v", resp.Data.Messages[1])
-		}
-		if _, ok := resp.Data.Messages[1]["summaryOutput"]; !ok {
-			t.Fatalf("assistant message missing summaryOutput: %#v", resp.Data.Messages[1])
 		}
 		if _, ok := resp.Data.Messages[1]["rawEvidence"]; !ok {
 			t.Fatalf("assistant message missing rawEvidence: %#v", resp.Data.Messages[1])

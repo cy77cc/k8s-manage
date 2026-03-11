@@ -8,7 +8,7 @@ describe('useConversationRestore', () => {
     vi.restoreAllMocks();
   });
 
-  it('restores the current scene session with summary output and raw evidence', async () => {
+  it('restores the current scene session with content and raw evidence', async () => {
     vi.spyOn(aiApi, 'getCurrentSession').mockResolvedValue({
       code: 0,
       data: {
@@ -20,7 +20,6 @@ describe('useConversationRestore', () => {
           id: 'msg-1',
           role: 'assistant',
           content: 'final answer',
-          summaryOutput: { headline: 'done' },
           rawEvidence: ['tool output'],
           timestamp: '2026-03-11T00:00:01Z',
         }],
@@ -40,7 +39,6 @@ describe('useConversationRestore', () => {
         messages: [
           expect.objectContaining({
             content: 'final answer',
-            summaryOutput: { headline: 'done' },
             rawEvidence: ['tool output'],
           }),
         ],

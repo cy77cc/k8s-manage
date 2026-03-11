@@ -39,9 +39,6 @@ func TestChatStoreFiltersBySceneAndPersistsAssistantMetadata(t *testing.T) {
 		Recommendations: []map[string]any{
 			{"id": "r-1", "title": "下一步"},
 		},
-		SummaryOutput: map[string]any{
-			"headline": "服务当前运行正常",
-		},
 		RawEvidence: []string{"命令执行成功"},
 	}); err != nil {
 		t.Fatalf("UpdateAssistantMessage(global) error = %v", err)
@@ -75,9 +72,6 @@ func TestChatStoreFiltersBySceneAndPersistsAssistantMetadata(t *testing.T) {
 	}
 	if len(msg.Recommendations) != 1 {
 		t.Fatalf("Recommendations = %#v, want 1 item", msg.Recommendations)
-	}
-	if msg.SummaryOutput["headline"] != "服务当前运行正常" {
-		t.Fatalf("SummaryOutput = %#v", msg.SummaryOutput)
 	}
 	if len(msg.RawEvidence) != 1 || msg.RawEvidence[0] != "命令执行成功" {
 		t.Fatalf("RawEvidence = %#v", msg.RawEvidence)

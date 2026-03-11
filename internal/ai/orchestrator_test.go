@@ -142,41 +142,20 @@ func newClarifyPlanner() *planner.Planner {
 }
 
 func newSummarizerForServiceStatus() *summarizer.Summarizer {
-	return summarizer.NewWithFunc(func(_ context.Context, _ summarizer.Input, onDelta func(string)) (summarizer.SummaryOutput, error) {
+	return summarizer.NewWithFunc(func(_ context.Context, _ summarizer.Input, onDelta func(string)) (string, error) {
 		if onDelta != nil {
 			onDelta("已根据执行证据整理最终结论。")
 		}
-		return summarizer.SummaryOutput{
-			Summary:         "payment-api 当前运行正常。",
-			Headline:        "payment-api 当前运行正常。",
-			Conclusion:      "未发现需要立即处理的异常。",
-			KeyFindings:     []string{"服务状态检查已完成。"},
-			Recommendations: []string{"继续保持常规观察。"},
-			RawOutputPolicy: "summary_only",
-			Narrative:       "总结基于当前执行证据生成。",
-		}, nil
+		return "payment-api 当前运行正常。", nil
 	})
 }
 
 func newSummarizerNeedingInvestigation() *summarizer.Summarizer {
-	return summarizer.NewWithFunc(func(_ context.Context, _ summarizer.Input, onDelta func(string)) (summarizer.SummaryOutput, error) {
+	return summarizer.NewWithFunc(func(_ context.Context, _ summarizer.Input, onDelta func(string)) (string, error) {
 		if onDelta != nil {
 			onDelta("已基于有限证据生成初步判断。")
 		}
-		return summarizer.SummaryOutput{
-			Summary:               "当前证据不足以形成稳定结论。",
-			Headline:              "当前仅能给出初步判断",
-			Conclusion:            "仍需补充证据后再确认最终状态。",
-			KeyFindings:           []string{"缺少足够执行证据。"},
-			Recommendations:       []string{"补充关键执行证据"},
-			RawOutputPolicy:       "summary_only",
-			Narrative:             "当前仅基于有限证据做出初步判断。",
-			NeedMoreInvestigation: true,
-			ReplanHint: &summarizer.ReplanHint{
-				Reason: "completed_steps_without_evidence",
-				Focus:  "补充执行证据",
-			},
-		}, nil
+		return "当前证据不足以形成稳定结论。", nil
 	})
 }
 
@@ -350,7 +329,6 @@ func TestOrchestratorRunMainFlowEmitsExpectedEvents(t *testing.T) {
 		planner:           newPlannerForServiceStatus(),
 		executor:          executor.New(store, executor.WithStepRunner(runner)),
 		summarizer:        newSummarizerForServiceStatus(),
-		renderer:          newFinalAnswerRenderer(),
 		maxIters:          2,
 		heartbeatInterval: time.Hour,
 	}
@@ -437,7 +415,6 @@ func TestOrchestratorEmitsHeartbeatDuringLongRun(t *testing.T) {
 			result: executor.StepResult{Summary: "service status collected"},
 		})),
 		summarizer:        newSummarizerForServiceStatus(),
-		renderer:          newFinalAnswerRenderer(),
 		maxIters:          2,
 		heartbeatInterval: 2 * time.Millisecond,
 	}
@@ -645,7 +622,7 @@ func TestWaitingApprovalStateSurvivesOrchestratorRestart(t *testing.T) {
 	}
 }
 
-func TestOrchestratorEmitsReplanStartedWhenSummaryNeedsMoreInvestigation(t *testing.T) {
+func TestOrchestratorDoesNotEmitReplanStartedFromSummaryText(t *testing.T) {
 	sessions := newSessionStateForOrchestrator(t)
 	store := newExecutionStoreForOrchestrator(t)
 	runner := &orchestratorStubStepRunner{result: executor.StepResult{
@@ -676,12 +653,10 @@ func TestOrchestratorEmitsReplanStartedWhenSummaryNeedsMoreInvestigation(t *test
 		planner:    newPlannerForServiceStatus(),
 		executor:   executor.New(store, executor.WithStepRunner(runner)),
 		summarizer: newSummarizerNeedingInvestigation(),
-		renderer:   newFinalAnswerRenderer(),
 		maxIters:   2,
 	}
 
 	var names []string
-	var replanReason string
 	err := orch.Run(context.Background(), RunRequest{
 		Message: "查看 payment-api 的状态",
 		RuntimeContext: RuntimeContext{
@@ -692,19 +667,13 @@ func TestOrchestratorEmitsReplanStartedWhenSummaryNeedsMoreInvestigation(t *test
 		},
 	}, func(evt StreamEvent) bool {
 		names = append(names, string(evt.Type))
-		if evt.Type == events.ReplanStarted {
-			replanReason = stringValue(evt.Data["reason"])
-		}
 		return true
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if !containsEvent(names, "replan_started") {
-		t.Fatalf("events = %v, want replan_started", names)
-	}
-	if replanReason == "" {
-		t.Fatalf("replan reason is empty")
+	if containsEvent(names, "replan_started") {
+		t.Fatalf("events = %v, want no replan_started", names)
 	}
 }
 

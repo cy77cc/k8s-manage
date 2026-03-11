@@ -10,8 +10,6 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	einomodel "github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -22,18 +20,10 @@ func NewWithADK(ctx context.Context, model einomodel.BaseChatModel) (*Summarizer
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          "summarizer-stage",
-		Description:   "Summarize executor outputs into structured conclusions and replan hints.",
+		Description:   "Stream the final user-facing answer from executor outputs.",
 		Instruction:   SystemPrompt(),
 		Model:         model,
 		MaxIterations: 2,
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: []tool.BaseTool{summaryDecisionTool()},
-			},
-			ReturnDirectly: map[string]bool{
-				"emit_summary": true,
-			},
-		},
 	})
 	if err != nil {
 		return nil, err
@@ -48,7 +38,6 @@ func runADKSummarizer(ctx context.Context, runner *adk.Runner, input string, onD
 		return "", fmt.Errorf("summarizer ADK runner is not configured")
 	}
 	iter := runner.Query(ctx, input)
-	var last string
 	var streamed string
 	for {
 		event, ok := iter.Next()
@@ -68,14 +57,11 @@ func runADKSummarizer(ctx context.Context, runner *adk.Runner, input string, onD
 		if msg.Role == schema.Assistant {
 			streamed = emitSummaryDelta(streamed, msg.Content, onDelta)
 		}
-		if isSummaryOutput(msg) {
-			last = strings.TrimSpace(msg.Content)
-		}
 	}
-	if last == "" {
+	if strings.TrimSpace(streamed) == "" {
 		return "", fmt.Errorf("summarizer stage produced empty output")
 	}
-	return last, nil
+	return strings.TrimSpace(streamed), nil
 }
 
 func emitSummaryDelta(previous, current string, onDelta func(string)) string {
@@ -95,18 +81,4 @@ func emitSummaryDelta(previous, current string, onDelta func(string)) string {
 	}
 	onDelta(current)
 	return current
-}
-
-func isSummaryOutput(msg *schema.Message) bool {
-	if msg == nil || strings.TrimSpace(msg.Content) == "" {
-		return false
-	}
-	switch msg.Role {
-	case schema.Tool:
-		return strings.TrimSpace(msg.ToolName) == "emit_summary"
-	case schema.Assistant:
-		return len(msg.ToolCalls) == 0
-	default:
-		return false
-	}
 }

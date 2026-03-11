@@ -385,9 +385,6 @@ func toAPISession(snapshot aistate.ChatSessionRecord, includeMessages bool) v1.A
 			if len(msg.Recommendations) > 0 {
 				payload["recommendations"] = msg.Recommendations
 			}
-			if len(msg.SummaryOutput) > 0 {
-				payload["summaryOutput"] = msg.SummaryOutput
-			}
 			if len(msg.RawEvidence) > 0 {
 				payload["rawEvidence"] = msg.RawEvidence
 			}
@@ -400,7 +397,6 @@ func toAPISession(snapshot aistate.ChatSessionRecord, includeMessages bool) v1.A
 				"traceId":         payload["traceId"],
 				"thoughtChain":    payload["thoughtChain"],
 				"recommendations": payload["recommendations"],
-				"summaryOutput":   payload["summaryOutput"],
 				"rawEvidence":     payload["rawEvidence"],
 				"timestamp":       payload["timestamp"],
 			})

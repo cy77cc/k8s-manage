@@ -7,7 +7,6 @@ export interface AIMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   thinking?: string;
-  summaryOutput?: Record<string, any>;
   rawEvidence?: string[];
   traces?: ToolTrace[];
   recommendations?: EmbeddedRecommendation[];
@@ -156,14 +155,7 @@ export interface SSEReplanStartedEvent {
 }
 
 export interface SSESummaryEvent {
-  output?: {
-    summary?: string;
-    conclusion?: string;
-    next_actions?: string[];
-    need_more_investigation?: boolean;
-    narrative?: string;
-    replan_hint?: Record<string, unknown>;
-  };
+  summary?: string;
 }
 
 function toContentChunk(payload: unknown): string {

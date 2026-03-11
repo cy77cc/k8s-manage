@@ -157,16 +157,11 @@ func (r *chatRecorder) HandleEvent(ctx context.Context, eventType events.Name, p
 			"description": "正在开始新一轮规划",
 		})
 	case events.Summary:
-		output, _ := payload["output"].(map[string]any)
-		r.assistant.SummaryOutput = copyMap(output)
-		if strings.EqualFold(firstString(output["raw_output_policy"]), "include_evidence") {
-			r.assistant.RawEvidence = extractRawEvidenceFromThoughtChain(r.assistant.ThoughtChain)
-		}
 		r.upsertStage(map[string]any{
 			"key":         "summary",
 			"title":       "生成结论",
 			"status":      "success",
-			"description": firstString(output["summary"], "已生成结构化结论"),
+			"description": firstString(payload["summary"], "已生成最终结论"),
 		})
 	case events.Error:
 		r.assistant.Status = "error"
