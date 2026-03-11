@@ -91,7 +91,7 @@ func (s *Summarizer) summarize(ctx context.Context, in Input, onThinkingDelta fu
 		}
 	}
 	message := buildPromptInput(ctx, in)
-	if message != nil {
+	if message == nil {
 		return "", fmt.Errorf("构建 prompt 失败")
 	}
 	raw, err := runADKSummarizer(ctx, s.runner, message, onThinkingDelta, onAnswerDelta)
