@@ -4,6 +4,8 @@
 
 This document describes the migration from the old checkpoint-oriented AI chain to the current orchestrated multi-expert runtime.
 
+It also covers the model-first rollout toggle and rollback posture.
+
 ## Architecture Migration
 
 Old shape:
@@ -24,6 +26,34 @@ Key changes:
 - execution state is explicit and durable
 - experts are isolated by domain
 - frontend consumes high-level orchestration events
+- semantic authority belongs to Rewrite / Planner / Experts / Summarizer
+- runtime code no longer impersonates missing model reasoning with deterministic semantic fallbacks
+
+## Rollout Migration
+
+Primary flags:
+
+- `ai.use_multi_domain_arch`
+- `feature_flags.ai_model_first_runtime`
+- `feature_flags.ai_legacy_semantic_fallback`
+
+Recommended target:
+
+```yaml
+ai:
+  use_multi_domain_arch: true
+
+feature_flags:
+  ai_model_first_runtime: true
+  ai_legacy_semantic_fallback: false
+```
+
+Rollback posture:
+
+- keep `ai.use_multi_domain_arch=true` for the stage-based runtime
+- set `feature_flags.ai_model_first_runtime=false` only for operational rollback
+- if rollback is required, treat the deployment as compatibility mode and instruct users to fall back to manual operations or compatibility endpoints as documented
+- do not reintroduce hidden code semantic fallbacks as a silent runtime behavior
 
 ## Resume Migration
 
@@ -56,6 +86,8 @@ Current model:
 - final answer body consumes `delta`
 - `tool_call` / `tool_result` are supplementary only
 - `summary` is structured only
+- `error` carries explicit `error_code` and `stage`
+- `heartbeat` keeps long streams alive
 
 Removed or deprecated assumptions:
 
@@ -103,6 +135,11 @@ Still supported:
 - `/api/v1/ai/approval/respond`
 - `/api/v1/ai/adk/resume`
 - `message` as a compatibility alias for final answer chunk handling in some clients
+
+Operational compatibility:
+
+- response headers expose `X-AI-Runtime-Mode`
+- SSE `meta` exposes `runtime_mode`, `model_first_enabled`, and `compatibility_enabled`
 
 Not recommended for new clients:
 

@@ -74,5 +74,8 @@ type SummaryPayload struct {
 }
 
 type ErrorPayload struct {
-	Message string `json:"message"`
+	Message     string `json:"message"`
+	ErrorCode   string `json:"error_code,omitempty"`
+	Stage       string `json:"stage,omitempty"`
+	Recoverable bool   `json:"recoverable,omitempty"`
 }

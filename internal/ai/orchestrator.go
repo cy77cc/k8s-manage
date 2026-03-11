@@ -3,11 +3,13 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/cy77cc/OpsPilot/internal/ai/availability"
 	"github.com/cy77cc/OpsPilot/internal/ai/events"
 	"github.com/cy77cc/OpsPilot/internal/ai/executor"
 	"github.com/cy77cc/OpsPilot/internal/ai/experts"
@@ -23,25 +25,27 @@ import (
 type StreamEmitter func(StreamEvent) bool
 
 type Orchestrator struct {
-	sessions   *state.SessionState
-	executions *runtime.ExecutionStore
-	rewriter   *rewrite.Rewriter
-	planner    *planner.Planner
-	executor   *executor.Executor
-	summarizer *summarizer.Summarizer
-	renderer   *finalAnswerRenderer
-	metrics    *AIMetrics
-	maxIters   int
+	sessions          *state.SessionState
+	executions        *runtime.ExecutionStore
+	rewriter          *rewrite.Rewriter
+	planner           *planner.Planner
+	executor          *executor.Executor
+	summarizer        *summarizer.Summarizer
+	renderer          *finalAnswerRenderer
+	metrics           *AIMetrics
+	maxIters          int
+	heartbeatInterval time.Duration
 }
 
 func NewOrchestrator(sessions *state.SessionState, executions *runtime.ExecutionStore, deps common.PlatformDeps) *Orchestrator {
 	out := &Orchestrator{
-		sessions:   sessions,
-		executions: executions,
-		executor:   executor.New(executions),
-		renderer:   newFinalAnswerRenderer(),
-		metrics:    NewAIMetrics(),
-		maxIters:   2,
+		sessions:          sessions,
+		executions:        executions,
+		executor:          executor.New(executions),
+		renderer:          newFinalAnswerRenderer(),
+		metrics:           NewAIMetrics(),
+		maxIters:          2,
+		heartbeatInterval: 10 * time.Second,
 	}
 	bootstrapCtx := context.Background()
 	if rewriteModel, err := NewRewriteChatModel(bootstrapCtx); err == nil {
@@ -138,30 +142,57 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		"traceId":    traceID,
 		"createdAt":  meta.Timestamp.Format(time.RFC3339),
 	})
+	stopHeartbeat := o.startHeartbeat(ctx, streamEmit, meta)
+	defer stopHeartbeat()
 
-	var rewriteOut rewrite.Output
-	if o.rewriter != nil {
-		emitStageDelta(streamEmit, meta, "rewrite", "loading", "开始理解你的问题并提取目标线索。", "", "")
-		var err error
-		rewriteOut, err = o.rewriter.RewriteStream(ctx, rewrite.Input{
-			Message:           message,
-			Scene:             req.RuntimeContext.Scene,
-			CurrentPage:       req.RuntimeContext.CurrentPage,
-			SelectedResources: toRewriteResources(req.RuntimeContext.SelectedResources),
-		}, func(chunk string) {
-			emitStageDelta(streamEmit, meta, "rewrite", "loading", chunk, "", "")
+	rewriteOut, rewriteErr := o.rewriter.RewriteStream(ctx, rewrite.Input{
+		Message:           message,
+		Scene:             req.RuntimeContext.Scene,
+		CurrentPage:       req.RuntimeContext.CurrentPage,
+		SelectedResources: toRewriteResources(req.RuntimeContext.SelectedResources),
+	}, func(chunk string) {
+		emitStageDelta(streamEmit, meta, "rewrite", "loading", chunk, "", "")
+	})
+	if rewriteErr != nil {
+		reply := rewriteFailureMessage(rewriteErr)
+		emitStageDelta(streamEmit, meta, "rewrite", "error", reply, "", "")
+		emitEvent(streamEmit, events.Error, meta, map[string]any{
+			"message":    reply,
+			"error_code": rewriteFailureCode(rewriteErr),
+			"stage":      "rewrite",
 		})
-		if err == nil {
-			if o.metrics != nil {
-				o.metrics.RecordRewrite(rewriteOut)
+		emitDeltaChunks(streamEmit, meta, reply)
+		if o.sessions != nil {
+			if err := o.sessions.AppendMessage(ctx, sessionID, schema.AssistantMessage(reply, nil)); err != nil {
+				return err
 			}
-			emitEvent(streamEmit, events.RewriteResult, meta, map[string]any{
-				"rewrite":              rewriteOut,
-				"user_visible_summary": rewriteOut.Narrative,
-			})
-			emitStageDelta(streamEmit, meta, "rewrite", "success", rewriteOut.Narrative, "", "")
 		}
+		sessionPayload := map[string]any{
+			"id":        sessionID,
+			"title":     deriveSessionTitle(message),
+			"messages":  o.sessionMessages(ctx, sessionID),
+			"createdAt": meta.Timestamp.Format(time.RFC3339),
+			"updatedAt": time.Now().UTC().Format(time.RFC3339),
+		}
+		emitEvent(streamEmit, events.Done, meta, map[string]any{
+			"session": sessionPayload,
+		})
+		if o.executions != nil {
+			if st, err := o.executions.Load(ctx, sessionID); err == nil && st != nil {
+				st.Status = runtime.ExecutionStatusFailed
+				st.Phase = "rewrite_unavailable"
+				_ = o.executions.Save(ctx, *st)
+			}
+		}
+		return nil
 	}
+	if o.metrics != nil {
+		o.metrics.RecordRewrite(rewriteOut)
+	}
+	emitEvent(streamEmit, events.RewriteResult, meta, map[string]any{
+		"rewrite":              rewriteOut,
+		"user_visible_summary": rewriteOut.Narrative,
+	})
 
 	reply, genErr := o.planAndReply(ctx, message, rewriteOut, req.RuntimeContext, meta, streamEmit, sessionID)
 	if genErr != nil {
@@ -308,118 +339,138 @@ func (o *Orchestrator) MetricsSnapshot() AIMetricsSnapshot {
 }
 
 func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritten rewrite.Output, runtimeCtx RuntimeContext, meta events.EventMeta, emit StreamEmitter, sessionID string) (string, error) {
-	if o.planner != nil {
+	if o.planner == nil {
+		reply := plannerFailureMessage(&planner.PlanningError{
+			Code:              "planner_runner_unavailable",
+			UserVisibleReason: "AI 规划模块当前不可用，请稍后重试或手动在页面中执行操作。",
+		})
 		emitEvent(emit, events.PlannerState, meta, map[string]any{
-			"status":               "planning",
-			"user_visible_summary": "正在根据 Rewrite 结果整理执行计划。",
+			"status":               "error",
+			"user_visible_summary": reply,
 		})
-		emitStageDelta(emit, meta, "plan", "loading", "正在整理目标、资源和执行约束。", "", "")
-		decision, err := o.planner.PlanStream(ctx, planner.Input{
-			Message: message,
-			Rewrite: rewritten,
-		}, func(chunk string) {
-			emitStageDelta(emit, meta, "plan", "loading", chunk, "", "")
+		emitStageDelta(emit, meta, "plan", "error", reply, "", "")
+		emitEvent(emit, events.Error, meta, map[string]any{
+			"message":    reply,
+			"error_code": "planner_runner_unavailable",
+			"stage":      "plan",
 		})
-		if err == nil {
-			if o.metrics != nil {
-				o.metrics.RecordPlanner(decision)
-			}
-			switch decision.Type {
-			case planner.DecisionClarify:
-				emitEvent(emit, events.ClarifyRequired, meta, map[string]any{
-					"title":      "需要你补充信息",
-					"message":    decision.Message,
-					"candidates": decision.Candidates,
-					"kind":       "clarify",
+		emitDeltaChunks(emit, meta, reply)
+		return reply, nil
+	}
+
+	emitEvent(emit, events.PlannerState, meta, map[string]any{
+		"status":               "planning",
+		"user_visible_summary": "正在根据 Rewrite 结果整理执行计划。",
+	})
+	decision, err := o.planner.PlanStream(ctx, planner.Input{
+		Message: message,
+		Rewrite: rewritten,
+	}, func(chunk string) {
+		emitStageDelta(emit, meta, "plan", "loading", chunk, "", "")
+	})
+	if err != nil {
+		reply := plannerFailureMessage(err)
+		emitStageDelta(emit, meta, "plan", "error", reply, "", "")
+		emitEvent(emit, events.Error, meta, map[string]any{
+			"message":    reply,
+			"error_code": plannerFailureCode(err),
+			"stage":      "plan",
+		})
+		emitDeltaChunks(emit, meta, reply)
+		return reply, nil
+	}
+	if o.metrics != nil {
+		o.metrics.RecordPlanner(decision)
+	}
+	switch decision.Type {
+	case planner.DecisionClarify:
+		emitEvent(emit, events.ClarifyRequired, meta, map[string]any{
+			"title":      "需要你补充信息",
+			"message":    decision.Message,
+			"candidates": decision.Candidates,
+			"kind":       "clarify",
+		})
+		emitStageDelta(emit, meta, "plan", "error", decision.Message, "", "")
+		emitDeltaChunks(emit, meta, decision.Message)
+		return decision.Message, nil
+	case planner.DecisionDirectReply:
+		emitStageDelta(emit, meta, "plan", "success", firstNonEmpty(decision.Message, decision.Narrative), "", "")
+		emitDeltaChunks(emit, meta, decision.Message)
+		return decision.Message, nil
+	case planner.DecisionPlan:
+		if decision.Plan != nil {
+			meta.PlanID = decision.Plan.PlanID
+			emitEvent(emit, events.PlanCreated, meta, map[string]any{
+				"plan":                 decision.Plan,
+				"user_visible_summary": decision.Narrative,
+			})
+			emitStageDelta(emit, meta, "plan", "success", firstNonEmpty(decision.Narrative, decision.Plan.Narrative), "", "")
+			if o.executor != nil {
+				executed, execErr := o.executor.Run(ctx, executor.Request{
+					TraceID:   meta.TraceID,
+					SessionID: sessionID,
+					Message:   message,
+					Plan:      *decision.Plan,
+					RuntimeContext: runtime.ContextSnapshot{
+						Scene:       runtimeCtx.Scene,
+						Route:       runtimeCtx.Route,
+						ProjectID:   runtimeCtx.ProjectID,
+						CurrentPage: runtimeCtx.CurrentPage,
+						ResourceIDs: selectedResourceIDs(runtimeCtx.SelectedResources),
+					},
+					EventMeta: executor.EventMeta{
+						SessionID: meta.SessionID,
+						TraceID:   meta.TraceID,
+						PlanID:    meta.PlanID,
+						Iteration: meta.Iteration,
+						Timestamp: meta.Timestamp,
+					},
+					EmitEvent: func(name string, eventMeta executor.EventMeta, data map[string]any) bool {
+						emitEvent(emit, events.Name(name), events.EventMeta{
+							SessionID: eventMeta.SessionID,
+							TraceID:   eventMeta.TraceID,
+							PlanID:    eventMeta.PlanID,
+							StepID:    eventMeta.StepID,
+							Iteration: eventMeta.Iteration,
+							Timestamp: eventMeta.Timestamp,
+						}, data)
+						emitExecuteStageDelta(emit, events.EventMeta{
+							SessionID: eventMeta.SessionID,
+							TraceID:   eventMeta.TraceID,
+							PlanID:    eventMeta.PlanID,
+							StepID:    eventMeta.StepID,
+							Iteration: eventMeta.Iteration,
+							Timestamp: eventMeta.Timestamp,
+						}, name, data)
+						return true
+					},
 				})
-				emitStageDelta(emit, meta, "plan", "error", decision.Message, "", "")
-				emitDeltaChunks(emit, meta, decision.Message)
-				return decision.Message, nil
-			case planner.DecisionDirectReply:
-				emitStageDelta(emit, meta, "plan", "success", firstNonEmpty(decision.Message, decision.Narrative), "", "")
-				emitDeltaChunks(emit, meta, decision.Message)
-				return decision.Message, nil
-			case planner.DecisionPlan:
-				if decision.Plan != nil {
-					meta.PlanID = decision.Plan.PlanID
-					emitEvent(emit, events.PlanCreated, meta, map[string]any{
-						"plan":                 decision.Plan,
-						"user_visible_summary": decision.Narrative,
+				if execErr == nil && executed != nil {
+					summaryOut, summaryErr := o.summarizeExecution(ctx, message, decision.Plan, executed, func(chunk string) {
+						emitStageDelta(emit, meta, "summary", "loading", chunk, "", "")
 					})
-					emitStageDelta(emit, meta, "plan", "success", firstNonEmpty(decision.Narrative, decision.Plan.Narrative), "", "")
-					if o.executor != nil {
-						executed, execErr := o.executor.Run(ctx, executor.Request{
-							TraceID:   meta.TraceID,
-							SessionID: sessionID,
-							Message:   message,
-							Plan:      *decision.Plan,
-							RuntimeContext: runtime.ContextSnapshot{
-								Scene:       runtimeCtx.Scene,
-								Route:       runtimeCtx.Route,
-								ProjectID:   runtimeCtx.ProjectID,
-								CurrentPage: runtimeCtx.CurrentPage,
-								ResourceIDs: selectedResourceIDs(runtimeCtx.SelectedResources),
-							},
-							EventMeta: executor.EventMeta{
-								SessionID: meta.SessionID,
-								TraceID:   meta.TraceID,
-								PlanID:    meta.PlanID,
-								Iteration: meta.Iteration,
-								Timestamp: meta.Timestamp,
-							},
-							EmitEvent: func(name string, eventMeta executor.EventMeta, data map[string]any) bool {
-								emitEvent(emit, events.Name(name), events.EventMeta{
-									SessionID: eventMeta.SessionID,
-									TraceID:   eventMeta.TraceID,
-									PlanID:    eventMeta.PlanID,
-									StepID:    eventMeta.StepID,
-									Iteration: eventMeta.Iteration,
-									Timestamp: eventMeta.Timestamp,
-								}, data)
-								emitExecuteStageDelta(emit, events.EventMeta{
-									SessionID: eventMeta.SessionID,
-									TraceID:   eventMeta.TraceID,
-									PlanID:    eventMeta.PlanID,
-									StepID:    eventMeta.StepID,
-									Iteration: eventMeta.Iteration,
-									Timestamp: eventMeta.Timestamp,
-								}, name, data)
-								return true
-							},
-						})
-						if execErr == nil && executed != nil {
-							emitStageDelta(emit, meta, "summary", "loading", "正在汇总执行证据并生成结论。", "", "")
-							summaryOut := o.summarizeExecution(ctx, message, decision.Plan, executed, func(chunk string) {
-								emitStageDelta(emit, meta, "summary", "loading", chunk, "", "")
-							})
-							emitEvent(emit, events.Summary, meta, map[string]any{
-								"output": summaryOut,
-							})
-							emitStageDelta(emit, meta, "summary", "success", firstNonEmpty(summaryOut.Summary, "已生成结构化结论。"), "", "")
-							if summaryOut.NeedMoreInvestigation && meta.Iteration < o.maxIters {
-								reason := ""
-								if summaryOut.ReplanHint != nil {
-									reason = summaryOut.ReplanHint.Reason
-								}
-								emitEvent(emit, events.ReplanStarted, meta, map[string]any{
-									"reason":           reason,
-									"previous_plan_id": executed.State.PlanID,
-								})
-							}
-							if body := o.renderAndEmitFinalAnswer(decision.Plan, executed, summaryOut, emit, meta); body != "" {
-								return body, nil
-							}
+					emitEvent(emit, events.Summary, meta, map[string]any{
+						"output": summaryOut,
+					})
+					emitStageDelta(emit, meta, "summary", summaryStageStatus(summaryErr), firstNonEmpty(summaryOut.Summary, summaryOut.Headline), "", "")
+					if summaryOut.NeedMoreInvestigation && meta.Iteration < o.maxIters {
+						reason := ""
+						if summaryOut.ReplanHint != nil {
+							reason = summaryOut.ReplanHint.Reason
 						}
+						emitEvent(emit, events.ReplanStarted, meta, map[string]any{
+							"reason":           reason,
+							"previous_plan_id": executed.State.PlanID,
+						})
+					}
+					if body := o.renderAndEmitFinalAnswer(decision.Plan, executed, summaryOut, emit, meta); body != "" {
+						return body, nil
 					}
 				}
 			}
 		}
 	}
-	reply, err := o.generateReply(ctx, message)
-	if err == nil {
-		emitDeltaChunks(emit, meta, reply)
-	}
-	return reply, err
+	return "", nil
 }
 
 func (o *Orchestrator) generateReply(ctx context.Context, message string) (string, error) {
@@ -500,6 +551,33 @@ func emitEvent(emit StreamEmitter, name events.Name, meta events.EventMeta, data
 		Meta:     meta.WithDefaults(),
 		Data:     data,
 	})
+}
+
+func (o *Orchestrator) startHeartbeat(ctx context.Context, emit StreamEmitter, meta events.EventMeta) func() {
+	if emit == nil || o == nil || o.heartbeatInterval <= 0 {
+		return func() {}
+	}
+	stop := make(chan struct{})
+	ticker := time.NewTicker(o.heartbeatInterval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stop:
+				return
+			case now := <-ticker.C:
+				emitEvent(emit, events.Heartbeat, meta, map[string]any{
+					"status":    "streaming",
+					"timestamp": now.UTC().Format(time.RFC3339),
+				})
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+	}
 }
 
 func emitStageDelta(emit StreamEmitter, meta events.EventMeta, stage, status, chunk, stepID, expert string) {
@@ -591,6 +669,38 @@ func emitDeltaChunks(emit StreamEmitter, meta events.EventMeta, content string) 
 	}
 }
 
+func rewriteFailureMessage(err error) string {
+	var unavailable *rewrite.ModelUnavailableError
+	if errors.As(err, &unavailable) {
+		return unavailable.UserVisibleMessage()
+	}
+	return availability.UnavailableMessage(availability.LayerRewrite)
+}
+
+func rewriteFailureCode(err error) string {
+	var unavailable *rewrite.ModelUnavailableError
+	if errors.As(err, &unavailable) && strings.TrimSpace(unavailable.Code) != "" {
+		return strings.TrimSpace(unavailable.Code)
+	}
+	return "rewrite_unavailable"
+}
+
+func plannerFailureMessage(err error) string {
+	var unavailable *planner.PlanningError
+	if errors.As(err, &unavailable) {
+		return unavailable.UserVisibleMessage()
+	}
+	return availability.UnavailableMessage(availability.LayerPlanner)
+}
+
+func plannerFailureCode(err error) string {
+	var unavailable *planner.PlanningError
+	if errors.As(err, &unavailable) && strings.TrimSpace(unavailable.Code) != "" {
+		return strings.TrimSpace(unavailable.Code)
+	}
+	return "planner_unavailable"
+}
+
 func eventsJSON(v any) (string, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -654,21 +764,21 @@ func resumeStatusMessage(status string, approved bool) string {
 	}
 }
 
-func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result, onDelta func(string)) summarizer.SummaryOutput {
+func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, plan *planner.ExecutionPlan, result *executor.Result, onDelta func(string)) (summarizer.SummaryOutput, error) {
 	if result == nil {
 		return summarizer.SummaryOutput{
-			Summary:   "当前执行结果不可用。",
-			Narrative: "Summarizer 未拿到 executor result，因此回退到保守总结。",
-		}
+			Summary:         "当前执行结果不可用。",
+			Headline:        "当前没有可用的执行结果",
+			Conclusion:      "当前无法生成 AI 总结，因为执行结果本身不可用。",
+			RawOutputPolicy: "summary_only",
+			Narrative:       "Summarizer 未拿到 executor result。",
+		}, errors.New("executor_result_unavailable")
 	}
 	if o.summarizer == nil {
-		fallback, _ := summarizer.New(nil).Summarize(context.Background(), summarizer.Input{
-			Message: message,
-			Plan:    plan,
-			State:   result.State,
-			Steps:   result.Steps,
-		})
-		return fallback
+		return summarizerUnavailableSummary(nil), &summarizer.UnavailableError{
+			Code:              "summarizer_runner_unavailable",
+			UserVisibleReason: availability.UnavailableMessage(availability.LayerSummarizer),
+		}
 	}
 	out, err := o.summarizer.SummarizeStream(ctx, summarizer.Input{
 		Message: message,
@@ -677,15 +787,33 @@ func (o *Orchestrator) summarizeExecution(ctx context.Context, message string, p
 		Steps:   result.Steps,
 	}, onDelta)
 	if err != nil {
-		fallback, _ := summarizer.New(nil).Summarize(context.Background(), summarizer.Input{
-			Message: message,
-			Plan:    plan,
-			State:   result.State,
-			Steps:   result.Steps,
-		})
-		return fallback
+		return summarizerUnavailableSummary(err), err
 	}
-	return out
+	return out, nil
+}
+
+func summarizerUnavailableSummary(err error) summarizer.SummaryOutput {
+	message := availability.UnavailableMessage(availability.LayerSummarizer)
+	var unavailable *summarizer.UnavailableError
+	if errors.As(err, &unavailable) {
+		message = unavailable.UserVisibleMessage()
+	}
+	return summarizer.SummaryOutput{
+		Summary:         message,
+		Headline:        "AI 总结模块当前不可用",
+		Conclusion:      "执行已经完成，但当前无法生成最终 AI 总结。请直接查看原始执行证据。",
+		KeyFindings:     []string{"本轮执行已完成，但总结阶段不可用。"},
+		Recommendations: []string{"查看原始执行证据"},
+		RawOutputPolicy: "include_evidence",
+		Narrative:       message,
+	}
+}
+
+func summaryStageStatus(err error) string {
+	if err != nil {
+		return "error"
+	}
+	return "success"
 }
 
 func toRewriteResources(items []SelectedResource) []rewrite.SelectedResource {

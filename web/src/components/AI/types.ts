@@ -90,6 +90,8 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   thinking?: string;
+  summaryOutput?: Record<string, unknown>;
+  rawEvidence?: string[];
   tools?: ToolExecution[];
   confirmation?: ConfirmationRequest;
   // 新增: 下一步推荐

@@ -84,14 +84,24 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	rollout := coreai.CurrentRolloutConfig()
+	c.Writer.Header().Set("X-AI-Runtime-Mode", rollout.RuntimeMode())
+	c.Writer.Header().Set("X-AI-Compatibility-Enabled", boolHeaderValue(rollout.CompatibilityEnabled()))
+	c.Writer.Header().Set("X-AI-Model-First-Enabled", boolHeaderValue(rollout.ModelFirstEnabled()))
 	c.Status(http.StatusOK)
 
 	scene := normalizedScene(req.Context["scene"])
 	recorder := newChatRecorder(h.chatStore, httpx.UIDFromCtx(c), scene, req.Message)
 	emit := func(evt coreai.StreamEvent) bool {
 		payload := evt.Data
+		if evt.Type == events.Meta {
+			payload = attachRolloutMetadata(cloneMap(payload), rollout)
+		}
 		if recorder != nil {
 			payload = cloneMap(evt.Data)
+			if evt.Type == events.Meta {
+				payload = attachRolloutMetadata(payload, rollout)
+			}
 			recorder.HandleEvent(c.Request.Context(), evt.Type, payload)
 			if evt.Type == events.Done {
 				if sessionPayload := recorder.SessionPayload(c.Request.Context()); sessionPayload != nil {
@@ -354,6 +364,12 @@ func toAPISession(snapshot aistate.ChatSessionRecord, includeMessages bool) v1.A
 			if len(msg.Recommendations) > 0 {
 				payload["recommendations"] = msg.Recommendations
 			}
+			if len(msg.SummaryOutput) > 0 {
+				payload["summaryOutput"] = msg.SummaryOutput
+			}
+			if len(msg.RawEvidence) > 0 {
+				payload["rawEvidence"] = msg.RawEvidence
+			}
 			msgs = append(msgs, map[string]any{
 				"id":              payload["id"],
 				"role":            payload["role"],
@@ -363,6 +379,8 @@ func toAPISession(snapshot aistate.ChatSessionRecord, includeMessages bool) v1.A
 				"traceId":         payload["traceId"],
 				"thoughtChain":    payload["thoughtChain"],
 				"recommendations": payload["recommendations"],
+				"summaryOutput":   payload["summaryOutput"],
+				"rawEvidence":     payload["rawEvidence"],
 				"timestamp":       payload["timestamp"],
 			})
 		}
@@ -407,6 +425,23 @@ func cloneMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func boolHeaderValue(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+func attachRolloutMetadata(payload map[string]any, rollout coreai.RolloutConfig) map[string]any {
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["runtime_mode"] = rollout.RuntimeMode()
+	payload["model_first_enabled"] = rollout.ModelFirstEnabled()
+	payload["compatibility_enabled"] = rollout.CompatibilityEnabled()
+	return payload
 }
 
 func normalizedScene(raw any) string {

@@ -17,10 +17,12 @@ func TestAIMetricsRecordRewriteQuality(t *testing.T) {
 		Narrative:      "structured rewrite",
 	})
 	metrics.RecordRewrite(rewrite.Output{
-		NormalizedGoal: "fallback rewrite",
-		OperationMode:  "query",
-		Narrative:      "fallback rewrite",
-		Assumptions:    []string{"rewrite_runner_unavailable"},
+		NormalizedGoal: "incident lookup",
+		OperationMode:  "investigate",
+		Narrative:      "incident lookup rewrite",
+		RetrievalQueries: []string{
+			"pod logs restart incidents",
+		},
 		AmbiguityFlags: []string{"namespace"},
 	})
 
@@ -31,8 +33,8 @@ func TestAIMetricsRecordRewriteQuality(t *testing.T) {
 	if snapshot.Rewrite.StructuredOutputs != 2 {
 		t.Fatalf("structured outputs = %d, want 2", snapshot.Rewrite.StructuredOutputs)
 	}
-	if snapshot.Rewrite.Fallbacks != 1 {
-		t.Fatalf("fallbacks = %d, want 1", snapshot.Rewrite.Fallbacks)
+	if snapshot.Rewrite.Fallbacks != 0 {
+		t.Fatalf("fallbacks = %d, want 0 after removing rewrite semantic fallback", snapshot.Rewrite.Fallbacks)
 	}
 	if snapshot.Rewrite.AmbiguousOutputs != 1 {
 		t.Fatalf("ambiguous outputs = %d, want 1", snapshot.Rewrite.AmbiguousOutputs)

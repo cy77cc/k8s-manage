@@ -14,6 +14,8 @@ export interface RestoredConversation {
     traceId?: string;
     thoughtChain?: ThoughtStageItem[];
     recommendations?: EmbeddedRecommendation[];
+    summaryOutput?: Record<string, unknown>;
+    rawEvidence?: string[];
     status?: string;
     createdAt: string;
   }>;
@@ -103,6 +105,8 @@ function toRestoredConversation(session: AISession): RestoredConversation {
       traceId: m.traceId,
       thoughtChain: (m.thoughtChain || []) as ThoughtStageItem[],
       recommendations: (m.recommendations || []) as EmbeddedRecommendation[],
+      summaryOutput: (m.summaryOutput || {}) as Record<string, unknown>,
+      rawEvidence: (m.rawEvidence || []) as string[],
       status: m.status,
       createdAt: m.timestamp,
     })),

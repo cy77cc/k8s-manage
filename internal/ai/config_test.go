@@ -4,14 +4,21 @@ import "testing"
 
 func TestRolloutDecisionRespectsThresholdsAndCompatibilityPath(t *testing.T) {
 	cfg := RolloutConfig{
-		UseMultiDomainArch: true,
-		UseAssistantV2:     true,
+		UseMultiDomainArch:   true,
+		UseAssistantV2:       true,
+		UseModelFirstRuntime: true,
 	}
 	if !cfg.AgenticEnabled() {
 		t.Fatalf("AgenticEnabled() = false, want true")
 	}
+	if !cfg.ModelFirstEnabled() {
+		t.Fatalf("ModelFirstEnabled() = false, want true")
+	}
 	if !cfg.CompatibilityEnabled() {
 		t.Fatalf("CompatibilityEnabled() = false, want true")
+	}
+	if cfg.RuntimeMode() != "model_first" {
+		t.Fatalf("RuntimeMode() = %q, want model_first", cfg.RuntimeMode())
 	}
 
 	thresholds := DefaultRolloutThresholds()
@@ -47,5 +54,25 @@ func TestRolloutDecisionDisabledWhenAgenticFlagOff(t *testing.T) {
 	}
 	if !cfg.CompatibilityEnabled() {
 		t.Fatalf("CompatibilityEnabled() = false, want true when agentic arch disabled")
+	}
+	if cfg.RuntimeMode() != "disabled" {
+		t.Fatalf("RuntimeMode() = %q, want disabled", cfg.RuntimeMode())
+	}
+}
+
+func TestRolloutCompatibilityModeSupportsLegacyFallbackFlag(t *testing.T) {
+	cfg := RolloutConfig{
+		UseMultiDomainArch:          true,
+		UseModelFirstRuntime:        false,
+		AllowLegacySemanticFallback: true,
+	}
+	if cfg.ModelFirstEnabled() {
+		t.Fatalf("ModelFirstEnabled() = true, want false")
+	}
+	if !cfg.CompatibilityEnabled() {
+		t.Fatalf("CompatibilityEnabled() = false, want true")
+	}
+	if cfg.RuntimeMode() != "compatibility" {
+		t.Fatalf("RuntimeMode() = %q, want compatibility", cfg.RuntimeMode())
 	}
 }

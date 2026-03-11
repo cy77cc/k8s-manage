@@ -143,10 +143,12 @@ type AI struct {
 }
 
 type FeatureFlags struct {
-	HostHealthDiagnostics   *bool `mapstructure:"host_health_diagnostics"`
-	HostMaintenanceMode     *bool `mapstructure:"host_maintenance_mode"`
-	AIGovernedHostExecution *bool `mapstructure:"ai_governed_host_execution"`
-	AIAssistantV2           *bool `mapstructure:"ai_assistant_v2"`
+	HostHealthDiagnostics    *bool `mapstructure:"host_health_diagnostics"`
+	HostMaintenanceMode      *bool `mapstructure:"host_maintenance_mode"`
+	AIGovernedHostExecution  *bool `mapstructure:"ai_governed_host_execution"`
+	AIAssistantV2            *bool `mapstructure:"ai_assistant_v2"`
+	AIModelFirstRuntime      *bool `mapstructure:"ai_model_first_runtime"`
+	AILegacySemanticFallback *bool `mapstructure:"ai_legacy_semantic_fallback"`
 }
 
 type Postgres struct {

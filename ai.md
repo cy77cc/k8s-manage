@@ -20,6 +20,12 @@ Core rule:
 - models decide and explain
 - runtime code schedules, persists, resumes, and enforces safety
 
+Rollout rule:
+
+- `feature_flags.ai_model_first_runtime=true` enables the model-first runtime contract
+- `feature_flags.ai_legacy_semantic_fallback=true` only marks compatibility mode for rollback operations
+- response metadata and SSE `meta` expose the active runtime mode as `model_first | compatibility | disabled`
+
 ## Layer Boundaries
 
 ### Gateway / Transport
@@ -68,12 +74,14 @@ Responsibilities:
 - normalize colloquial input
 - extract resource hints
 - preserve ambiguity flags
+- produce RAG-ready retrieval intent, queries, keywords, and knowledge scope
 
 Must not:
 
 - fabricate resource IDs
 - claim permission outcomes
 - claim execution conclusions
+- fall back to deterministic code understanding when the model is unavailable
 
 ### Planner
 
@@ -199,6 +207,13 @@ Design intent:
 - ThoughtChain consumes stage-oriented events
 - final body consumes `delta`
 - `tool_call` and `tool_result` are detail signals
+- `stage_delta` should carry model-stage output or explicit stage failure text, not host-generated placeholder prose
+
+Operational signals:
+
+- `heartbeat` is emitted every 10 seconds while the stream is active
+- `error` payloads carry `error_code`, `stage`, and `recoverable`
+- `meta` includes rollout state such as `runtime_mode`, `model_first_enabled`, and `compatibility_enabled`
 
 ## Frontend Integration
 

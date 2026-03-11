@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/cy77cc/OpsPilot/internal/ai/availability"
 	"github.com/cy77cc/OpsPilot/internal/ai/experts"
 	expertspec "github.com/cy77cc/OpsPilot/internal/ai/experts/spec"
 	"github.com/cy77cc/OpsPilot/internal/ai/planner"
@@ -55,9 +56,9 @@ func NewAgentStepRunner(ctx context.Context, model einomodel.BaseChatModel, regi
 func (r *AgentStepRunner) RunStep(ctx context.Context, req Request, step planner.PlanStep) (StepResult, error) {
 	if r == nil {
 		return StepResult{}, &ExecutionError{
-			Code:        "expert_tool_stream_failed",
+			Code:        "expert_runner_unavailable",
 			Message:     "expert step runner is not configured",
-			UserSummary: "专家执行链路未正确初始化，当前步骤无法执行。",
+			UserSummary: availability.UnavailableMessage(availability.LayerExpert),
 		}
 	}
 	agent, ok := r.agents[strings.TrimSpace(step.Expert)]
@@ -65,7 +66,7 @@ func (r *AgentStepRunner) RunStep(ctx context.Context, req Request, step planner
 		return StepResult{}, &ExecutionError{
 			Code:        "expert_not_registered",
 			Message:     fmt.Sprintf("expert %q is not registered", step.Expert),
-			UserSummary: fmt.Sprintf("未找到 %s 专家，无法执行该步骤。", strings.TrimSpace(step.Expert)),
+			UserSummary: fmt.Sprintf("未找到 %s 专家，当前无法执行该步骤。", strings.TrimSpace(step.Expert)),
 		}
 	}
 	raw, err := runExpertAgent(ctx, agent, buildExpertRequest(req, step))
@@ -78,7 +79,7 @@ func (r *AgentStepRunner) RunStep(ctx context.Context, req Request, step planner
 		return StepResult{}, &ExecutionError{
 			Code:        "expert_result_invalid",
 			Message:     err.Error(),
-			UserSummary: "专家已执行，但返回结果格式不符合协议。",
+			UserSummary: availability.InvalidOutputMessage(availability.LayerExpert),
 		}
 	}
 	return StepResult{
@@ -154,8 +155,8 @@ Guardrails:
 - You MUST NOT fabricate resource IDs, permissions, tool results, logs, or execution outcomes.
 - You MUST distinguish observed facts from inferred conclusions.
 - If the available evidence is incomplete, say so explicitly in inferences or next_actions.
-- When you are done, call emit_expert_result exactly once.
-- Do not return the final result as plain text.
+- Prefer calling emit_expert_result exactly once with structured JSON.
+- If structured emission fails, return a compact half-structured result that clearly separates summary, observed facts, inferences, and next actions.
 
 Expert capabilities:
 %s
@@ -190,12 +191,85 @@ func parseExpertResult(raw string) (expertResult, error) {
 	}
 	var out expertResult
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return expertResult{}, fmt.Errorf("expert returned non-JSON output: %w", err)
+		recovered, recoverErr := recoverHalfStructuredExpertResult(raw)
+		if recoverErr != nil {
+			return expertResult{}, fmt.Errorf("expert returned non-JSON output: %w", err)
+		}
+		return recovered, nil
 	}
 	if strings.TrimSpace(out.Summary) == "" && strings.TrimSpace(out.Narrative) == "" {
-		return expertResult{}, fmt.Errorf("expert result is missing summary and narrative")
+		recovered, err := recoverHalfStructuredExpertResult(raw)
+		if err != nil {
+			return expertResult{}, fmt.Errorf("expert result is missing summary and narrative")
+		}
+		return recovered, nil
 	}
 	return out, nil
+}
+
+func recoverHalfStructuredExpertResult(raw string) (expertResult, error) {
+	lines := splitNonEmptyLines(raw)
+	if len(lines) == 0 {
+		return expertResult{}, fmt.Errorf("expert returned empty text")
+	}
+	out := expertResult{
+		Summary:   lines[0],
+		Narrative: strings.TrimSpace(raw),
+	}
+	for _, line := range lines[1:] {
+		normalized := strings.TrimLeft(strings.TrimSpace(line), "-* ")
+		switch {
+		case hasAnyPrefix(normalized, "observed:", "observed facts:", "事实:", "观察:"):
+			out.ObservedFacts = append(out.ObservedFacts, trimSectionPrefix(normalized))
+		case hasAnyPrefix(normalized, "inference:", "inferences:", "推断:", "判断:"):
+			out.Inferences = append(out.Inferences, trimSectionPrefix(normalized))
+		case hasAnyPrefix(normalized, "next:", "next actions:", "建议:", "后续:"):
+			out.NextActions = append(out.NextActions, trimSectionPrefix(normalized))
+		default:
+			if out.Summary == "" {
+				out.Summary = normalized
+				continue
+			}
+			out.ObservedFacts = append(out.ObservedFacts, normalized)
+		}
+	}
+	if strings.TrimSpace(out.Summary) == "" {
+		out.Summary = lines[0]
+	}
+	return out, nil
+}
+
+func splitNonEmptyLines(raw string) []string {
+	parts := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+func hasAnyPrefix(value string, prefixes ...string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(value, strings.ToLower(strings.TrimSpace(prefix))) {
+			return true
+		}
+	}
+	return false
+}
+
+func trimSectionPrefix(value string) string {
+	value = strings.TrimSpace(value)
+	for _, prefix := range []string{"observed:", "observed facts:", "事实:", "观察:", "inference:", "inferences:", "推断:", "判断:", "next:", "next actions:", "建议:", "后续:"} {
+		if strings.HasPrefix(strings.ToLower(value), strings.ToLower(prefix)) {
+			return strings.TrimSpace(value[len(prefix):])
+		}
+	}
+	return value
 }
 
 type expertDecision struct {
@@ -311,9 +385,9 @@ func classifyExpertRunError(step planner.PlanStep, err error) error {
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || isProviderTimeoutError(err.Error()) {
 		return &ExecutionError{
-			Code:        "expert_tool_stream_failed",
+			Code:        "expert_model_unavailable",
 			Message:     compactToolError(err.Error()),
-			UserSummary: fmt.Sprintf("专家 %s 调用模型超时，请稍后重试。", strings.TrimSpace(step.Expert)),
+			UserSummary: availability.UnavailableMessage(availability.LayerExpert),
 		}
 	}
 	return &ExecutionError{

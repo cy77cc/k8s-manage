@@ -23,6 +23,8 @@ type ChatMessageMetadata struct {
 	ThoughtChain    []map[string]any `json:"thoughtChain,omitempty"`
 	TraceID         string           `json:"traceId,omitempty"`
 	Recommendations []map[string]any `json:"recommendations,omitempty"`
+	SummaryOutput   map[string]any   `json:"summaryOutput,omitempty"`
+	RawEvidence     []string         `json:"rawEvidence,omitempty"`
 }
 
 type ChatMessageRecord struct {
@@ -34,6 +36,8 @@ type ChatMessageRecord struct {
 	ThoughtChain    []map[string]any
 	TraceID         string
 	Recommendations []map[string]any
+	SummaryOutput   map[string]any
+	RawEvidence     []string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -135,6 +139,8 @@ func (s *ChatStore) UpdateAssistantMessage(ctx context.Context, sessionID, messa
 		ThoughtChain:    patch.ThoughtChain,
 		TraceID:         strings.TrimSpace(patch.TraceID),
 		Recommendations: patch.Recommendations,
+		SummaryOutput:   patch.SummaryOutput,
+		RawEvidence:     patch.RawEvidence,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal assistant metadata: %w", err)
@@ -203,6 +209,8 @@ func (s *ChatStore) Clone(ctx context.Context, userID uint64, fromID, toID, titl
 				ThoughtChain:    msg.ThoughtChain,
 				TraceID:         msg.TraceID,
 				Recommendations: msg.Recommendations,
+				SummaryOutput:   msg.SummaryOutput,
+				RawEvidence:     msg.RawEvidence,
 			})
 			if err != nil {
 				return err
@@ -310,6 +318,8 @@ func (s *ChatStore) GetSession(ctx context.Context, userID uint64, scene, sessio
 			ThoughtChain:    meta.ThoughtChain,
 			TraceID:         meta.TraceID,
 			Recommendations: meta.Recommendations,
+			SummaryOutput:   meta.SummaryOutput,
+			RawEvidence:     meta.RawEvidence,
 			CreatedAt:       msg.CreatedAt,
 			UpdatedAt:       msg.UpdatedAt,
 		})

@@ -1,8 +1,6 @@
 package ai
 
 import (
-	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/cy77cc/OpsPilot/internal/ai/executor"
@@ -18,223 +16,62 @@ func newFinalAnswerRenderer() *finalAnswerRenderer {
 
 func (r *finalAnswerRenderer) Render(message string, plan *planner.ExecutionPlan, result *executor.Result, summaryOut summarizer.SummaryOutput) []string {
 	_ = message
-	if result == nil {
-		return compactParagraphs([]string{
-			sanitizeAnswerText(firstNonEmpty(summaryOut.Headline, "本轮执行已结束")),
-			sanitizeAnswerText(firstNonEmpty(summaryOut.Conclusion, summaryOut.Summary)),
-		})
-	}
-	if looksLikeFleetHostStatus(plan, result) {
-		return r.renderFleetHostStatus(summaryOut, result)
-	}
-	return r.renderGeneric(summaryOut, result)
-}
+	_ = plan
 
-func (r *finalAnswerRenderer) renderGeneric(summaryOut summarizer.SummaryOutput, result *executor.Result) []string {
-	headline := chooseGenericHeadline(summaryOut, result)
 	paragraphs := []string{}
+	headline := sanitizeAnswerText(firstNonEmpty(summaryOut.Headline, summaryOut.Summary))
 	if headline != "" {
 		paragraphs = append(paragraphs, headline)
 	}
-	findings := append([]string(nil), summaryOut.KeyFindings...)
-	findings = append(findings, summaryOut.ResourceSummaries...)
-	findings = append(findings, importantObservedFacts(result, 3)...)
-	findings = sanitizeLines(findings)
-	findings = filterBoilerplateFindings(findings)
+	conclusion := sanitizeAnswerText(firstNonEmpty(summaryOut.Conclusion, summaryOut.Summary))
+	if conclusion != "" && conclusion != headline {
+		paragraphs = append(paragraphs, conclusion)
+	}
+
+	findings := sanitizeLines(append(append([]string(nil), summaryOut.KeyFindings...), summaryOut.ResourceSummaries...))
 	if len(findings) > 0 {
 		paragraphs = append(paragraphs, "关键依据：\n- "+strings.Join(findings, "\n- "))
 	}
-	recommendations := sanitizeLines(summaryOut.Recommendations)
-	if len(recommendations) == 0 {
-		recommendations = sanitizeLines(summaryOut.NextActions)
-	}
-	recommendations = filterBoilerplateRecommendations(recommendations)
-	if len(recommendations) > 0 {
-		paragraphs = append(paragraphs, "建议：\n- "+strings.Join(recommendations, "\n- "))
-	}
-	return compactParagraphs(paragraphs)
-}
-
-func (r *finalAnswerRenderer) renderFleetHostStatus(summaryOut summarizer.SummaryOutput, result *executor.Result) []string {
-	items := extractHostInventoryEntries(result)
-	if len(items) == 0 {
-		return r.renderGeneric(summaryOut, result)
-	}
-	total := len(items)
-	abnormal := 0
-	for _, item := range items {
-		if !isHealthyHost(item) {
-			abnormal++
-		}
-	}
-
-	headline := sanitizeAnswerText(firstNonEmpty(summaryOut.Headline, "已完成主机状态汇总"))
-	if abnormal == 0 {
-		headline = fmt.Sprintf("共检查 %d 台主机，当前均运行正常。", total)
-	} else {
-		headline = fmt.Sprintf("共检查 %d 台主机，其中 %d 台需要重点关注。", total, abnormal)
-	}
-
-	paragraphs := []string{headline}
-
-	top := summarizeTopHosts(items, abnormal == 0)
-	if len(top) > 0 {
-		paragraphs = append(paragraphs, "关键依据：\n- "+strings.Join(top, "\n- "))
-	}
 
 	recommendations := sanitizeLines(summaryOut.Recommendations)
-	if abnormal == 0 {
-		recommendations = filterRoutineRestartAdvice(recommendations)
-		if len(recommendations) == 0 {
-			recommendations = []string{"当前无需额外处理，继续保持常规巡检即可。"}
-		}
-	}
 	if len(recommendations) == 0 {
 		recommendations = sanitizeLines(summaryOut.NextActions)
 	}
 	if len(recommendations) > 0 {
 		paragraphs = append(paragraphs, "建议：\n- "+strings.Join(recommendations, "\n- "))
 	}
+
+	if shouldIncludeEvidence(summaryOut) {
+		evidence := collectEvidenceLines(result, 6)
+		if len(evidence) > 0 {
+			paragraphs = append(paragraphs, "原始执行证据：\n- "+strings.Join(evidence, "\n- "))
+		}
+	}
 	return compactParagraphs(paragraphs)
 }
 
-type hostInventoryEntry struct {
-	ID       int
-	Name     string
-	IP       string
-	Status   string
-	CPUCores int
-	MemoryMB int
-	DiskGB   int
+func shouldIncludeEvidence(summaryOut summarizer.SummaryOutput) bool {
+	policy := strings.ToLower(strings.TrimSpace(summaryOut.RawOutputPolicy))
+	return policy == "include_evidence" || policy == "raw_evidence"
 }
 
-func looksLikeFleetHostStatus(plan *planner.ExecutionPlan, result *executor.Result) bool {
-	if plan == nil || result == nil || len(result.Steps) == 0 {
-		return false
-	}
-	scope := plan.Resolved.Scope
-	if scope == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(scope.ResourceType), "host") &&
-		strings.TrimSpace(scope.Kind) == "all"
-}
-
-func extractHostInventoryEntries(result *executor.Result) []hostInventoryEntry {
-	if result == nil {
-		return nil
-	}
-	var out []hostInventoryEntry
-	for _, step := range result.Steps {
-		for _, evidence := range step.Evidence {
-			if evidence.Source != "hostops" && evidence.Source != "host_list_inventory" {
-				continue
-			}
-			data := evidence.Data
-			if data == nil {
-				continue
-			}
-			list, ok := data["list"].([]map[string]any)
-			if !ok {
-				if raw, okAny := data["list"].([]any); okAny {
-					list = make([]map[string]any, 0, len(raw))
-					for _, item := range raw {
-						if row, okRow := item.(map[string]any); okRow {
-							list = append(list, row)
-						}
-					}
-				}
-			}
-			for _, item := range list {
-				out = append(out, hostInventoryEntry{
-					ID:       looseInt(item["id"]),
-					Name:     firstNonEmpty(asString(item["name"]), asString(item["hostname"]), asString(item["ip"])),
-					IP:       asString(item["ip"]),
-					Status:   asString(item["status"]),
-					CPUCores: looseInt(item["cpu_cores"]),
-					MemoryMB: looseInt(item["memory_mb"]),
-					DiskGB:   looseInt(item["disk_gb"]),
-				})
-			}
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
-func isHealthyHost(item hostInventoryEntry) bool {
-	status := strings.ToLower(strings.TrimSpace(item.Status))
-	return status == "" || status == "online" || status == "healthy"
-}
-
-func summarizeTopHosts(items []hostInventoryEntry, allHealthy bool) []string {
-	if len(items) == 0 {
-		return nil
-	}
-	picked := items
-	if allHealthy && len(picked) > 3 {
-		picked = picked[:3]
-	}
-	lines := make([]string, 0, len(picked)+1)
-	for _, item := range picked {
-		line := firstNonEmpty(item.Name, item.IP)
-		if line == "" {
-			line = fmt.Sprintf("主机 %d", item.ID)
-		}
-		parts := []string{}
-		if item.Status != "" {
-			parts = append(parts, "状态 "+item.Status)
-		}
-		if item.CPUCores > 0 {
-			parts = append(parts, fmt.Sprintf("CPU %d 核", item.CPUCores))
-		}
-		if item.MemoryMB > 0 {
-			parts = append(parts, fmt.Sprintf("内存 %.1f GB", float64(item.MemoryMB)/1024.0))
-		}
-		if item.DiskGB > 0 {
-			parts = append(parts, fmt.Sprintf("磁盘 %d GB", item.DiskGB))
-		}
-		if len(parts) > 0 {
-			line += "：" + strings.Join(parts, "，")
-		}
-		lines = append(lines, line)
-	}
-	if allHealthy && len(items) > len(picked) {
-		lines = append(lines, fmt.Sprintf("其余 %d 台主机状态一致，未见需要单独展开的异常。", len(items)-len(picked)))
-	}
-	return lines
-}
-
-func filterRoutineRestartAdvice(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, item := range in {
-		text := strings.TrimSpace(item)
-		if text == "" {
-			continue
-		}
-		lower := strings.ToLower(text)
-		if strings.Contains(text, "重启") && !strings.Contains(text, "异常") && !strings.Contains(text, "补丁") && !strings.Contains(text, "升级") {
-			continue
-		}
-		if strings.Contains(lower, "maintenance window") && !strings.Contains(text, "补丁") {
-			continue
-		}
-		out = append(out, text)
-	}
-	return out
-}
-
-func importantObservedFacts(result *executor.Result, limit int) []string {
+func collectEvidenceLines(result *executor.Result, limit int) []string {
 	if result == nil || limit <= 0 {
 		return nil
 	}
-	var out []string
+	out := make([]string, 0, limit)
 	for _, step := range result.Steps {
+		if summary := sanitizeAnswerText(step.Summary); summary != "" {
+			out = append(out, summary)
+			if len(out) >= limit {
+				return dedupeStrings(out)
+			}
+		}
 		for _, evidence := range step.Evidence {
 			facts, ok := evidence.Data["observed_facts"].([]string)
 			if ok {
 				for _, fact := range facts {
-					fact = strings.TrimSpace(fact)
+					fact = sanitizeAnswerText(fact)
 					if fact == "" {
 						continue
 					}
@@ -247,7 +84,7 @@ func importantObservedFacts(result *executor.Result, limit int) []string {
 			}
 			if rawFacts, ok := evidence.Data["observed_facts"].([]any); ok {
 				for _, fact := range rawFacts {
-					text := strings.TrimSpace(asString(fact))
+					text := sanitizeAnswerText(asString(fact))
 					if text == "" {
 						continue
 					}
@@ -295,80 +132,6 @@ func sanitizeAnswerText(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func chooseGenericHeadline(summaryOut summarizer.SummaryOutput, result *executor.Result) string {
-	candidates := []string{
-		sanitizeAnswerText(summaryOut.Headline),
-		sanitizeAnswerText(summaryOut.Conclusion),
-		sanitizeAnswerText(summaryOut.Summary),
-	}
-	for _, item := range candidates {
-		if isBoilerplateHeadline(item) {
-			continue
-		}
-		if item != "" {
-			return item
-		}
-	}
-	facts := filterBoilerplateFindings(sanitizeLines(importantObservedFacts(result, 1)))
-	if len(facts) > 0 {
-		return facts[0]
-	}
-	return ""
-}
-
-func filterBoilerplateFindings(items []string) []string {
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		if isBoilerplateFinding(item) {
-			continue
-		}
-		out = append(out, item)
-	}
-	return dedupeStrings(out)
-}
-
-func filterBoilerplateRecommendations(items []string) []string {
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		if isBoilerplateRecommendation(item) {
-			continue
-		}
-		out = append(out, item)
-	}
-	return dedupeStrings(out)
-}
-
-func isBoilerplateHeadline(text string) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return true
-	}
-	switch text {
-	case "已完成本轮排查", "已完成本轮执行汇总", "本轮执行已结束，结果已交给 Summarizer 生成结构化结论。":
-		return true
-	}
-	return strings.Contains(text, "可继续查看正文回答") || strings.Contains(text, "结构化结论")
-}
-
-func isBoilerplateFinding(text string) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return true
-	}
-	if strings.HasPrefix(text, "已完成步骤 ") || strings.HasPrefix(text, "收集执行证据 ") {
-		return true
-	}
-	return text == "当前结果已完成结构化汇总。"
-}
-
-func isBoilerplateRecommendation(text string) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return true
-	}
-	return text == "查看最终结论正文"
-}
-
 func compactParagraphs(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, item := range in {
@@ -403,20 +166,5 @@ func asString(v any) string {
 		return strings.TrimSpace(x)
 	default:
 		return ""
-	}
-}
-
-func looseInt(v any) int {
-	switch x := v.(type) {
-	case int:
-		return x
-	case int64:
-		return int(x)
-	case float64:
-		return int(x)
-	case float32:
-		return int(x)
-	default:
-		return 0
 	}
 }

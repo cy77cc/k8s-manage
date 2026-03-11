@@ -22,6 +22,15 @@ describe('normalizeAssistantMessage', () => {
 
     expect(blocks.map((block) => block.type)).toEqual(['thinking', 'markdown', 'recommendations']);
   });
+
+  it('includes raw evidence as a dedicated render block', () => {
+    const blocks = normalizeAssistantMessage({
+      content: 'final answer',
+      rawEvidence: ['step output 1', 'step output 2'],
+    });
+
+    expect(blocks.map((block) => block.type)).toEqual(['markdown', 'raw_evidence']);
+  });
 });
 
 describe('AssistantMessageBlocks', () => {

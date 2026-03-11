@@ -140,6 +140,12 @@ func CheckStartupModelHealth(ctx context.Context) []StartupModelHealthResult {
 			factory: NewRewriteChatModel,
 		},
 		{
+			name: "expert",
+			factory: func(ctx context.Context) (einomodel.BaseChatModel, error) {
+				return NewToolCallingChatModel(ctx)
+			},
+		},
+		{
 			name:    "summarizer",
 			factory: NewSummarizerChatModel,
 		},

@@ -2,55 +2,30 @@ package planner
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/cy77cc/OpsPilot/internal/ai/rewrite"
 )
 
-func TestPlanFallsBackToMinimalPlan(t *testing.T) {
-	out, err := New(nil).Plan(context.Background(), Input{
+func TestPlanReturnsUnavailableWhenRunnerMissing(t *testing.T) {
+	_, err := New(nil).Plan(context.Background(), Input{
 		Message: "查看所有主机的状态",
 		Rewrite: rewrite.Output{
 			NormalizedGoal: "查看所有主机的状态",
 			OperationMode:  "query",
-			NormalizedRequest: rewrite.NormalizedRequest{
-				Intent: "service_health_check",
-				Targets: []rewrite.RequestTarget{
-					{Type: "host", Name: "all"},
-				},
-			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Plan() error = %v", err)
+	if err == nil {
+		t.Fatalf("Plan() error = nil, want PlanningError")
 	}
-	if out.Type != DecisionPlan {
-		t.Fatalf("Type = %s, want %s", out.Type, DecisionPlan)
+	var planningErr *PlanningError
+	if !errors.As(err, &planningErr) {
+		t.Fatalf("Plan() error = %v, want PlanningError", err)
 	}
-	if out.Plan == nil || len(out.Plan.Steps) != 1 {
-		t.Fatalf("Plan = %#v", out.Plan)
-	}
-	if out.Plan.Steps[0].Expert != "hostops" {
-		t.Fatalf("Expert = %q, want hostops", out.Plan.Steps[0].Expert)
-	}
-	if !strings.Contains(out.Plan.Steps[0].Task, "主机") || !strings.Contains(out.Plan.Steps[0].Task, "状态") {
-		t.Fatalf("Task = %q, want canonical host inventory task", out.Plan.Steps[0].Task)
-	}
-	if out.Plan.Resolved.Scope == nil {
-		t.Fatalf("Resolved.Scope is nil")
-	}
-	if out.Plan.Resolved.Scope.Kind != "all" || out.Plan.Resolved.Scope.ResourceType != "host" {
-		t.Fatalf("Resolved.Scope = %#v, want all host scope", out.Plan.Resolved.Scope)
-	}
-	if got := looseStringValue(out.Plan.Steps[0].Input["scope"].(map[string]any)["resource_type"]); got != "host" {
-		t.Fatalf("step scope resource_type = %q, want host", got)
-	}
-	if got := looseStringValue(out.Plan.Steps[0].Input["query_mode"]); got != "inventory" {
-		t.Fatalf("step query_mode = %q, want inventory", got)
-	}
-	if got := out.Plan.Steps[0].Intent; got != "list_host_inventory" {
-		t.Fatalf("step intent = %q, want list_host_inventory", got)
+	if planningErr.Code != "planner_runner_unavailable" {
+		t.Fatalf("Code = %q, want planner_runner_unavailable", planningErr.Code)
 	}
 }
 
@@ -73,19 +48,31 @@ func TestPlanFallsBackToClarifyWhenRewriteStillAmbiguous(t *testing.T) {
 }
 
 func TestNormalizeDecisionDoesNotPanicWhenBaseHasNoPlan(t *testing.T) {
-	base := Decision{
-		Type:      DecisionClarify,
-		Message:   "need more info",
-		Narrative: "clarify first",
-	}
+	base := &ExecutionPlan{}
 	parsed := Decision{
 		Type: DecisionPlan,
 		Plan: &ExecutionPlan{
-			Goal: "check mysql-0",
+			PlanID: "plan-0",
+			Goal:   "check mysql-0",
+			Steps: []PlanStep{{
+				StepID: "step-1",
+				Title:  "检查 Pod 状态",
+				Expert: "k8s",
+				Task:   "check mysql-0",
+				Mode:   "readonly",
+				Risk:   "low",
+				Input: map[string]any{
+					"cluster_id": 1,
+					"pod":        "mysql-0",
+				},
+			}},
 		},
 	}
 
-	out := normalizeDecision(base, parsed)
+	out, err := normalizeDecision(base, parsed)
+	if err != nil {
+		t.Fatalf("normalizeDecision() error = %v", err)
+	}
 	if out.Plan == nil {
 		t.Fatalf("Plan is nil")
 	}
@@ -101,14 +88,17 @@ func TestParseDecisionAcceptsNumericStepIDsAndNormalizesPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseDecision() error = %v", err)
 	}
-	base := buildBaseDecision(Input{
+	base := buildBasePlanContext(Input{
 		Message: "查看 mysql-0 pod 最近 100 条日志并分析运行状况",
 		Rewrite: rewrite.Output{
 			NormalizedGoal: "查看 mysql-0 pod 最近 100 条日志并分析运行状况",
 			OperationMode:  "query",
 		},
 	})
-	out := normalizeDecision(base, parsed)
+	out, err := normalizeDecision(base, parsed)
+	if err != nil {
+		t.Fatalf("normalizeDecision() error = %v", err)
+	}
 	if out.Plan == nil {
 		t.Fatalf("normalized plan is nil")
 	}
@@ -121,8 +111,8 @@ func TestParseDecisionAcceptsNumericStepIDsAndNormalizesPlan(t *testing.T) {
 	if got := out.Plan.Steps[0].Mode; got != "readonly" {
 		t.Fatalf("step 1 mode = %q, want readonly", got)
 	}
-	if got := out.Plan.Steps[1].Expert; got != "k8s" {
-		t.Fatalf("step 2 expert = %q, want k8s", got)
+	if got := out.Plan.Steps[1].Expert; got != "analysis" {
+		t.Fatalf("step 2 expert = %q, want analysis preserved", got)
 	}
 	if len(out.Plan.Steps[1].DependsOn) != 1 || out.Plan.Steps[1].DependsOn[0] != "1" {
 		t.Fatalf("step 2 depends_on = %#v", out.Plan.Steps[1].DependsOn)
@@ -138,8 +128,8 @@ func TestParseDecisionAcceptsNumericStepIDsAndNormalizesPlan(t *testing.T) {
 	}
 }
 
-func TestNormalizeDecisionClarifiesWhenK8sPlanMissesClusterContext(t *testing.T) {
-	base := buildBaseDecision(Input{
+func TestNormalizeDecisionReturnsPlanningInvalidWhenK8sPlanMissesClusterContext(t *testing.T) {
+	base := buildBasePlanContext(Input{
 		Message: "查看 mysql-0 pod 最近 100 条日志",
 		Rewrite: rewrite.Output{
 			NormalizedGoal: "查看 mysql-0 pod 最近 100 条日志",
@@ -162,17 +152,21 @@ func TestNormalizeDecisionClarifiesWhenK8sPlanMissesClusterContext(t *testing.T)
 		},
 	}
 
-	out := normalizeDecision(base, parsed)
-	if out.Type != DecisionClarify {
-		t.Fatalf("Type = %s, want %s", out.Type, DecisionClarify)
+	_, err := normalizeDecision(base, parsed)
+	if err == nil {
+		t.Fatalf("normalizeDecision() error = nil, want PlanningError")
 	}
-	if out.Message == "" {
-		t.Fatalf("clarify message is empty")
+	var planningErr *PlanningError
+	if !errors.As(err, &planningErr) {
+		t.Fatalf("normalizeDecision() error = %v, want PlanningError", err)
+	}
+	if planningErr.Code != "planning_invalid" {
+		t.Fatalf("Code = %q, want planning_invalid", planningErr.Code)
 	}
 }
 
 func TestNormalizeDecisionPropagatesSelectedResourceIDsIntoStepInput(t *testing.T) {
-	base := buildBaseDecision(Input{
+	base := buildBasePlanContext(Input{
 		Message: "发布 payment-api 到 prod 集群",
 		Rewrite: rewrite.Output{
 			NormalizedGoal: "发布 payment-api 到 prod 集群",
@@ -201,7 +195,10 @@ func TestNormalizeDecisionPropagatesSelectedResourceIDsIntoStepInput(t *testing.
 		},
 	}
 
-	out := normalizeDecision(base, parsed)
+	out, err := normalizeDecision(base, parsed)
+	if err != nil {
+		t.Fatalf("normalizeDecision() error = %v", err)
+	}
 	if out.Type != DecisionPlan || out.Plan == nil {
 		t.Fatalf("unexpected decision: %#v", out)
 	}
@@ -220,7 +217,7 @@ func TestNormalizeDecisionKeepsValidK8sPlanFromModelOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseDecision() error = %v", err)
 	}
-	base := buildBaseDecision(Input{
+	base := buildBasePlanContext(Input{
 		Message: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志，分析运行状况",
 		Rewrite: rewrite.Output{
 			NormalizedGoal: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志，分析运行状况",
@@ -237,7 +234,10 @@ func TestNormalizeDecisionKeepsValidK8sPlanFromModelOutput(t *testing.T) {
 		},
 	})
 
-	out := normalizeDecision(base, parsed)
+	out, err := normalizeDecision(base, parsed)
+	if err != nil {
+		t.Fatalf("normalizeDecision() error = %v", err)
+	}
 	if out.Type != DecisionPlan {
 		t.Fatalf("Type = %s, want %s", out.Type, DecisionPlan)
 	}
@@ -255,8 +255,8 @@ func TestNormalizeDecisionKeepsValidK8sPlanFromModelOutput(t *testing.T) {
 	}
 }
 
-func TestNormalizeDecisionCanonicalizesFleetHostStatusStep(t *testing.T) {
-	base := buildBaseDecision(Input{
+func TestNormalizeDecisionPreservesFleetHostStepSemantics(t *testing.T) {
+	base := buildBasePlanContext(Input{
 		Message: "查看所有主机状态",
 		Rewrite: rewrite.Output{
 			NormalizedGoal: "查看所有主机状态",
@@ -278,9 +278,9 @@ func TestNormalizeDecisionCanonicalizesFleetHostStatusStep(t *testing.T) {
 			},
 			Steps: []PlanStep{{
 				StepID: "step-1",
-				Title:  "处理用户请求",
+				Title:  "查询所有主机状态",
 				Expert: "hostops",
-				Intent: "handle_request",
+				Intent: "inventory_scan",
 				Task:   "query all hosts",
 				Mode:   "readonly",
 				Risk:   "low",
@@ -291,19 +291,19 @@ func TestNormalizeDecisionCanonicalizesFleetHostStatusStep(t *testing.T) {
 		},
 	}
 
-	out := normalizeDecision(base, parsed)
+	out, err := normalizeDecision(base, parsed)
+	if err != nil {
+		t.Fatalf("normalizeDecision() error = %v", err)
+	}
 	if out.Type != DecisionPlan || out.Plan == nil {
 		t.Fatalf("unexpected decision: %#v", out)
 	}
 	step := out.Plan.Steps[0]
-	if got := step.Intent; got != "list_host_inventory" {
-		t.Fatalf("step intent = %q, want list_host_inventory", got)
+	if got := step.Intent; got != "inventory_scan" {
+		t.Fatalf("step intent = %q, want inventory_scan preserved", got)
 	}
-	if got := looseStringValue(step.Input["query_mode"]); got != "inventory" {
-		t.Fatalf("step query_mode = %q, want inventory", got)
-	}
-	if strings.TrimSpace(step.Task) == "query all hosts" {
-		t.Fatalf("step task = %q, want canonical inventory task", step.Task)
+	if strings.TrimSpace(step.Task) != "query all hosts" {
+		t.Fatalf("step task = %q, want model task preserved", step.Task)
 	}
 }
 
@@ -325,7 +325,7 @@ func TestPickPrimaryExpertPrefersHostContextOverMisleadingDomainHint(t *testing.
 }
 
 func TestBuildBaseDecisionCarriesPodTargetIntoResolvedResources(t *testing.T) {
-	out := buildBaseDecision(Input{
+	out := buildBasePlanContext(Input{
 		Message: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志",
 		Rewrite: rewrite.Output{
 			NormalizedGoal: "查看 local 集群 kube-system 空间下的 cilium-87f2m 最近 100 条日志",
@@ -341,20 +341,21 @@ func TestBuildBaseDecisionCarriesPodTargetIntoResolvedResources(t *testing.T) {
 			},
 		},
 	})
-	if out.Plan == nil {
+	if out == nil {
 		t.Fatalf("base plan is nil")
 	}
-	if got := out.Plan.Resolved.PodName; got != "cilium-87f2m" {
+	if got := out.Resolved.PodName; got != "cilium-87f2m" {
 		t.Fatalf("pod name = %q, want cilium-87f2m", got)
 	}
-	if len(out.Plan.Resolved.Pods) != 1 || out.Plan.Resolved.Pods[0].Name != "cilium-87f2m" {
-		t.Fatalf("pods = %#v, want cilium-87f2m", out.Plan.Resolved.Pods)
+	if len(out.Resolved.Pods) != 1 || out.Resolved.Pods[0].Name != "cilium-87f2m" {
+		t.Fatalf("pods = %#v, want cilium-87f2m", out.Resolved.Pods)
 	}
 }
 
 func TestValidatePlanPrerequisitesUsesStructuredTargetTypeInsteadOfKeyword(t *testing.T) {
 	plan := &ExecutionPlan{
 		PlanID: "plan-4",
+		Goal:   "读取最近 100 条日志",
 		Resolved: ResolvedResources{
 			ClusterID: 3,
 		},
@@ -373,9 +374,8 @@ func TestValidatePlanPrerequisitesUsesStructuredTargetTypeInsteadOfKeyword(t *te
 		}},
 	}
 
-	out := validatePlanPrerequisites(plan)
-	if out.Type != "" {
-		t.Fatalf("Type = %s, want empty decision", out.Type)
+	if err := validatePlanPrerequisites(plan); err != nil {
+		t.Fatalf("validatePlanPrerequisites() error = %v, want nil", err)
 	}
 }
 
@@ -386,7 +386,7 @@ func TestParseDecisionAcceptsResolvedScopeForFleetTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseDecision() error = %v", err)
 	}
-	out := normalizeDecision(buildBaseDecision(Input{
+	out, err := normalizeDecision(buildBasePlanContext(Input{
 		Message: "查看所有主机状态",
 		Rewrite: rewrite.Output{
 			NormalizedGoal: "查看所有主机状态",
@@ -396,14 +396,17 @@ func TestParseDecisionAcceptsResolvedScopeForFleetTargets(t *testing.T) {
 			},
 		},
 	}), parsed)
+	if err != nil {
+		t.Fatalf("normalizeDecision() error = %v", err)
+	}
 	if out.Type != DecisionPlan || out.Plan == nil {
 		t.Fatalf("unexpected decision: %#v", out)
 	}
 	if out.Plan.Resolved.Scope == nil || out.Plan.Resolved.Scope.ResourceType != "host" {
 		t.Fatalf("scope = %#v, want host scope", out.Plan.Resolved.Scope)
 	}
-	if clarify := validatePlanPrerequisites(out.Plan); clarify.Type != "" {
-		t.Fatalf("unexpected clarify: %#v", clarify)
+	if err := validatePlanPrerequisites(out.Plan); err != nil {
+		t.Fatalf("unexpected planning validation error: %v", err)
 	}
 }
 

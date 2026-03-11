@@ -3,9 +3,11 @@ package rewrite
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cy77cc/OpsPilot/internal/ai/availability"
 )
 
 type Output struct {
@@ -18,7 +20,61 @@ type Output struct {
 	ResourceHints     ResourceHints     `json:"resource_hints,omitempty"`
 	DomainHints       []string          `json:"domain_hints,omitempty"`
 	AmbiguityFlags    []string          `json:"ambiguity_flags,omitempty"`
+	RetrievalIntent   string            `json:"retrieval_intent,omitempty"`
+	RetrievalQueries  []string          `json:"retrieval_queries,omitempty"`
+	RetrievalKeywords []string          `json:"retrieval_keywords,omitempty"`
+	KnowledgeScope    []string          `json:"knowledge_scope,omitempty"`
+	RequiresRAG       bool              `json:"requires_rag,omitempty"`
 	Narrative         string            `json:"narrative"`
+}
+
+type SemanticContract struct {
+	RawUserInput      string            `json:"raw_user_input,omitempty"`
+	NormalizedGoal    string            `json:"normalized_goal,omitempty"`
+	OperationMode     string            `json:"operation_mode,omitempty"`
+	NormalizedRequest NormalizedRequest `json:"normalized_request,omitempty"`
+	ResourceHints     ResourceHints     `json:"resource_hints,omitempty"`
+	DomainHints       []string          `json:"domain_hints,omitempty"`
+	Ambiguities       []string          `json:"ambiguities,omitempty"`
+	AmbiguityFlags    []string          `json:"ambiguity_flags,omitempty"`
+	RetrievalIntent   string            `json:"retrieval_intent,omitempty"`
+	RetrievalQueries  []string          `json:"retrieval_queries,omitempty"`
+	RetrievalKeywords []string          `json:"retrieval_keywords,omitempty"`
+	KnowledgeScope    []string          `json:"knowledge_scope,omitempty"`
+	RequiresRAG       bool              `json:"requires_rag,omitempty"`
+}
+
+type ModelUnavailableError struct {
+	Code              string
+	UserVisibleReason string
+	Cause             error
+}
+
+func (e *ModelUnavailableError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", strings.TrimSpace(e.Code), e.Cause)
+	}
+	if strings.TrimSpace(e.Code) != "" {
+		return strings.TrimSpace(e.Code)
+	}
+	return "rewrite unavailable"
+}
+
+func (e *ModelUnavailableError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (e *ModelUnavailableError) UserVisibleMessage() string {
+	if e == nil {
+		return availability.UnavailableMessage(availability.LayerRewrite)
+	}
+	return firstNonEmpty(e.UserVisibleReason, availability.UnavailableMessage(availability.LayerRewrite))
 }
 
 type ResourceHints struct {
@@ -71,10 +127,15 @@ type SelectedResource struct {
 
 type Rewriter struct {
 	runner *adk.Runner
+	runFn  func(context.Context, Input, func(string)) (Output, error)
 }
 
 func New(runner *adk.Runner) *Rewriter {
 	return &Rewriter{runner: runner}
+}
+
+func NewWithFunc(runFn func(context.Context, Input, func(string)) (Output, error)) *Rewriter {
+	return &Rewriter{runFn: runFn}
 }
 
 func (r *Rewriter) Rewrite(ctx context.Context, in Input) (Output, error) {
@@ -86,21 +147,26 @@ func (r *Rewriter) RewriteStream(ctx context.Context, in Input, onDelta func(str
 }
 
 func (r *Rewriter) rewrite(ctx context.Context, in Input, onDelta func(string)) (Output, error) {
+	if r != nil && r.runFn != nil {
+		return r.runFn(ctx, in, onDelta)
+	}
 	base := buildBaseOutput(in)
 
 	if r == nil || r.runner == nil {
-		return buildFallbackOutput(base, "rewrite_runner_unavailable"), nil
+		return Output{}, &ModelUnavailableError{
+			Code:              "rewrite_runner_unavailable",
+			UserVisibleReason: availability.UnavailableMessage(availability.LayerRewrite),
+		}
 	}
 	raw, err := runADKRewrite(ctx, r.runner, buildPromptInput(in), onDelta)
 	if err != nil {
-		return buildFallbackOutput(base, "rewrite_model_unavailable"), nil
+		return Output{}, &ModelUnavailableError{
+			Code:              "rewrite_model_unavailable",
+			UserVisibleReason: availability.UnavailableMessage(availability.LayerRewrite),
+			Cause:             err,
+		}
 	}
-
-	var parsed Output
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed); err != nil {
-		return buildFallbackOutput(base, "rewrite_invalid_json"), nil
-	}
-	return normalizeOutput(base, parsed), nil
+	return parseModelOutput(base, raw)
 }
 
 func buildBaseOutput(in Input) Output {
@@ -116,6 +182,24 @@ func buildBaseOutput(in Input) Output {
 			Targets: buildTargets(in.SelectedResources),
 		},
 		Narrative: buildNarrative(message, "query", hints, nil, nil),
+	}
+}
+
+func (out Output) SemanticContract() SemanticContract {
+	return SemanticContract{
+		RawUserInput:      strings.TrimSpace(out.RawUserInput),
+		NormalizedGoal:    strings.TrimSpace(out.NormalizedGoal),
+		OperationMode:     strings.TrimSpace(out.OperationMode),
+		NormalizedRequest: out.NormalizedRequest,
+		ResourceHints:     out.ResourceHints,
+		DomainHints:       dedupe(out.DomainHints),
+		Ambiguities:       dedupe(out.Ambiguities),
+		AmbiguityFlags:    dedupe(out.AmbiguityFlags),
+		RetrievalIntent:   strings.TrimSpace(out.RetrievalIntent),
+		RetrievalQueries:  dedupe(out.RetrievalQueries),
+		RetrievalKeywords: dedupe(out.RetrievalKeywords),
+		KnowledgeScope:    dedupe(out.KnowledgeScope),
+		RequiresRAG:       out.RequiresRAG,
 	}
 }
 
@@ -147,6 +231,18 @@ func buildPromptInput(in Input) string {
 		}
 	}
 	return b.String()
+}
+
+func parseModelOutput(base Output, raw string) (Output, error) {
+	var parsed Output
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed); err != nil {
+		return Output{}, &ModelUnavailableError{
+			Code:              "rewrite_invalid_json",
+			UserVisibleReason: availability.InvalidOutputMessage(availability.LayerRewrite),
+			Cause:             err,
+		}
+	}
+	return normalizeOutput(base, parsed), nil
 }
 
 func mergeNormalizedRequest(parsed, base NormalizedRequest) NormalizedRequest {
@@ -185,14 +281,12 @@ func normalizeOutput(base, parsed Output) Output {
 	parsed.Ambiguities = dedupe(parsed.Ambiguities)
 	parsed.DomainHints = dedupe(parsed.DomainHints)
 	parsed.AmbiguityFlags = dedupe(parsed.AmbiguityFlags)
+	parsed.RetrievalIntent = firstNonEmpty(parsed.RetrievalIntent)
+	parsed.RetrievalQueries = dedupe(parsed.RetrievalQueries)
+	parsed.RetrievalKeywords = dedupe(parsed.RetrievalKeywords)
+	parsed.KnowledgeScope = dedupe(parsed.KnowledgeScope)
 	parsed.Narrative = buildNarrative(parsed.NormalizedGoal, parsed.OperationMode, parsed.ResourceHints, parsed.DomainHints, parsed.AmbiguityFlags)
 	return parsed
-}
-
-func buildFallbackOutput(base Output, reason string) Output {
-	base.Assumptions = dedupe(append(base.Assumptions, reason))
-	base.Narrative = buildFallbackNarrative(base.NormalizedGoal, reason)
-	return base
 }
 
 func buildTargets(resources []SelectedResource) []RequestTarget {
@@ -244,14 +338,6 @@ func buildNarrative(goal, mode string, hints ResourceHints, domains, ambiguity [
 	}
 	if len(ambiguity) > 0 {
 		parts = append(parts, "当前仍存在歧义："+strings.Join(ambiguity, ", ")+"。")
-	}
-	return strings.Join(parts, " ")
-}
-
-func buildFallbackNarrative(goal, reason string) string {
-	parts := []string{"Rewrite 模型不可用，已将用户原始请求标准化透传给 Planner。", "目标：" + goal + "。"}
-	if reason != "" {
-		parts = append(parts, "原因："+reason+"。")
 	}
 	return strings.Join(parts, " ")
 }

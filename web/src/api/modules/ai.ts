@@ -7,6 +7,8 @@ export interface AIMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   thinking?: string;
+  summaryOutput?: Record<string, any>;
+  rawEvidence?: string[];
   traces?: ToolTrace[];
   recommendations?: EmbeddedRecommendation[];
   thoughtChain?: Array<Record<string, any>>;
@@ -199,6 +201,8 @@ interface SSEDoneEvent {
 interface SSEErrorEvent {
   message: string;
   code?: string;
+  error_code?: string;
+  stage?: string;
   recoverable?: boolean;
   tool_summary?: {
     calls: number;
@@ -488,7 +492,11 @@ export const aiApi = {
         toolPending = false;
         clearToolTimer();
       } else if (eventType === 'error') {
-        handlers.onError?.(payload as SSEErrorEvent);
+        const errorPayload = payload as SSEErrorEvent;
+        if (!errorPayload.code && errorPayload.error_code) {
+          errorPayload.code = errorPayload.error_code;
+        }
+        handlers.onError?.(errorPayload);
         const err = payload as SSEErrorEvent;
         if (err.code !== 'tool_timeout_soft') {
           toolPending = false;

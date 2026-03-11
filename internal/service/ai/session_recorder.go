@@ -150,6 +150,10 @@ func (r *chatRecorder) HandleEvent(ctx context.Context, eventType events.Name, p
 		})
 	case events.Summary:
 		output, _ := payload["output"].(map[string]any)
+		r.assistant.SummaryOutput = copyMap(output)
+		if strings.EqualFold(firstString(output["raw_output_policy"]), "include_evidence") {
+			r.assistant.RawEvidence = extractRawEvidenceFromThoughtChain(r.assistant.ThoughtChain)
+		}
 		r.upsertStage(map[string]any{
 			"key":         "summary",
 			"title":       "生成结论",
@@ -167,6 +171,48 @@ func (r *chatRecorder) HandleEvent(ctx context.Context, eventType events.Name, p
 		}
 	}
 	_ = r.persist(ctx)
+}
+
+func extractRawEvidenceFromThoughtChain(stages []map[string]any) []string {
+	for _, stage := range stages {
+		if toString(stage["key"]) != "execute" {
+			continue
+		}
+		details, _ := stage["details"].([]map[string]any)
+		if len(details) == 0 {
+			if raw, ok := stage["details"].([]any); ok {
+				details = make([]map[string]any, 0, len(raw))
+				for _, item := range raw {
+					if detail, okDetail := item.(map[string]any); okDetail {
+						details = append(details, detail)
+					}
+				}
+			}
+		}
+		out := make([]string, 0, len(details))
+		for _, detail := range details {
+			text := firstString(detail["content"])
+			if text == "" {
+				text = firstString(detail["label"])
+			}
+			if text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func copyMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func (r *chatRecorder) SessionPayload(ctx context.Context) map[string]any {

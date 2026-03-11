@@ -21,6 +21,14 @@ The transport contract is:
 - `summary`: structured conclusion
 - `stage_delta`: ThoughtChain stage stream
 - `approval` / `clarify`: user action gates
+- `error`: explicit stage failure signal with `error_code` and `stage`
+- `heartbeat`: keep-alive for long-running streams
+
+Response headers:
+
+- `X-AI-Runtime-Mode`: `model_first | compatibility | disabled`
+- `X-AI-Compatibility-Enabled`: `true | false`
+- `X-AI-Model-First-Enabled`: `true | false`
 
 ## Chat
 
@@ -86,7 +94,10 @@ done
   "session_id": "3781107b-dd2b-462a-9467-1120293fb126",
   "traceId": "c9d1c182-ef1d-4f68-9d20-922326be486a",
   "trace_id": "c9d1c182-ef1d-4f68-9d20-922326be486a",
-  "createdAt": "2026-03-10T13:28:33Z"
+  "createdAt": "2026-03-10T13:28:33Z",
+  "runtime_mode": "model_first",
+  "model_first_enabled": true,
+  "compatibility_enabled": false
 }
 ```
 
@@ -149,7 +160,7 @@ Used by the frontend ThoughtChain, not by the final answer body.
 {
   "stage": "rewrite",
   "status": "loading",
-  "content_chunk": "开始理解你的问题并提取目标线索。"
+  "content_chunk": "已提取目标资源、查询范围和排查意图。"
 }
 ```
 
@@ -161,6 +172,8 @@ Fields:
 - `step_id`: optional for execute stage
 - `expert`: optional for execute stage
 - `replace`: optional overwrite mode
+
+`stage_delta` should reflect model-stage output or explicit stage failure text. It is not intended for host-generated placeholder sentences.
 
 ### `step_update`
 
@@ -216,8 +229,29 @@ Structured only. Do not render this as the final answer body.
     "summary": "已生成结构化结论",
     "conclusion": "Cilium pod 运行正常，日志中未见错误。",
     "need_more_investigation": false,
-    "narrative": "当前结论基于已执行步骤及其证据生成。"
+    "narrative": "当前结论基于已执行步骤及其证据生成。",
+    "raw_output_policy": "summary_only"
   }
+}
+```
+
+### `error`
+
+```json
+{
+  "message": "AI 规划模块当前不可用，请稍后重试或手动在页面中执行操作。",
+  "error_code": "planner_runner_unavailable",
+  "stage": "plan",
+  "recoverable": true
+}
+```
+
+### `heartbeat`
+
+```json
+{
+  "status": "streaming",
+  "timestamp": "2026-03-11T07:30:00Z"
 }
 ```
 

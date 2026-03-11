@@ -68,4 +68,27 @@ describe('aiApi.chatStream', () => {
     expect(onStepUpdate).toHaveBeenCalledWith(expect.objectContaining({ step_id: 'step-1', status: 'running' }));
     expect(onSummary).toHaveBeenCalledWith(expect.objectContaining({ output: expect.objectContaining({ summary: 'done' }) }));
   });
+
+  it('preserves stage-aware error payloads', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      body: buildStream([
+        'event: error\ndata: {"message":"AI 规划模块当前不可用，请稍后重试或手动在页面中执行操作。","error_code":"planner_runner_unavailable","stage":"plan","recoverable":true}\n\n',
+      ]),
+    } as Response);
+
+    const onError = vi.fn();
+
+    await aiApi.chatStream(
+      { message: 'hi', context: { scene: 'global' } },
+      { onError }
+    );
+
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'AI 规划模块当前不可用，请稍后重试或手动在页面中执行操作。',
+      code: 'planner_runner_unavailable',
+      stage: 'plan',
+      recoverable: true,
+    }));
+  });
 });

@@ -3,6 +3,7 @@ import type { EmbeddedRecommendation } from './types';
 export interface AssistantMessageInput {
   content?: string;
   thinking?: string;
+  rawEvidence?: string[];
   recommendations?: EmbeddedRecommendation[];
   isStreaming?: boolean;
 }
@@ -27,6 +28,11 @@ export interface RecommendationsBlock extends BaseBlock {
   recommendations: EmbeddedRecommendation[];
 }
 
+export interface RawEvidenceBlock extends BaseBlock {
+  type: 'raw_evidence';
+  items: string[];
+}
+
 export interface FallbackBlock extends BaseBlock {
   type: 'fallback';
   content: string;
@@ -36,6 +42,7 @@ export type AssistantMessageBlock =
   | ThinkingBlock
   | MarkdownBlock
   | RecommendationsBlock
+  | RawEvidenceBlock
   | FallbackBlock;
 
 export function normalizeAssistantMessage(input: AssistantMessageInput): AssistantMessageBlock[] {
@@ -63,6 +70,14 @@ export function normalizeAssistantMessage(input: AssistantMessageInput): Assista
       id: 'recommendations',
       type: 'recommendations',
       recommendations: input.recommendations,
+    });
+  }
+
+  if (input.rawEvidence && input.rawEvidence.length > 0) {
+    blocks.push({
+      id: 'raw_evidence',
+      type: 'raw_evidence',
+      items: input.rawEvidence,
     });
   }
 

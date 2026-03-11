@@ -3,8 +3,10 @@ package ai
 import "github.com/cy77cc/OpsPilot/internal/config"
 
 type RolloutConfig struct {
-	UseMultiDomainArch bool `json:"use_multi_domain_arch"`
-	UseAssistantV2     bool `json:"use_assistant_v2"`
+	UseMultiDomainArch          bool `json:"use_multi_domain_arch"`
+	UseAssistantV2              bool `json:"use_assistant_v2"`
+	UseModelFirstRuntime        bool `json:"use_model_first_runtime"`
+	AllowLegacySemanticFallback bool `json:"allow_legacy_semantic_fallback"`
 }
 
 type RolloutThresholds struct {
@@ -21,10 +23,17 @@ type RolloutDecision struct {
 
 func CurrentRolloutConfig() RolloutConfig {
 	cfg := RolloutConfig{
-		UseMultiDomainArch: config.CFG.AI.UseMultiDomainArch,
+		UseMultiDomainArch:   config.CFG.AI.UseMultiDomainArch,
+		UseModelFirstRuntime: true,
 	}
 	if config.CFG.FeatureFlags.AIAssistantV2 != nil {
 		cfg.UseAssistantV2 = *config.CFG.FeatureFlags.AIAssistantV2
+	}
+	if config.CFG.FeatureFlags.AIModelFirstRuntime != nil {
+		cfg.UseModelFirstRuntime = *config.CFG.FeatureFlags.AIModelFirstRuntime
+	}
+	if config.CFG.FeatureFlags.AILegacySemanticFallback != nil {
+		cfg.AllowLegacySemanticFallback = *config.CFG.FeatureFlags.AILegacySemanticFallback
 	}
 	return cfg
 }
@@ -33,8 +42,23 @@ func (c RolloutConfig) AgenticEnabled() bool {
 	return c.UseMultiDomainArch
 }
 
+func (c RolloutConfig) ModelFirstEnabled() bool {
+	return c.UseModelFirstRuntime
+}
+
 func (c RolloutConfig) CompatibilityEnabled() bool {
-	return !c.UseMultiDomainArch || c.UseAssistantV2
+	return !c.UseMultiDomainArch || c.UseAssistantV2 || c.AllowLegacySemanticFallback
+}
+
+func (c RolloutConfig) RuntimeMode() string {
+	switch {
+	case c.ModelFirstEnabled():
+		return "model_first"
+	case c.AllowLegacySemanticFallback:
+		return "compatibility"
+	default:
+		return "disabled"
+	}
 }
 
 func DefaultRolloutThresholds() RolloutThresholds {

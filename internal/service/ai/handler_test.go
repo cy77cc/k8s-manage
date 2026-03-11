@@ -52,6 +52,26 @@ func TestBuildResumeResponseMarksLegacyADKCompatibility(t *testing.T) {
 	}
 }
 
+func TestAttachRolloutMetadataIncludesRuntimeFlags(t *testing.T) {
+	payload := attachRolloutMetadata(map[string]any{
+		"session_id": "session-1",
+	}, coreai.RolloutConfig{
+		UseMultiDomainArch:          true,
+		UseModelFirstRuntime:        false,
+		AllowLegacySemanticFallback: true,
+	})
+
+	if payload["runtime_mode"] != "compatibility" {
+		t.Fatalf("runtime_mode = %#v, want compatibility", payload["runtime_mode"])
+	}
+	if payload["model_first_enabled"] != false {
+		t.Fatalf("model_first_enabled = %#v, want false", payload["model_first_enabled"])
+	}
+	if payload["compatibility_enabled"] != true {
+		t.Fatalf("compatibility_enabled = %#v, want true", payload["compatibility_enabled"])
+	}
+}
+
 func TestSessionHandlersRespectSceneAndExposeThoughtChain(t *testing.T) {
 	suite := testutil.NewIntegrationSuite(t)
 	t.Cleanup(suite.Cleanup)
@@ -74,6 +94,10 @@ func TestSessionHandlersRespectSceneAndExposeThoughtChain(t *testing.T) {
 		ThoughtChain: []map[string]any{
 			{"key": "rewrite", "title": "理解你的问题", "status": "success"},
 		},
+		SummaryOutput: map[string]any{
+			"headline": "服务当前运行正常",
+		},
+		RawEvidence: []string{"命令执行成功"},
 	}); err != nil {
 		t.Fatalf("UpdateAssistantMessage(global) error = %v", err)
 	}
@@ -128,6 +152,12 @@ func TestSessionHandlersRespectSceneAndExposeThoughtChain(t *testing.T) {
 		}
 		if _, ok := resp.Data.Messages[1]["thoughtChain"]; !ok {
 			t.Fatalf("assistant message missing thoughtChain: %#v", resp.Data.Messages[1])
+		}
+		if _, ok := resp.Data.Messages[1]["summaryOutput"]; !ok {
+			t.Fatalf("assistant message missing summaryOutput: %#v", resp.Data.Messages[1])
+		}
+		if _, ok := resp.Data.Messages[1]["rawEvidence"]; !ok {
+			t.Fatalf("assistant message missing rawEvidence: %#v", resp.Data.Messages[1])
 		}
 	})
 }

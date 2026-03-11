@@ -9,45 +9,26 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/summarizer"
 )
 
-func TestFinalAnswerRendererFleetHostStatusUsesSummaryAndTopN(t *testing.T) {
+func TestFinalAnswerRendererFormatsSummaryWithoutSemanticRewrite(t *testing.T) {
 	renderer := newFinalAnswerRenderer()
-	paragraphs := renderer.Render("查看所有主机状态", &planner.ExecutionPlan{
-		Resolved: planner.ResolvedResources{
-			Scope: &planner.ResourceScope{Kind: "all", ResourceType: "host"},
-		},
-	}, &executor.Result{
-		Steps: []executor.StepResult{
-			{
-				StepID:  "step-1",
-				Summary: "inventory collected",
-				Evidence: []executor.Evidence{{
-					Kind:   "tool_result",
-					Source: "host_list_inventory",
-					Data: map[string]any{
-						"list": []any{
-							map[string]any{"id": 1, "name": "test", "status": "online", "cpu_cores": 4, "memory_mb": 16384, "disk_gb": 100},
-							map[string]any{"id": 2, "name": "火山云服务器", "status": "online", "cpu_cores": 2, "memory_mb": 8192, "disk_gb": 40},
-							map[string]any{"id": 3, "name": "香港云服务器", "status": "online", "cpu_cores": 2, "memory_mb": 4096, "disk_gb": 40},
-							map[string]any{"id": 4, "name": "备用机", "status": "online", "cpu_cores": 2, "memory_mb": 4096, "disk_gb": 40},
-						},
-					},
-				}},
-			},
-		},
-	}, summarizer.SummaryOutput{
-		Headline:        "所有主机运行稳定",
-		Recommendations: []string{"建议评估是否安排维护窗口进行计划性重启。"},
+	paragraphs := renderer.Render("查看所有主机状态", &planner.ExecutionPlan{}, &executor.Result{}, summarizer.SummaryOutput{
+		Headline:          "所有 3 台主机当前均处于正常运行状态。",
+		Conclusion:        "系统资源充足，当前没有明显性能压力。",
+		KeyFindings:       []string{"主机 test 负载正常。", "主机 火山云服务器 负载极低。"},
+		Recommendations:   []string{"继续保持常规巡检即可。"},
+		RawOutputPolicy:   "summary_only",
+		ResourceSummaries: []string{"其余主机状态一致。"},
 	})
 
 	joined := strings.Join(paragraphs, "\n\n")
-	if !strings.Contains(joined, "共检查 4 台主机，当前均运行正常。") {
-		t.Fatalf("rendered body = %q", joined)
+	if !strings.Contains(joined, "所有 3 台主机当前均处于正常运行状态。") {
+		t.Fatalf("rendered body = %q, want summary headline", joined)
 	}
-	if !strings.Contains(joined, "其余 1 台主机状态一致") {
-		t.Fatalf("rendered body = %q, want topN summary", joined)
+	if !strings.Contains(joined, "系统资源充足，当前没有明显性能压力。") {
+		t.Fatalf("rendered body = %q, want summary conclusion", joined)
 	}
-	if strings.Contains(joined, "计划性重启") {
-		t.Fatalf("rendered body = %q, should suppress routine restart advice", joined)
+	if !strings.Contains(joined, "其余主机状态一致。") {
+		t.Fatalf("rendered body = %q, want resource summary", joined)
 	}
 }
 
@@ -67,40 +48,36 @@ func TestFinalAnswerRendererSuppressesRawCommandDump(t *testing.T) {
 	}
 }
 
-func TestFinalAnswerRendererFiltersBoilerplateSummaryScaffold(t *testing.T) {
+func TestFinalAnswerRendererIncludesEvidenceOnlyWhenRequested(t *testing.T) {
 	renderer := newFinalAnswerRenderer()
-	paragraphs := renderer.Render("在火山云服务器上执行 df -h", nil, &executor.Result{
+	result := &executor.Result{
 		Steps: []executor.StepResult{{
 			StepID:  "step-1",
-			Summary: "host command completed",
+			Summary: "命令 df -h 在 host_id 2 上执行成功，退出码为 0",
 			Evidence: []executor.Evidence{{
 				Kind:   "expert_result",
 				Source: "hostops",
 				Data: map[string]any{
 					"observed_facts": []any{
-						"命令 df -h 在 host_id 2 上执行成功，退出码为 0",
 						"根文件系统 /dev/vda2 总容量 40G，已使用 10G，可用 28G，使用率 27%",
 					},
 				},
 			}},
 		}},
-	}, summarizer.SummaryOutput{
-		Headline:        "已完成本轮排查",
-		KeyFindings:     []string{"已完成步骤 1 个", "收集执行证据 1 条"},
-		Recommendations: []string{"查看最终结论正文"},
+	}
+
+	paragraphs := renderer.Render("在火山云服务器上执行 df -h", nil, result, summarizer.SummaryOutput{
+		Headline:        "AI 总结模块当前不可用",
+		Conclusion:      "执行已经完成，但当前无法生成最终 AI 总结。请直接查看原始执行证据。",
+		Recommendations: []string{"查看原始执行证据"},
+		RawOutputPolicy: "include_evidence",
 	})
 
 	joined := strings.Join(paragraphs, "\n\n")
-	if strings.Contains(joined, "已完成本轮排查") {
-		t.Fatalf("rendered body = %q, should not keep boilerplate headline", joined)
+	if !strings.Contains(joined, "原始执行证据") {
+		t.Fatalf("rendered body = %q, want raw evidence section", joined)
 	}
-	if strings.Contains(joined, "已完成步骤 1 个") || strings.Contains(joined, "收集执行证据 1 条") {
-		t.Fatalf("rendered body = %q, should not keep boilerplate findings", joined)
-	}
-	if strings.Contains(joined, "查看最终结论正文") {
-		t.Fatalf("rendered body = %q, should not keep boilerplate recommendation", joined)
-	}
-	if !strings.Contains(joined, "根文件系统 /dev/vda2") {
-		t.Fatalf("rendered body = %q, want real observed fact", joined)
+	if !strings.Contains(joined, "命令 df -h 在 host_id 2 上执行成功") {
+		t.Fatalf("rendered body = %q, want step summary evidence", joined)
 	}
 }

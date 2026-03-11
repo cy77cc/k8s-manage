@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -59,6 +60,124 @@ func newSessionStateForOrchestrator(t *testing.T) *state.SessionState {
 		mr.Close()
 	})
 	return state.NewSessionState(client, "ai:test:session:")
+}
+
+func newPlannerForServiceStatus() *planner.Planner {
+	return planner.NewWithFunc(func(_ context.Context, _ planner.Input, onDelta func(string)) (planner.Decision, error) {
+		if onDelta != nil {
+			onDelta("已确认目标服务、操作模式和执行边界。")
+		}
+		return planner.Decision{
+			Type:      planner.DecisionPlan,
+			Narrative: "已生成服务状态检查计划。",
+			Plan: &planner.ExecutionPlan{
+				PlanID:    "plan-service-status",
+				Goal:      "查看 payment-api 的状态",
+				Narrative: "通过 service 专家检查 payment-api 的运行状态。",
+				Resolved: planner.ResolvedResources{
+					ServiceName: "payment-api",
+					ServiceID:   42,
+				},
+				Steps: []planner.PlanStep{{
+					StepID: "step-1",
+					Title:  "检查服务状态",
+					Expert: "service",
+					Intent: "inspect_service",
+					Task:   "inspect payment-api",
+					Mode:   "readonly",
+					Risk:   "low",
+					Input: map[string]any{
+						"service_id": 42,
+					},
+				}},
+			},
+		}, nil
+	})
+}
+
+func newPlannerForServiceDeploy() *planner.Planner {
+	return planner.NewWithFunc(func(context.Context, planner.Input, func(string)) (planner.Decision, error) {
+		return planner.Decision{
+			Type:      planner.DecisionPlan,
+			Narrative: "已生成服务部署计划。",
+			Plan: &planner.ExecutionPlan{
+				PlanID:    "plan-service-deploy",
+				Goal:      "发布 payment-api 到 prod",
+				Narrative: "通过 service 专家执行发布并等待审批。",
+				Resolved: planner.ResolvedResources{
+					ServiceName: "payment-api",
+					ServiceID:   42,
+					ClusterName: "prod",
+					ClusterID:   9,
+				},
+				Steps: []planner.PlanStep{{
+					StepID: "step-1",
+					Title:  "发布服务",
+					Expert: "service",
+					Intent: "deploy_service",
+					Task:   "deploy payment-api to prod",
+					Mode:   "mutating",
+					Risk:   "high",
+					Input: map[string]any{
+						"service_id": 42,
+						"cluster_id": 9,
+					},
+				}},
+			},
+		}, nil
+	})
+}
+
+func newClarifyPlanner() *planner.Planner {
+	return planner.NewWithFunc(func(context.Context, planner.Input, func(string)) (planner.Decision, error) {
+		return planner.Decision{
+			Type:      planner.DecisionClarify,
+			Message:   "我需要先确认目标资源后再继续规划。",
+			Narrative: "Rewrite 输出仍有未消解歧义，Planner 先请求补充信息。",
+			Candidates: []map[string]any{
+				{"kind": "ambiguity", "message": "resource_target_not_explicit"},
+			},
+		}, nil
+	})
+}
+
+func newSummarizerForServiceStatus() *summarizer.Summarizer {
+	return summarizer.NewWithFunc(func(_ context.Context, _ summarizer.Input, onDelta func(string)) (summarizer.SummaryOutput, error) {
+		if onDelta != nil {
+			onDelta("已根据执行证据整理最终结论。")
+		}
+		return summarizer.SummaryOutput{
+			Summary:         "payment-api 当前运行正常。",
+			Headline:        "payment-api 当前运行正常。",
+			Conclusion:      "未发现需要立即处理的异常。",
+			KeyFindings:     []string{"服务状态检查已完成。"},
+			Recommendations: []string{"继续保持常规观察。"},
+			RawOutputPolicy: "summary_only",
+			Narrative:       "总结基于当前执行证据生成。",
+		}, nil
+	})
+}
+
+func newSummarizerNeedingInvestigation() *summarizer.Summarizer {
+	return summarizer.NewWithFunc(func(_ context.Context, _ summarizer.Input, onDelta func(string)) (summarizer.SummaryOutput, error) {
+		if onDelta != nil {
+			onDelta("已基于有限证据生成初步判断。")
+		}
+		return summarizer.SummaryOutput{
+			Summary:               "当前证据不足以形成稳定结论。",
+			Headline:              "当前仅能给出初步判断",
+			Conclusion:            "仍需补充证据后再确认最终状态。",
+			KeyFindings:           []string{"缺少足够执行证据。"},
+			Recommendations:       []string{"补充关键执行证据"},
+			RawOutputPolicy:       "summary_only",
+			Narrative:             "当前仅基于有限证据做出初步判断。",
+			NeedMoreInvestigation: true,
+			ReplanHint: &summarizer.ReplanHint{
+				Reason: "completed_steps_without_evidence",
+				Focus:  "补充执行证据",
+			},
+		}, nil
+	})
 }
 
 func TestResumeReturnsIdempotentStatus(t *testing.T) {
@@ -209,17 +328,37 @@ func TestOrchestratorRunMainFlowEmitsExpectedEvents(t *testing.T) {
 	orch := &Orchestrator{
 		sessions:   sessions,
 		executions: store,
-		rewriter:   rewrite.New(nil),
-		planner:    planner.New(nil),
-		executor:   executor.New(store, executor.WithStepRunner(runner)),
-		summarizer: summarizer.New(nil),
-		renderer:   newFinalAnswerRenderer(),
-		maxIters:   2,
+		rewriter: rewrite.NewWithFunc(func(_ context.Context, in rewrite.Input, onDelta func(string)) (rewrite.Output, error) {
+			if onDelta != nil {
+				onDelta("已提取服务和状态查询目标。")
+			}
+			return rewrite.Output{
+				RawUserInput:   in.Message,
+				NormalizedGoal: "查看 payment-api 的状态",
+				OperationMode:  "query",
+				ResourceHints: rewrite.ResourceHints{
+					ServiceName: "payment-api",
+					ServiceID:   42,
+				},
+				NormalizedRequest: rewrite.NormalizedRequest{
+					Intent:  "service_health_check",
+					Targets: []rewrite.RequestTarget{{Type: "service", Name: "payment-api"}},
+				},
+				Narrative: "已将口语化输入整理为服务状态查询任务。",
+			}, nil
+		}),
+		planner:           newPlannerForServiceStatus(),
+		executor:          executor.New(store, executor.WithStepRunner(runner)),
+		summarizer:        newSummarizerForServiceStatus(),
+		renderer:          newFinalAnswerRenderer(),
+		maxIters:          2,
+		heartbeatInterval: time.Hour,
 	}
 
 	var names []string
 	var stages []string
 	var deltas []string
+	var stageChunks []string
 	err := orch.Run(context.Background(), RunRequest{
 		Message: "查看 payment-api 的状态",
 		RuntimeContext: RuntimeContext{
@@ -232,6 +371,7 @@ func TestOrchestratorRunMainFlowEmitsExpectedEvents(t *testing.T) {
 		names = append(names, string(evt.Type))
 		if evt.Type == events.StageDelta {
 			stages = append(stages, strings.TrimSpace(stringValue(evt.Data["stage"])))
+			stageChunks = append(stageChunks, stringValue(evt.Data["content_chunk"]))
 		}
 		if evt.Type == events.Delta {
 			deltas = append(deltas, stringValue(evt.Data["content_chunk"]))
@@ -255,6 +395,12 @@ func TestOrchestratorRunMainFlowEmitsExpectedEvents(t *testing.T) {
 	assertStageSeen(t, stages, "plan")
 	assertStageSeen(t, stages, "execute")
 	assertStageSeen(t, stages, "summary")
+	assertStageChunkContains(t, stageChunks, "已提取服务和状态查询目标。")
+	assertStageChunkContains(t, stageChunks, "已确认目标服务、操作模式和执行边界。")
+	assertStageChunkContains(t, stageChunks, "已根据执行证据整理最终结论。")
+	assertStageChunkNotContains(t, stageChunks, "开始理解你的问题并提取目标线索。")
+	assertStageChunkNotContains(t, stageChunks, "正在整理目标、资源和执行约束。")
+	assertStageChunkNotContains(t, stageChunks, "正在汇总执行证据并生成结论。")
 	if len(deltas) == 0 {
 		t.Fatalf("delta events = %v, want streamed final answer", deltas)
 	}
@@ -263,9 +409,100 @@ func TestOrchestratorRunMainFlowEmitsExpectedEvents(t *testing.T) {
 	}
 }
 
+func TestOrchestratorEmitsHeartbeatDuringLongRun(t *testing.T) {
+	sessions := newSessionStateForOrchestrator(t)
+	store := newExecutionStoreForOrchestrator(t)
+	orch := &Orchestrator{
+		sessions:   sessions,
+		executions: store,
+		rewriter: rewrite.NewWithFunc(func(_ context.Context, in rewrite.Input, onDelta func(string)) (rewrite.Output, error) {
+			time.Sleep(12 * time.Millisecond)
+			if onDelta != nil {
+				onDelta("已提取目标。")
+			}
+			return rewrite.Output{
+				RawUserInput:   in.Message,
+				NormalizedGoal: "查看 payment-api 的状态",
+				OperationMode:  "query",
+				ResourceHints:  rewrite.ResourceHints{ServiceName: "payment-api", ServiceID: 42},
+				NormalizedRequest: rewrite.NormalizedRequest{
+					Intent:  "service_health_check",
+					Targets: []rewrite.RequestTarget{{Type: "service", Name: "payment-api"}},
+				},
+				Narrative: "已将口语化输入整理为服务状态查询任务。",
+			}, nil
+		}),
+		planner: newPlannerForServiceStatus(),
+		executor: executor.New(store, executor.WithStepRunner(&orchestratorStubStepRunner{
+			result: executor.StepResult{Summary: "service status collected"},
+		})),
+		summarizer:        newSummarizerForServiceStatus(),
+		renderer:          newFinalAnswerRenderer(),
+		maxIters:          2,
+		heartbeatInterval: 2 * time.Millisecond,
+	}
+
+	var names []string
+	err := orch.Run(context.Background(), RunRequest{
+		Message:        "查看 payment-api 的状态",
+		RuntimeContext: RuntimeContext{Scene: "scene:service"},
+	}, func(evt StreamEvent) bool {
+		names = append(names, string(evt.Type))
+		return true
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !containsEvent(names, "heartbeat") {
+		t.Fatalf("events = %v, want heartbeat", names)
+	}
+}
+
+func TestOrchestratorStopsWhenRewriteUnavailable(t *testing.T) {
+	sessions := newSessionStateForOrchestrator(t)
+	store := newExecutionStoreForOrchestrator(t)
+	orch := &Orchestrator{
+		sessions:   sessions,
+		executions: store,
+		rewriter: rewrite.NewWithFunc(func(context.Context, rewrite.Input, func(string)) (rewrite.Output, error) {
+			return rewrite.Output{}, &rewrite.ModelUnavailableError{
+				Code:              "rewrite_model_unavailable",
+				UserVisibleReason: "AI 理解模块当前不可用，请稍后重试或手动在页面中执行操作。",
+			}
+		}),
+		planner:  planner.New(nil),
+		maxIters: 2,
+	}
+
+	var names []string
+	var deltas strings.Builder
+	err := orch.Run(context.Background(), RunRequest{
+		Message: "查看 payment-api 的状态",
+		RuntimeContext: RuntimeContext{
+			Scene: "scene:service",
+		},
+	}, func(evt StreamEvent) bool {
+		names = append(names, string(evt.Type))
+		if evt.Type == events.Delta {
+			deltas.WriteString(stringValue(evt.Data["content_chunk"]))
+		}
+		return true
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	assertEventOrder(t, names, []string{"meta", "error", "delta", "done"})
+	if containsEvent(names, "planner_state") {
+		t.Fatalf("events = %v, planner should not start after rewrite failure", names)
+	}
+	if !strings.Contains(deltas.String(), "AI 理解模块当前不可用") {
+		t.Fatalf("delta = %q, want rewrite unavailable message", deltas.String())
+	}
+}
+
 func TestOrchestratorPlanAndReplyClarifyFlow(t *testing.T) {
 	orch := &Orchestrator{
-		planner:  planner.New(nil),
+		planner:  newClarifyPlanner(),
 		maxIters: 2,
 	}
 	meta := events.EventMeta{
@@ -297,7 +534,7 @@ func TestOrchestratorApprovalResumeFlow(t *testing.T) {
 	runner := &orchestratorStubStepRunner{result: executor.StepResult{Summary: "deployment completed"}}
 	orch := &Orchestrator{
 		executions: store,
-		planner:    planner.New(nil),
+		planner:    newPlannerForServiceDeploy(),
 		executor:   executor.New(store, executor.WithStepRunner(runner)),
 		maxIters:   2,
 	}
@@ -353,7 +590,7 @@ func TestWaitingApprovalStateSurvivesOrchestratorRestart(t *testing.T) {
 	store := newExecutionStoreForOrchestrator(t)
 	orch := &Orchestrator{
 		executions: store,
-		planner:    planner.New(nil),
+		planner:    newPlannerForServiceDeploy(),
 		executor:   executor.New(store, executor.WithStepRunner(&orchestratorStubStepRunner{result: executor.StepResult{Summary: "deployment completed"}})),
 		maxIters:   2,
 	}
@@ -417,10 +654,28 @@ func TestOrchestratorEmitsReplanStartedWhenSummaryNeedsMoreInvestigation(t *test
 	orch := &Orchestrator{
 		sessions:   sessions,
 		executions: store,
-		rewriter:   rewrite.New(nil),
-		planner:    planner.New(nil),
+		rewriter: rewrite.NewWithFunc(func(_ context.Context, in rewrite.Input, onDelta func(string)) (rewrite.Output, error) {
+			if onDelta != nil {
+				onDelta("已提取服务状态查询目标。")
+			}
+			return rewrite.Output{
+				RawUserInput:   in.Message,
+				NormalizedGoal: "查看 payment-api 的状态",
+				OperationMode:  "query",
+				ResourceHints: rewrite.ResourceHints{
+					ServiceName: "payment-api",
+					ServiceID:   42,
+				},
+				NormalizedRequest: rewrite.NormalizedRequest{
+					Intent:  "service_health_check",
+					Targets: []rewrite.RequestTarget{{Type: "service", Name: "payment-api"}},
+				},
+				Narrative: "已将口语化输入整理为服务状态查询任务。",
+			}, nil
+		}),
+		planner:    newPlannerForServiceStatus(),
 		executor:   executor.New(store, executor.WithStepRunner(runner)),
-		summarizer: summarizer.New(nil),
+		summarizer: newSummarizerNeedingInvestigation(),
 		renderer:   newFinalAnswerRenderer(),
 		maxIters:   2,
 	}
@@ -474,6 +729,25 @@ func assertStageSeen(t *testing.T, stages []string, want string) {
 		}
 	}
 	t.Fatalf("stages = %v, want %s", stages, want)
+}
+
+func assertStageChunkContains(t *testing.T, chunks []string, want string) {
+	t.Helper()
+	for _, chunk := range chunks {
+		if strings.Contains(chunk, want) {
+			return
+		}
+	}
+	t.Fatalf("stage chunks = %v, want content containing %q", chunks, want)
+}
+
+func assertStageChunkNotContains(t *testing.T, chunks []string, unwanted string) {
+	t.Helper()
+	for _, chunk := range chunks {
+		if strings.Contains(chunk, unwanted) {
+			t.Fatalf("stage chunks = %v, found unexpected placeholder %q", chunks, unwanted)
+		}
+	}
 }
 
 func containsEvent(items []string, target string) bool {

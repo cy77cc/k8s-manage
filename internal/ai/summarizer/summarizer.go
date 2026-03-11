@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cy77cc/OpsPilot/internal/ai/availability"
 	"github.com/cy77cc/OpsPilot/internal/ai/executor"
 	"github.com/cy77cc/OpsPilot/internal/ai/planner"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
@@ -41,10 +42,45 @@ type SummaryOutput struct {
 
 type Summarizer struct {
 	runner *adk.Runner
+	runFn  func(context.Context, Input, func(string)) (SummaryOutput, error)
 }
 
 func New(runner *adk.Runner) *Summarizer {
 	return &Summarizer{runner: runner}
+}
+
+func NewWithFunc(runFn func(context.Context, Input, func(string)) (SummaryOutput, error)) *Summarizer {
+	return &Summarizer{runFn: runFn}
+}
+
+type UnavailableError struct {
+	Code              string
+	UserVisibleReason string
+	Cause             error
+}
+
+func (e *UnavailableError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", strings.TrimSpace(e.Code), e.Cause)
+	}
+	return firstNonEmpty(e.Code, "summarizer_unavailable")
+}
+
+func (e *UnavailableError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (e *UnavailableError) UserVisibleMessage() string {
+	if e == nil {
+		return availability.UnavailableMessage(availability.LayerSummarizer)
+	}
+	return firstNonEmpty(e.UserVisibleReason, availability.UnavailableMessage(availability.LayerSummarizer))
 }
 
 func (s *Summarizer) Summarize(ctx context.Context, in Input) (SummaryOutput, error) {
@@ -56,101 +92,32 @@ func (s *Summarizer) SummarizeStream(ctx context.Context, in Input, onDelta func
 }
 
 func (s *Summarizer) summarize(ctx context.Context, in Input, onDelta func(string)) (SummaryOutput, error) {
-	base := buildBaseSummary(in)
+	if s != nil && s.runFn != nil {
+		return s.runFn(ctx, in, onDelta)
+	}
 	if s == nil || s.runner == nil {
-		return base, nil
+		return SummaryOutput{}, &UnavailableError{
+			Code:              "summarizer_runner_unavailable",
+			UserVisibleReason: availability.UnavailableMessage(availability.LayerSummarizer),
+		}
 	}
 	raw, err := runADKSummarizer(ctx, s.runner, buildPromptInput(in), onDelta)
 	if err != nil {
-		return base, nil
+		return SummaryOutput{}, &UnavailableError{
+			Code:              "summarizer_model_unavailable",
+			UserVisibleReason: availability.UnavailableMessage(availability.LayerSummarizer),
+			Cause:             err,
+		}
 	}
 	var parsed SummaryOutput
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed); err != nil {
-		return base, nil
-	}
-	return normalizeSummary(base, parsed), nil
-}
-
-func buildBaseSummary(in Input) SummaryOutput {
-	output := SummaryOutput{
-		Summary:         "本轮执行已结束，结果已交给 Summarizer 生成结构化结论。",
-		Headline:        "已完成本轮执行汇总",
-		Conclusion:      "可继续查看正文回答获取自然语言结论。",
-		KeyFindings:     []string{"当前结果已完成结构化汇总。"},
-		Recommendations: []string{"查看最终结论正文"},
-		RawOutputPolicy: "summary_only",
-		Narrative:       "Summarizer 模型不可用时，使用当前执行状态生成最小结构化摘要。",
-	}
-	if in.State.PendingApproval != nil && in.State.PendingApproval.Status == "pending" {
-		title := firstNonEmpty(in.State.PendingApproval.Title, in.State.PendingApproval.StepID)
-		output.Summary = fmt.Sprintf("步骤 %q 正在等待审批。", title)
-		output.Headline = "当前执行正在等待审批"
-		output.Conclusion = "当前计划已暂停，等待你确认后继续执行。"
-		output.KeyFindings = []string{fmt.Sprintf("待审批步骤：%s", title)}
-		output.Recommendations = []string{"确认当前审批请求"}
-		output.NextActions = []string{"确认当前审批请求"}
-		output.Narrative = "执行链到达审批节点，当前只能回报暂停状态。"
-		return output
-	}
-
-	completed, failed, blocked := summarizeStepCounts(in.Steps)
-	evidenceCount := countEvidence(in.Steps)
-
-	if failed > 0 || blocked > 0 {
-		output.Summary = "当前证据不足以形成稳定结论。"
-		output.Headline = "当前执行存在失败或阻断步骤"
-		output.Conclusion = "执行链中存在失败或阻断步骤，建议补充调查后再继续决策。"
-		output.KeyFindings = []string{
-			fmt.Sprintf("已完成步骤 %d 个", completed),
-			fmt.Sprintf("失败步骤 %d 个", failed),
-			fmt.Sprintf("阻断步骤 %d 个", blocked),
+		return SummaryOutput{}, &UnavailableError{
+			Code:              "summarizer_invalid_json",
+			UserVisibleReason: availability.InvalidOutputMessage(availability.LayerSummarizer),
+			Cause:             err,
 		}
-		output.Recommendations = []string{"检查失败步骤的错误详情", "补充缺失证据后重新规划"}
-		output.NextActions = []string{"检查失败步骤的错误详情", "补充缺失证据后重新规划"}
-		output.NeedMoreInvestigation = true
-		output.ReplanHint = &ReplanHint{
-			Reason:          "executor_has_failed_or_blocked_steps",
-			Focus:           "补充失败步骤所需的资源信息或调查证据",
-			MissingEvidence: []string{"failed_or_blocked_step_evidence"},
-		}
-		output.Narrative = "当前执行状态显示仍有失败或阻断步骤。"
-		return output
 	}
-	if completed > 0 && evidenceCount == 0 {
-		output.Summary = fmt.Sprintf("已完成 %d 个步骤，但还没有收集到足够的执行证据。", completed)
-		output.Headline = "已完成执行，但证据不足"
-		output.Conclusion = "当前只能给出初步判断，仍需补充执行证据后再确认结论。"
-		output.KeyFindings = []string{
-			fmt.Sprintf("已完成步骤 %d 个", completed),
-			"当前没有可用于支撑结论的执行证据。",
-		}
-		output.Recommendations = []string{"补充关键步骤的执行证据", "基于新增证据重新总结结论"}
-		output.NextActions = []string{"补充关键步骤的执行证据", "基于新增证据重新总结结论"}
-		output.NeedMoreInvestigation = true
-		output.ReplanHint = &ReplanHint{
-			Reason:          "completed_steps_without_evidence",
-			Focus:           "补充已完成步骤对应的工具输出或观察证据",
-			MissingEvidence: []string{"step_evidence"},
-		}
-		output.Narrative = "步骤虽然完成，但缺少可支撑结论的 StepResult/Evidence。"
-		return output
-	}
-
-	goal := strings.TrimSpace(in.Message)
-	if in.Plan != nil && strings.TrimSpace(in.Plan.Goal) != "" {
-		goal = strings.TrimSpace(in.Plan.Goal)
-	}
-	output.Summary = fmt.Sprintf("已围绕目标“%s”完成 %d 个步骤，并收集到 %d 条执行证据。", goal, completed, evidenceCount)
-	output.Headline = "已完成本轮排查"
-	output.Conclusion = "当前结论基于已执行步骤及其证据生成，可继续查看正文回答获取自然语言说明。"
-	output.KeyFindings = []string{
-		fmt.Sprintf("已完成步骤 %d 个", completed),
-		fmt.Sprintf("收集执行证据 %d 条", evidenceCount),
-	}
-	output.Recommendations = []string{"查看最终结论正文"}
-	output.NextActions = []string{"查看最终结论正文"}
-	output.Narrative = "当前总结基于 StepResult 与执行证据汇总得出。"
-	return output
+	return normalizeSummary(parsed)
 }
 
 func buildPromptInput(in Input) string {
@@ -168,75 +135,30 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func normalizeSummary(base, parsed SummaryOutput) SummaryOutput {
-	if strings.TrimSpace(parsed.Summary) == "" {
-		parsed.Summary = base.Summary
-	}
-	if strings.TrimSpace(parsed.Headline) == "" {
-		parsed.Headline = firstNonEmpty(base.Headline, parsed.Summary)
-	}
-	if strings.TrimSpace(parsed.Conclusion) == "" {
-		parsed.Conclusion = base.Conclusion
-	}
-	if len(parsed.KeyFindings) == 0 {
-		parsed.KeyFindings = append([]string(nil), base.KeyFindings...)
-	}
-	if len(parsed.ResourceSummaries) == 0 {
-		parsed.ResourceSummaries = append([]string(nil), base.ResourceSummaries...)
-	}
-	if len(parsed.Recommendations) == 0 {
-		parsed.Recommendations = append([]string(nil), base.Recommendations...)
+func normalizeSummary(parsed SummaryOutput) (SummaryOutput, error) {
+	parsed.Summary = firstNonEmpty(parsed.Summary, parsed.Headline, parsed.Conclusion)
+	parsed.Headline = firstNonEmpty(parsed.Headline, parsed.Summary)
+	parsed.Conclusion = firstNonEmpty(parsed.Conclusion, parsed.Summary)
+	if parsed.Summary == "" || parsed.Headline == "" || parsed.Conclusion == "" {
+		return SummaryOutput{}, &UnavailableError{
+			Code:              "summarizer_invalid_output",
+			UserVisibleReason: availability.InvalidOutputMessage(availability.LayerSummarizer),
+			Cause:             fmt.Errorf("summary output missing summary/headline/conclusion"),
+		}
 	}
 	if strings.TrimSpace(parsed.RawOutputPolicy) == "" {
-		parsed.RawOutputPolicy = firstNonEmpty(base.RawOutputPolicy, "summary_only")
+		parsed.RawOutputPolicy = "summary_only"
 	}
-	if len(parsed.NextActions) == 0 {
-		parsed.NextActions = base.NextActions
-	}
-	if strings.TrimSpace(parsed.Narrative) == "" {
-		parsed.Narrative = base.Narrative
-	}
-	if parsed.ReplanHint == nil && base.ReplanHint != nil {
-		parsed.ReplanHint = base.ReplanHint
-	}
+	parsed.KeyFindings = dedupe(parsed.KeyFindings)
+	parsed.ResourceSummaries = dedupe(parsed.ResourceSummaries)
+	parsed.Recommendations = dedupe(parsed.Recommendations)
+	parsed.NextActions = dedupe(parsed.NextActions)
 	if parsed.NeedMoreInvestigation {
 		parsed.Conclusion = qualifyUncertainConclusion(parsed.Conclusion)
 		parsed.Narrative = qualifyUncertainNarrative(parsed.Narrative)
 		parsed.Headline = qualifyHeadline(parsed.Headline)
-		return parsed
 	}
-	parsed.NeedMoreInvestigation = base.NeedMoreInvestigation
-	if parsed.NeedMoreInvestigation {
-		if parsed.ReplanHint == nil {
-			parsed.ReplanHint = base.ReplanHint
-		}
-		parsed.Conclusion = qualifyUncertainConclusion(parsed.Conclusion)
-		parsed.Narrative = qualifyUncertainNarrative(parsed.Narrative)
-		parsed.Headline = qualifyHeadline(parsed.Headline)
-	}
-	return parsed
-}
-
-func summarizeStepCounts(steps []executor.StepResult) (completed, failed, blocked int) {
-	for _, step := range steps {
-		switch step.Status {
-		case runtime.StepCompleted:
-			completed++
-		case runtime.StepFailed:
-			failed++
-		case runtime.StepBlocked, runtime.StepCancelled:
-			blocked++
-		}
-	}
-	return completed, failed, blocked
-}
-
-func countEvidence(steps []executor.StepResult) int {
-	total := 0
-	for _, step := range steps {
-		total += len(step.Evidence)
-	}
-	return total
+	return parsed, nil
 }
 
 func qualifyUncertainConclusion(text string) string {
@@ -287,4 +209,21 @@ func containsUncertaintyMarker(text string) bool {
 		}
 	}
 	return false
+}
+
+func dedupe(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }

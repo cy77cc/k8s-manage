@@ -10,11 +10,13 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/google/uuid"
 
+	"github.com/cy77cc/OpsPilot/internal/ai/availability"
 	"github.com/cy77cc/OpsPilot/internal/ai/rewrite"
 )
 
 type Planner struct {
 	runner *adk.Runner
+	runFn  func(context.Context, Input, func(string)) (Decision, error)
 }
 
 type Input struct {
@@ -38,6 +40,36 @@ type Decision struct {
 	Candidates []map[string]any `json:"candidates,omitempty"`
 	Plan       *ExecutionPlan   `json:"plan,omitempty"`
 	Narrative  string           `json:"narrative"`
+}
+
+type PlanningError struct {
+	Code              string
+	UserVisibleReason string
+	Cause             error
+}
+
+func (e *PlanningError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", strings.TrimSpace(e.Code), e.Cause)
+	}
+	return firstNonEmpty(e.Code, "planning_unavailable")
+}
+
+func (e *PlanningError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (e *PlanningError) UserVisibleMessage() string {
+	if e == nil {
+		return availability.UnavailableMessage(availability.LayerPlanner)
+	}
+	return firstNonEmpty(e.UserVisibleReason, availability.UnavailableMessage(availability.LayerPlanner))
 }
 
 type ExecutionPlan struct {
@@ -98,6 +130,10 @@ func New(runner *adk.Runner) *Planner {
 	return &Planner{runner: runner}
 }
 
+func NewWithFunc(runFn func(context.Context, Input, func(string)) (Decision, error)) *Planner {
+	return &Planner{runFn: runFn}
+}
+
 func (p *Planner) Plan(ctx context.Context, in Input) (Decision, error) {
 	return p.plan(ctx, in, nil)
 }
@@ -107,21 +143,36 @@ func (p *Planner) PlanStream(ctx context.Context, in Input, onDelta func(string)
 }
 
 func (p *Planner) plan(ctx context.Context, in Input, onDelta func(string)) (Decision, error) {
-	base := buildBaseDecision(in)
-
+	if p != nil && p.runFn != nil {
+		return p.runFn(ctx, in, onDelta)
+	}
+	if ambiguity := buildAmbiguityDecision(in.Rewrite); ambiguity.Type != "" {
+		return ambiguity, nil
+	}
 	if p == nil || p.runner == nil {
-		return base, nil
+		return Decision{}, &PlanningError{
+			Code:              "planner_runner_unavailable",
+			UserVisibleReason: availability.UnavailableMessage(availability.LayerPlanner),
+		}
 	}
 	raw, err := runADKPlanner(ctx, p.runner, buildPromptInput(in), onDelta)
 	if err != nil {
-		return base, nil
+		return Decision{}, &PlanningError{
+			Code:              "planner_model_unavailable",
+			UserVisibleReason: availability.UnavailableMessage(availability.LayerPlanner),
+			Cause:             err,
+		}
 	}
 
 	parsed, err := ParseDecision(strings.TrimSpace(raw))
 	if err != nil {
-		return base, nil
+		return Decision{}, &PlanningError{
+			Code:              "planner_invalid_json",
+			UserVisibleReason: availability.InvalidOutputMessage(availability.LayerPlanner),
+			Cause:             err,
+		}
 	}
-	return normalizeDecision(base, parsed), nil
+	return normalizeDecision(buildBasePlanContext(in), parsed)
 }
 
 func ParseDecision(raw string) (Decision, error) {
@@ -152,22 +203,22 @@ func ParseDecision(raw string) (Decision, error) {
 	return out, nil
 }
 
-func buildBaseDecision(in Input) Decision {
-	rewritten := in.Rewrite
+func buildAmbiguityDecision(rewritten rewrite.Output) Decision {
 	ambiguities := dedupe(append(append([]string(nil), rewritten.AmbiguityFlags...), rewritten.Ambiguities...))
-	if len(ambiguities) > 0 {
-		return Decision{
-			Type:       DecisionClarify,
-			Message:    "我需要先确认目标资源后再继续规划。",
-			Narrative:  "Rewrite 输出仍有未消解歧义，Planner 先请求补充信息。",
-			Candidates: buildClarifyCandidates(ambiguities),
-		}
+	if len(ambiguities) == 0 {
+		return Decision{}
 	}
+	return Decision{
+		Type:       DecisionClarify,
+		Message:    "我需要先确认目标资源后再继续规划。",
+		Narrative:  "Rewrite 输出仍有未消解歧义，Planner 先请求补充信息。",
+		Candidates: buildClarifyCandidates(ambiguities),
+	}
+}
 
-	planID := uuid.NewString()
+func buildBasePlanContext(in Input) *ExecutionPlan {
+	rewritten := in.Rewrite
 	goal := firstNonEmpty(rewritten.NormalizedGoal, strings.TrimSpace(in.Message))
-	mode, risk := normalizeStepMode(rewritten.OperationMode)
-	expert := pickPrimaryExpert(rewritten)
 	resolved := ResolvedResources{
 		ServiceName: rewritten.ResourceHints.ServiceName,
 		ServiceID:   rewritten.ResourceHints.ServiceID,
@@ -183,86 +234,65 @@ func buildBaseDecision(in Input) Decision {
 		Pods:        collectPods(rewritten),
 		Scope:       detectScope(rewritten),
 	}
-	step := PlanStep{
-		StepID:    "step-1",
-		Title:     "处理用户请求",
-		Expert:    expert,
-		Intent:    "handle_request",
-		Task:      goal,
-		Mode:      mode,
-		Risk:      risk,
-		Narrative: goal,
-		Input: map[string]any{
-			"message":            strings.TrimSpace(in.Message),
-			"normalized_request": rewritten.NormalizedRequest,
-			"resource_hints":     rewritten.ResourceHints,
-			"scope":              scopeToMap(detectScope(rewritten)),
-		},
-	}
-	step = normalizeFleetHostStep(step, resolved)
-	return Decision{
-		Type:      DecisionPlan,
-		Narrative: "Planner 模型不可用时，使用最小结构化计划继续交给执行层处理。",
-		Plan: &ExecutionPlan{
-			PlanID:    planID,
-			Goal:      goal,
-			Resolved:  resolved,
-			Narrative: "该计划是 Planner 失败时的最小兜底结构，保留用户目标与已知资源线索。",
-			Steps:     []PlanStep{step},
-		},
+	return &ExecutionPlan{
+		PlanID:   uuid.NewString(),
+		Goal:     goal,
+		Resolved: resolved,
+		Steps: []PlanStep{{
+			StepID: "step-1",
+			Input: map[string]any{
+				"message":            strings.TrimSpace(in.Message),
+				"normalized_request": rewritten.NormalizedRequest,
+				"resource_hints":     rewritten.ResourceHints,
+				"scope":              scopeToMap(detectScope(rewritten)),
+			},
+		}},
 	}
 }
 
 func buildPromptInput(in Input) string {
-	data, _ := json.Marshal(in.Rewrite)
+	data, _ := json.Marshal(in.Rewrite.SemanticContract())
 	return "message: " + strings.TrimSpace(in.Message) + "\nrewrite: " + string(data)
 }
 
-func normalizeDecision(base, parsed Decision) Decision {
-	parsed = canonicalizeDecision(base, parsed)
+func normalizeDecision(base *ExecutionPlan, parsed Decision) (Decision, error) {
+	parsed = canonicalizeDecision(parsed)
 	if parsed.Type == "" {
-		return base
-	}
-	if parsed.Type == DecisionPlan {
-		parsed.Plan = canonicalizePlan(base.Plan, parsed.Plan)
-		if clarify := validatePlanPrerequisites(parsed.Plan); clarify.Type != "" {
-			return clarify
+		return Decision{}, &PlanningError{
+			Code:              "planning_invalid",
+			UserVisibleReason: "AI 规划结果不可执行，请稍后重试或手动在页面中执行操作。",
 		}
 	}
-	return parsed
+	if parsed.Type == DecisionPlan {
+		var err error
+		parsed.Plan, err = canonicalizePlan(base, parsed.Plan)
+		if err != nil {
+			return Decision{}, err
+		}
+		if err := validatePlanPrerequisites(parsed.Plan); err != nil {
+			return Decision{}, err
+		}
+	}
+	return parsed, nil
 }
 
-func canonicalizeDecision(base, parsed Decision) Decision {
+func canonicalizeDecision(parsed Decision) Decision {
 	if parsed.Type == "" {
-		return base
-	}
-	if strings.TrimSpace(parsed.Narrative) == "" {
-		parsed.Narrative = base.Narrative
-	}
-	if parsed.Type == DecisionPlan && parsed.Plan == nil {
-		parsed.Plan = base.Plan
-	}
-	if parsed.Type == DecisionClarify && strings.TrimSpace(parsed.Message) == "" {
-		parsed.Message = base.Message
-	}
-	if parsed.Type == DecisionDirectReply && strings.TrimSpace(parsed.Message) == "" {
-		parsed.Message = base.Message
+		return Decision{}
 	}
 	return parsed
 }
 
-func canonicalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
+func canonicalizePlan(base, parsed *ExecutionPlan) (*ExecutionPlan, error) {
 	if parsed == nil {
-		return base
+		return nil, &PlanningError{
+			Code:              "planning_invalid",
+			UserVisibleReason: "AI 规划结果不可执行，请稍后重试或手动在页面中执行操作。",
+			Cause:             fmt.Errorf("planner plan is nil"),
+		}
 	}
 	if base == nil {
-		return parsed
-	}
-	if strings.TrimSpace(parsed.PlanID) == "" {
-		parsed.PlanID = base.PlanID
-	}
-	if strings.TrimSpace(parsed.Goal) == "" {
-		parsed.Goal = base.Goal
+		base = &ExecutionPlan{}
 	}
 	parsed.Resolved.ServiceName = firstNonEmpty(parsed.Resolved.ServiceName, base.Resolved.ServiceName)
 	if parsed.Resolved.ServiceID == 0 {
@@ -298,40 +328,21 @@ func canonicalizePlan(base, parsed *ExecutionPlan) *ExecutionPlan {
 	if parsed.Resolved.Scope == nil && base.Resolved.Scope != nil {
 		parsed.Resolved.Scope = cloneScope(base.Resolved.Scope)
 	}
-	if len(parsed.Steps) == 0 {
-		parsed.Steps = base.Steps
-	}
 	commonInput := baseStepInput(base)
 	for i := range parsed.Steps {
 		step := parsed.Steps[i]
 		if strings.TrimSpace(step.StepID) == "" {
 			step.StepID = fmt.Sprintf("step-%d", i+1)
 		}
-		if strings.TrimSpace(step.Title) == "" {
-			step.Title = fmt.Sprintf("步骤 %d", i+1)
-		}
-		if strings.TrimSpace(step.Expert) == "" {
-			if i < len(base.Steps) {
-				step.Expert = base.Steps[i].Expert
-			}
-			if strings.TrimSpace(step.Expert) == "" {
-				step.Expert = "service"
-			}
-		}
-		step.Expert = normalizeExpertName(step.Expert, parsed.Steps, i)
 		step.Mode, step.Risk = normalizeModeRisk(step.Mode, step.Risk)
-		step = normalizeFleetHostStep(step, parsed.Resolved)
 		if len(step.DependsOn) > 0 {
 			step.DependsOn = dedupe(step.DependsOn)
-		}
-		if strings.TrimSpace(step.Narrative) == "" {
-			step.Narrative = firstNonEmpty(step.Task, step.Title)
 		}
 		step.Input = mergeStepInput(commonInput, step.Input)
 		step.Input = populateStepInput(step, parsed.Resolved)
 		parsed.Steps[i] = step
 	}
-	return parsed
+	return parsed, nil
 }
 
 func normalizeFleetHostStep(step PlanStep, resolved ResolvedResources) PlanStep {
@@ -728,53 +739,71 @@ func cloneInput(input map[string]any) map[string]any {
 	return out
 }
 
-func validatePlanPrerequisites(plan *ExecutionPlan) Decision {
+func validatePlanPrerequisites(plan *ExecutionPlan) error {
 	if plan == nil {
-		return Decision{}
+		return &PlanningError{
+			Code:              "planning_invalid",
+			UserVisibleReason: "AI 规划结果不可执行，请稍后重试或手动在页面中执行操作。",
+			Cause:             fmt.Errorf("planner plan is nil"),
+		}
+	}
+	if strings.TrimSpace(plan.PlanID) == "" || strings.TrimSpace(plan.Goal) == "" || len(plan.Steps) == 0 {
+		return &PlanningError{
+			Code:              "planning_invalid",
+			UserVisibleReason: "AI 规划结果缺少必要字段，当前无法执行。",
+			Cause:             fmt.Errorf("planner plan is missing plan_id, goal, or steps"),
+		}
 	}
 	for _, step := range plan.Steps {
+		if strings.TrimSpace(step.Title) == "" || strings.TrimSpace(step.Expert) == "" || strings.TrimSpace(step.Task) == "" {
+			return &PlanningError{
+				Code:              "planning_invalid",
+				UserVisibleReason: "AI 规划结果缺少必要步骤字段，当前无法执行。",
+				Cause:             fmt.Errorf("planner step %s missing title, expert, or task", strings.TrimSpace(step.StepID)),
+			}
+		}
 		switch step.Expert {
 		case "k8s":
 			if resolvedClusterID(step, plan.Resolved) <= 0 {
-				return Decision{
-					Type:      DecisionClarify,
-					Message:   "需要先明确目标集群后才能执行 Kubernetes 相关步骤。",
-					Narrative: "Kubernetes 步骤缺少 cluster_id，Planner 不能继续交给 Executor。",
+				return &PlanningError{
+					Code:              "planning_invalid",
+					UserVisibleReason: "AI 规划结果缺少 cluster_id，当前无法执行 Kubernetes 相关步骤。",
+					Cause:             fmt.Errorf("kubernetes step missing cluster_id"),
 				}
 			}
 			if requiresK8sPodTarget(step, plan.Resolved) && resolvedPodName(step, plan.Resolved) == "" {
-				return Decision{
-					Type:      DecisionClarify,
-					Message:   "需要先明确目标 Pod 名称后才能继续执行。",
-					Narrative: "Kubernetes Pod 相关步骤缺少 pod 标识。",
+				return &PlanningError{
+					Code:              "planning_invalid",
+					UserVisibleReason: "AI 规划结果缺少 pod 标识，当前无法执行 Kubernetes Pod 相关步骤。",
+					Cause:             fmt.Errorf("kubernetes pod step missing pod target"),
 				}
 			}
 		case "service":
 			if requiresServiceID(step) && resolvedServiceID(step, plan.Resolved) <= 0 {
-				return Decision{
-					Type:      DecisionClarify,
-					Message:   "需要先明确目标服务后才能继续执行服务相关步骤。",
-					Narrative: "Service 步骤缺少 service_id。",
+				return &PlanningError{
+					Code:              "planning_invalid",
+					UserVisibleReason: "AI 规划结果缺少 service_id，当前无法执行服务相关步骤。",
+					Cause:             fmt.Errorf("service step missing service_id"),
 				}
 			}
 			if requiresClusterID(step) && resolvedClusterID(step, plan.Resolved) <= 0 {
-				return Decision{
-					Type:      DecisionClarify,
-					Message:   "需要先明确目标集群后才能执行服务部署相关步骤。",
-					Narrative: "Service 部署步骤缺少 cluster_id。",
+				return &PlanningError{
+					Code:              "planning_invalid",
+					UserVisibleReason: "AI 规划结果缺少 cluster_id，当前无法执行服务部署相关步骤。",
+					Cause:             fmt.Errorf("service mutating step missing cluster_id"),
 				}
 			}
 		case "hostops":
 			if requiresHostTarget(step, plan.Resolved) && len(resolvedHostIDs(step, plan.Resolved)) == 0 && !hasResolvedScope(step, plan.Resolved, "host") {
-				return Decision{
-					Type:      DecisionClarify,
-					Message:   "需要先明确目标主机后才能继续执行主机相关步骤。",
-					Narrative: "HostOps 步骤缺少 host_id 或 host_ids。",
+				return &PlanningError{
+					Code:              "planning_invalid",
+					UserVisibleReason: "AI 规划结果缺少 host_id 或 host_ids，当前无法执行主机相关步骤。",
+					Cause:             fmt.Errorf("hostops step missing host target"),
 				}
 			}
 		}
 	}
-	return Decision{}
+	return nil
 }
 
 func requiresServiceID(step PlanStep) bool {

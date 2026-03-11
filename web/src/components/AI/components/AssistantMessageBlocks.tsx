@@ -3,7 +3,7 @@ import { theme } from 'antd';
 import { Think, CodeHighlighter } from '@ant-design/x';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import { RecommendationCard } from './RecommendationCard';
-import type { AssistantMessageBlock, RecommendationsBlock } from '../messageBlocks';
+import type { AssistantMessageBlock, RawEvidenceBlock, RecommendationsBlock } from '../messageBlocks';
 
 class BlockErrorBoundary extends React.Component<{
   fallback: React.ReactNode;
@@ -101,6 +101,23 @@ const RecommendationMessageBlock: React.FC<{
   </BlockErrorBoundary>
 );
 
+const RawEvidenceMessageBlock: React.FC<{ block: RawEvidenceBlock }> = ({ block }) => (
+  <BlockErrorBoundary
+    fallback={(
+      <pre style={{ whiteSpace: 'pre-wrap', margin: '12px 0 0' }}>
+        {block.items.join('\n')}
+      </pre>
+    )}
+  >
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>原始执行证据</div>
+      <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+        {block.items.map((item) => `- ${item}`).join('\n')}
+      </pre>
+    </div>
+  </BlockErrorBoundary>
+);
+
 export function AssistantMessageBlocks({
   blocks,
   onRecommendationSelect,
@@ -132,6 +149,8 @@ export function AssistantMessageBlocks({
                 onRecommendationSelect={onRecommendationSelect}
               />
             );
+          case 'raw_evidence':
+            return <RawEvidenceMessageBlock key={block.id} block={block} />;
           case 'fallback':
           default:
             return (

@@ -149,6 +149,16 @@ function normalizeThoughtStatus(status: string | undefined, fallback: ThoughtSta
   }
 }
 
+function collectRawEvidenceFromThoughtChain(stages: ThoughtStageItem[] | undefined): string[] {
+  const executeStage = (stages || []).find((item) => item.key === 'execute');
+  if (!executeStage?.details?.length) {
+    return [];
+  }
+  return executeStage.details
+    .map((detail) => (detail.content || detail.label || '').trim())
+    .filter(Boolean);
+}
+
 function resolveThoughtStageTitle(stage: string | undefined): ThoughtStageItem['title'] {
   switch (stage) {
     case 'rewrite':
@@ -170,19 +180,21 @@ const AssistantMessage: React.FC<{
   thinking?: string;
   recommendations?: EmbeddedRecommendation[];
   thoughtChain?: ThoughtStageItem[];
+  rawEvidence?: string[];
   isStreaming?: boolean;
   showActions?: boolean;
   onRegenerate?: () => void;
   onRecommendationSelect?: (prompt: string) => void;
   isLoading?: boolean;
-}> = ({ content, thinking, recommendations, thoughtChain, isStreaming, showActions = true, onRegenerate, onRecommendationSelect, isLoading }) => {
+}> = ({ content, thinking, recommendations, thoughtChain, rawEvidence, isStreaming, showActions = true, onRegenerate, onRecommendationSelect, isLoading }) => {
   const { token } = theme.useToken();
   const blocks = useMemo(() => normalizeAssistantMessage({
     content,
     thinking,
+    rawEvidence,
     recommendations,
     isStreaming,
-  }), [content, thinking, recommendations, isStreaming]);
+  }), [content, thinking, rawEvidence, recommendations, isStreaming]);
 
   return (
     <div>
@@ -657,6 +669,10 @@ export const Copilot: React.FC<CopilotProps> = ({
               const output = (data.output as Record<string, unknown> | undefined) || {};
               setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
                 ...message,
+                summaryOutput: output,
+                rawEvidence: String(output.raw_output_policy || '').toLowerCase() === 'include_evidence'
+                  ? collectRawEvidenceFromThoughtChain(message.thoughtChain)
+                  : message.rawEvidence,
                 thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
                   key: 'summary',
                   title: '生成结论',
@@ -677,6 +693,14 @@ export const Copilot: React.FC<CopilotProps> = ({
                 const finalAssistant = getLastAssistantMessage(session);
                 assistantContent ||= String(finalAssistant?.content || '');
                 assistantThinking ||= String(finalAssistant?.thinking || '');
+                assistantRecommendations ||= (finalAssistant?.recommendations as EmbeddedRecommendation[] | undefined);
+                const finalSummaryOutput = (finalAssistant?.summaryOutput as Record<string, unknown> | undefined) || undefined;
+                const finalRawEvidence = (finalAssistant?.rawEvidence as string[] | undefined) || undefined;
+                setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
+                  ...message,
+                  summaryOutput: finalSummaryOutput || message.summaryOutput,
+                  rawEvidence: finalRawEvidence || message.rawEvidence,
+                })));
                 if (session.id) {
                   setSessionId(session.id as string);
                 }
@@ -693,12 +717,28 @@ export const Copilot: React.FC<CopilotProps> = ({
               break;
 
             case 'error':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: (message.thoughtChain || []).map((item, index, items) => (
-                  index === items.length - 1 ? { ...item, status: 'error', blink: false } : item
-                )),
-              })));
+              assistantContent ||= String(data.message || '当前 AI 阶段执行失败，请稍后重试。').trim();
+              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => {
+                const stageKey = String(data.stage || '').trim() as ThoughtStageItem['key'];
+                const errorText = String(data.message || '当前 AI 阶段执行失败，请稍后重试。').trim();
+                const nextThoughtChain = stageKey
+                  ? upsertThoughtStage(message.thoughtChain || [], {
+                    key: stageKey,
+                    title: resolveThoughtStageTitle(stageKey),
+                    status: 'error',
+                    description: errorText,
+                    content: errorText,
+                    blink: false,
+                  })
+                  : (message.thoughtChain || []).map((item, index, items) => (
+                    index === items.length - 1 ? { ...item, status: 'error' as ThoughtStageStatus, blink: false, content: item.content || errorText } : item
+                  ));
+                return {
+                  ...message,
+                  content: message.content || errorText,
+                  thoughtChain: nextThoughtChain,
+                };
+              }));
               setIsLoading(false);
               break;
           }
@@ -862,6 +902,7 @@ export const Copilot: React.FC<CopilotProps> = ({
         thinking={msg.thinking}
         recommendations={msg.recommendations}
         thoughtChain={msg.thoughtChain}
+        rawEvidence={msg.rawEvidence}
         isStreaming={isStreaming || (isCurrentStreaming && !!msg.thinking && !msg.content)}
         onRegenerate={() => handleRegenerate(msg.id)}
         onRecommendationSelect={handleRecommendationSelect}
