@@ -66,3 +66,41 @@ func TestFinalAnswerRendererSuppressesRawCommandDump(t *testing.T) {
 		t.Fatalf("rendered body = %q, want summarized finding", joined)
 	}
 }
+
+func TestFinalAnswerRendererFiltersBoilerplateSummaryScaffold(t *testing.T) {
+	renderer := newFinalAnswerRenderer()
+	paragraphs := renderer.Render("在火山云服务器上执行 df -h", nil, &executor.Result{
+		Steps: []executor.StepResult{{
+			StepID:  "step-1",
+			Summary: "host command completed",
+			Evidence: []executor.Evidence{{
+				Kind:   "expert_result",
+				Source: "hostops",
+				Data: map[string]any{
+					"observed_facts": []any{
+						"命令 df -h 在 host_id 2 上执行成功，退出码为 0",
+						"根文件系统 /dev/vda2 总容量 40G，已使用 10G，可用 28G，使用率 27%",
+					},
+				},
+			}},
+		}},
+	}, summarizer.SummaryOutput{
+		Headline:        "已完成本轮排查",
+		KeyFindings:     []string{"已完成步骤 1 个", "收集执行证据 1 条"},
+		Recommendations: []string{"查看最终结论正文"},
+	})
+
+	joined := strings.Join(paragraphs, "\n\n")
+	if strings.Contains(joined, "已完成本轮排查") {
+		t.Fatalf("rendered body = %q, should not keep boilerplate headline", joined)
+	}
+	if strings.Contains(joined, "已完成步骤 1 个") || strings.Contains(joined, "收集执行证据 1 条") {
+		t.Fatalf("rendered body = %q, should not keep boilerplate findings", joined)
+	}
+	if strings.Contains(joined, "查看最终结论正文") {
+		t.Fatalf("rendered body = %q, should not keep boilerplate recommendation", joined)
+	}
+	if !strings.Contains(joined, "根文件系统 /dev/vda2") {
+		t.Fatalf("rendered body = %q, want real observed fact", joined)
+	}
+}

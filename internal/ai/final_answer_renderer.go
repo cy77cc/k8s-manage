@@ -31,11 +31,16 @@ func (r *finalAnswerRenderer) Render(message string, plan *planner.ExecutionPlan
 }
 
 func (r *finalAnswerRenderer) renderGeneric(summaryOut summarizer.SummaryOutput, result *executor.Result) []string {
-	paragraphs := []string{sanitizeAnswerText(firstNonEmpty(summaryOut.Headline, summaryOut.Summary))}
+	headline := chooseGenericHeadline(summaryOut, result)
+	paragraphs := []string{}
+	if headline != "" {
+		paragraphs = append(paragraphs, headline)
+	}
 	findings := append([]string(nil), summaryOut.KeyFindings...)
 	findings = append(findings, summaryOut.ResourceSummaries...)
 	findings = append(findings, importantObservedFacts(result, 3)...)
 	findings = sanitizeLines(findings)
+	findings = filterBoilerplateFindings(findings)
 	if len(findings) > 0 {
 		paragraphs = append(paragraphs, "关键依据：\n- "+strings.Join(findings, "\n- "))
 	}
@@ -43,6 +48,7 @@ func (r *finalAnswerRenderer) renderGeneric(summaryOut summarizer.SummaryOutput,
 	if len(recommendations) == 0 {
 		recommendations = sanitizeLines(summaryOut.NextActions)
 	}
+	recommendations = filterBoilerplateRecommendations(recommendations)
 	if len(recommendations) > 0 {
 		paragraphs = append(paragraphs, "建议：\n- "+strings.Join(recommendations, "\n- "))
 	}
@@ -287,6 +293,80 @@ func sanitizeAnswerText(text string) string {
 	text = strings.ReplaceAll(text, "***", "")
 	text = strings.ReplaceAll(text, "**", "")
 	return strings.TrimSpace(text)
+}
+
+func chooseGenericHeadline(summaryOut summarizer.SummaryOutput, result *executor.Result) string {
+	candidates := []string{
+		sanitizeAnswerText(summaryOut.Headline),
+		sanitizeAnswerText(summaryOut.Conclusion),
+		sanitizeAnswerText(summaryOut.Summary),
+	}
+	for _, item := range candidates {
+		if isBoilerplateHeadline(item) {
+			continue
+		}
+		if item != "" {
+			return item
+		}
+	}
+	facts := filterBoilerplateFindings(sanitizeLines(importantObservedFacts(result, 1)))
+	if len(facts) > 0 {
+		return facts[0]
+	}
+	return ""
+}
+
+func filterBoilerplateFindings(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if isBoilerplateFinding(item) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return dedupeStrings(out)
+}
+
+func filterBoilerplateRecommendations(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if isBoilerplateRecommendation(item) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return dedupeStrings(out)
+}
+
+func isBoilerplateHeadline(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+	switch text {
+	case "已完成本轮排查", "已完成本轮执行汇总", "本轮执行已结束，结果已交给 Summarizer 生成结构化结论。":
+		return true
+	}
+	return strings.Contains(text, "可继续查看正文回答") || strings.Contains(text, "结构化结论")
+}
+
+func isBoilerplateFinding(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+	if strings.HasPrefix(text, "已完成步骤 ") || strings.HasPrefix(text, "收集执行证据 ") {
+		return true
+	}
+	return text == "当前结果已完成结构化汇总。"
+}
+
+func isBoilerplateRecommendation(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+	return text == "查看最终结论正文"
 }
 
 func compactParagraphs(in []string) []string {
