@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyBlockDelta,
   applyBlockOpen,
+  applyBlockReplace,
   applyTurnStarted,
   getTurnBlocksForDisplay,
   projectTurnSummary,
@@ -88,5 +89,31 @@ describe('turnLifecycle', () => {
 
     const blocks = getTurnBlocksForDisplay(turn, 'normal', true);
     expect(blocks[0].streaming).toBe(false);
+  });
+
+  it('keeps approval blocks visible in normal mode', () => {
+    let turn = applyTurnStarted(undefined, { turn_id: 'turn-4', phase: 'execute', status: 'waiting_user' });
+    turn = applyBlockReplace(turn, {
+      turn_id: 'turn-4',
+      block_id: 'approval:step-1',
+      block_type: 'approval',
+      payload: {
+        title: '等待你确认',
+        summary: '请确认创建定时任务',
+        risk: 'high',
+        status: 'waiting_user',
+      },
+    });
+
+    const blocks = getTurnBlocksForDisplay(turn, 'normal', false);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      id: 'approval:step-1',
+      type: 'approval',
+      data: {
+        title: '等待你确认',
+        summary: '请确认创建定时任务',
+      },
+    });
   });
 });

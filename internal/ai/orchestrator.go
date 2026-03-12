@@ -779,6 +779,12 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 					},
 				})
 				if execErr == nil && executed != nil {
+					if approval := executed.Approval(); approval != nil && strings.TrimSpace(approval.Status) == "pending" {
+						projector.SetState("waiting_user", "execute")
+						waitingSummary := "此步骤需要你确认后继续执行。"
+						emitDeltaChunks(emit, projector, meta, waitingSummary)
+						return waitingSummary, nil
+					}
 					projector.SetState("streaming", "summary")
 					emitStageDelta(emit, projector, meta, "summary", "loading", "正在思考并整理最终回答。", "", "")
 					summaryText, summaryErr := o.summarizeExecution(ctx, message, decision.Plan, executed, func(chunk string) {

@@ -117,6 +117,15 @@ func TestOrchestratorRunEmitsApprovalRequiredStreamState(t *testing.T) {
 	if !containsTurnState(eventsSeen, "waiting_user") {
 		t.Fatalf("expected waiting_user turn_state in stream: %#v", eventTypes(eventsSeen))
 	}
+	if findEvent(eventsSeen, events.ThinkingDelta) != nil {
+		t.Fatalf("approval flow should not emit thinking deltas before approval: %#v", eventTypes(eventsSeen))
+	}
+	if findEvent(eventsSeen, events.Summary) != nil {
+		t.Fatalf("approval flow should not emit summary before approval: %#v", eventTypes(eventsSeen))
+	}
+	if !containsEventData(eventsSeen, events.Delta, "content_chunk", "此步骤需要你确认后继续执行。") {
+		t.Fatalf("approval flow should emit waiting summary delta: %#v", eventsSeen)
+	}
 }
 
 func assertContainsEvent(t *testing.T, seen []StreamEvent, want events.Name) {
@@ -153,4 +162,16 @@ func eventTypes(seen []StreamEvent) []events.Name {
 		out = append(out, evt.Type)
 	}
 	return out
+}
+
+func containsEventData(seen []StreamEvent, want events.Name, key, value string) bool {
+	for _, evt := range seen {
+		if evt.Type != want {
+			continue
+		}
+		if stringValue(evt.Data[key]) == value {
+			return true
+		}
+	}
+	return false
 }

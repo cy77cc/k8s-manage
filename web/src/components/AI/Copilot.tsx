@@ -8,6 +8,7 @@ import {
   CommentOutlined,
   GlobalOutlined,
   EnvironmentOutlined,
+  DownOutlined,
   PlusOutlined,
   CopyOutlined,
   LikeOutlined,
@@ -154,6 +155,19 @@ function finalizeThoughtStage(
         }
       : item
   ));
+}
+
+function buildApprovalBlockID(payload: Record<string, unknown>): string {
+  const resume = (payload.resume || {}) as Record<string, unknown>;
+  const stepID = String(payload.step_id || resume.step_id || '').trim();
+  if (stepID) {
+    return `approval:${stepID}`;
+  }
+  const planID = String(payload.plan_id || resume.plan_id || '').trim();
+  if (planID) {
+    return `approval:${planID}`;
+  }
+  return 'approval:active';
 }
 
 function upsertThoughtStage(
@@ -899,16 +913,42 @@ export const Copilot: React.FC<CopilotProps> = ({
         title?: string;
         user_visible_summary?: string;
       }) => {
-        patchAssistantMessage(conversationKey, assistantId, (message) => ({
-          ...message,
-          thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-            key: 'user_action',
-            title: '等待你确认',
-            status: 'loading',
-            description: String(data.title || '当前步骤需要确认后继续执行'),
-            content: String(data.user_visible_summary || ''),
-          }),
-        }));
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const turnID = String(data.turn_id || message.turn?.id || `pending-${assistantId}`);
+          const nextTurn = applyTurnState(
+            applyBlockReplace(message.turn, {
+              turn_id: turnID,
+              block_id: buildApprovalBlockID(data as unknown as Record<string, unknown>),
+              block_type: 'approval',
+              payload: {
+                ...data,
+                status: 'waiting_user',
+                title: String(data.title || '等待你确认'),
+                summary: String(data.user_visible_summary || data.title || '当前步骤需要确认后继续执行'),
+              },
+            }),
+            {
+              turn_id: turnID,
+              status: 'waiting_user',
+              phase: 'execute',
+            },
+          );
+          const summary = projectTurnSummary(nextTurn);
+          return syncMessageFromBuffers(message, {
+            turn: nextTurn,
+            content: summary.content || message.content,
+            thinking: summary.thinking || message.thinking,
+            rawEvidence: summary.rawEvidence || message.rawEvidence,
+            recommendations: summary.recommendations || message.recommendations,
+            thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
+              key: 'user_action',
+              title: '等待你确认',
+              status: 'loading',
+              description: String(data.title || '当前步骤需要确认后继续执行'),
+              content: String(data.user_visible_summary || ''),
+            }),
+          });
+        });
         refreshAnnouncement('等待确认');
       },
       onClarifyRequired: (data: Record<string, unknown>) => {
@@ -967,7 +1007,9 @@ export const Copilot: React.FC<CopilotProps> = ({
           thoughtChain: (message.thoughtChain || []).map((item) => ({
             ...item,
             blink: false,
-            status: item.status === 'loading' ? 'success' : item.status,
+            status: item.key === 'user_action' && message.turn?.status === 'waiting_user'
+              ? item.status
+              : item.status === 'loading' ? 'success' : item.status,
           })),
         }));
         setIsLoading(false);
@@ -1379,19 +1421,57 @@ export const Copilot: React.FC<CopilotProps> = ({
               role={role}
             />
             {showJumpToLatest && (
-              <Button
-                type="primary"
-                size="small"
-                aria-label="跳转到最新消息"
-                style={{ position: 'absolute', right: 20, bottom: 16, minHeight: 44 }}
-                onClick={() => {
-                  listRef.current?.scrollTo({ top: 'bottom', behavior: reducedMotion ? 'auto' : 'smooth' });
-                  setShowJumpToLatest(false);
-                  setIsNearBottom(true);
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 16,
+                  bottom: 18,
+                  display: 'flex',
+                  justifyContent: 'flex-end',
                 }}
               >
-                跳转到最新
-              </Button>
+                <button
+                  type="button"
+                  aria-label="跳转到最新消息"
+                  onClick={() => {
+                    listRef.current?.scrollTo({ top: 'bottom', behavior: reducedMotion ? 'auto' : 'smooth' });
+                    setShowJumpToLatest(false);
+                    setIsNearBottom(true);
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 12px',
+                    borderRadius: 18,
+                    border: `1px solid ${token.colorBorderSecondary}`,
+                    background: token.colorBgElevated,
+                    color: token.colorText,
+                    boxShadow: token.boxShadowSecondary,
+                    backdropFilter: 'blur(12px)',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    lineHeight: 1,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: 999,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: token.colorPrimaryBg,
+                      color: token.colorPrimary,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <DownOutlined style={{ fontSize: 10 }} />
+                  </span>
+                  <span style={{ whiteSpace: 'nowrap' }}>有新消息</span>
+                </button>
+              </div>
             )}
           </div>
         ) : (
