@@ -38,6 +38,7 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/events"
 	"github.com/cy77cc/OpsPilot/internal/ai/executor"
 	"github.com/cy77cc/OpsPilot/internal/ai/experts"
+	"github.com/cy77cc/OpsPilot/internal/ai/observability"
 	"github.com/cy77cc/OpsPilot/internal/ai/planner"
 	"github.com/cy77cc/OpsPilot/internal/ai/rewrite"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
@@ -61,6 +62,7 @@ type StreamEmitter func(StreamEvent) bool
 //   - executor: 任务执行阶段，调用专家 Agent
 //   - summarizer: 结果总结阶段，生成最终答案
 //   - metrics: 指标收集器，用于监控和统计
+//   - observability: 可观测性处理器，用于追踪 LLM/工具/Agent 调用
 //   - maxIters: 最大迭代次数，防止无限重规划
 //   - heartbeatInterval: 心跳间隔，保持长连接活跃
 type Orchestrator struct {
@@ -71,6 +73,7 @@ type Orchestrator struct {
 	executor          *executor.Executor      // 任务执行阶段
 	summarizer        *summarizer.Summarizer  // 结果总结阶段
 	metrics           *AIMetrics              // 指标收集器
+	observability     *observability.Handler // 可观测性处理器
 	maxIters          int                     // 最大迭代次数
 	heartbeatInterval time.Duration           // 心跳间隔
 }
@@ -92,6 +95,7 @@ func NewOrchestrator(sessions *state.SessionState, executions *runtime.Execution
 		executions:        executions,
 		executor:          executor.New(executions),
 		metrics:           NewAIMetrics(),
+		observability:     observability.GetHandler(),
 		maxIters:          2,
 		heartbeatInterval: 10 * time.Second,
 	}
@@ -420,6 +424,15 @@ func (o *Orchestrator) MetricsSnapshot() AIMetricsSnapshot {
 		return AIMetricsSnapshot{}
 	}
 	return o.metrics.Snapshot()
+}
+
+// ObservabilitySnapshot 返回可观测性指标快照。
+// 包含 LLM 调用、工具调用、Agent 运行的详细指标。
+func (o *Orchestrator) ObservabilitySnapshot() observability.MetricsSnapshot {
+	if o == nil || o.observability == nil {
+		return observability.MetricsSnapshot{}
+	}
+	return o.observability.Snapshot()
 }
 
 // planAndReply 执行规划和回复生成。

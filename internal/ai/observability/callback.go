@@ -230,14 +230,16 @@ func (h *Handler) toolHandler() *template.ToolCallbackHandler {
 
 			h.metrics.RecordToolCall(info.Name, latencyMs, nil)
 
+			result := extractToolResult(output)
+
 			if h.eventHandler != nil {
 				h.eventHandler("tool_end", events.EventMeta{
 					Timestamp: time.Now().UTC(),
 				}, map[string]any{
-					"tool":         info.Name,
-					"span_id":      spanID,
-					"duration_ms":  latencyMs,
-					"result_preview": truncate(output.Output, 500),
+					"tool":          info.Name,
+					"span_id":       spanID,
+					"duration_ms":   latencyMs,
+					"result_preview": truncate(result, 500),
 				})
 			}
 
@@ -283,7 +285,12 @@ func (h *Handler) toolHandler() *template.ToolCallbackHandler {
 						break
 					}
 					if chunk != nil {
-						result.WriteString(chunk.Output)
+						if chunk.Response != "" {
+							result.WriteString(chunk.Response)
+						}
+						if chunk.ToolOutput != nil {
+							result.WriteString(extractToolResultFromParts(chunk.ToolOutput.Parts))
+						}
 					}
 				}
 
@@ -427,4 +434,32 @@ func estimateTokens(content string) int {
 
 	// 简单估算：平均 3 字符一个 token
 	return len(content) / 3
+}
+
+// extractToolResult 从工具回调输出中提取结果文本。
+func extractToolResult(output *tool.CallbackOutput) string {
+	if output == nil {
+		return ""
+	}
+	if output.Response != "" {
+		return output.Response
+	}
+	if output.ToolOutput != nil {
+		return extractToolResultFromParts(output.ToolOutput.Parts)
+	}
+	return ""
+}
+
+// extractToolResultFromParts 从工具输出部分中提取文本。
+func extractToolResultFromParts(parts []schema.ToolOutputPart) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	var texts []string
+	for _, part := range parts {
+		if part.Type == schema.ToolPartTypeText && part.Text != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
