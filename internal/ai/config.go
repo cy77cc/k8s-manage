@@ -14,20 +14,21 @@ import "github.com/cy77cc/OpsPilot/internal/config"
 //   - UseModelFirstRuntime: 是否使用模型优先运行时
 //   - AllowLegacySemanticFallback: 是否允许降级到旧版语义处理
 type RolloutConfig struct {
-	UseMultiDomainArch          bool `json:"use_multi_domain_arch"`           // 多领域架构开关
-	UseAssistantV2              bool `json:"use_assistant_v2"`                // Assistant V2 开关
-	UseModelFirstRuntime        bool `json:"use_model_first_runtime"`         // 模型优先运行时开关
-	AllowLegacySemanticFallback bool `json:"allow_legacy_semantic_fallback"`  // 旧版语义降级开关
+	UseMultiDomainArch          bool `json:"use_multi_domain_arch"`          // 多领域架构开关
+	UseTurnBlockStreaming       bool `json:"use_turn_block_streaming"`       // turn/block 流式开关
+	UseAssistantV2              bool `json:"use_assistant_v2"`               // Assistant V2 开关
+	UseModelFirstRuntime        bool `json:"use_model_first_runtime"`        // 模型优先运行时开关
+	AllowLegacySemanticFallback bool `json:"allow_legacy_semantic_fallback"` // 旧版语义降级开关
 }
 
 // RolloutThresholds 定义发布决策的阈值。
 //
 // 当错误率超过阈值时，会自动降级或阻止发布。
 type RolloutThresholds struct {
-	MaxPlannerErrorRate    float64 `json:"max_planner_error_rate"`    // 最大规划器错误率
-	MaxResumeFailureRate   float64 `json:"max_resume_failure_rate"`   // 最大恢复失败率
-	MinRewriteSuccessRate  float64 `json:"min_rewrite_success_rate"`  // 最小改写成功率
-	AllowCompatibilityPath bool    `json:"allow_compatibility_path"`  // 是否允许兼容路径
+	MaxPlannerErrorRate    float64 `json:"max_planner_error_rate"`   // 最大规划器错误率
+	MaxResumeFailureRate   float64 `json:"max_resume_failure_rate"`  // 最大恢复失败率
+	MinRewriteSuccessRate  float64 `json:"min_rewrite_success_rate"` // 最小改写成功率
+	AllowCompatibilityPath bool    `json:"allow_compatibility_path"` // 是否允许兼容路径
 }
 
 // RolloutDecision 表示发布决策结果。
@@ -40,8 +41,9 @@ type RolloutDecision struct {
 // 从全局配置和功能开关中读取配置值。
 func CurrentRolloutConfig() RolloutConfig {
 	cfg := RolloutConfig{
-		UseMultiDomainArch:   config.CFG.AI.UseMultiDomainArch,
-		UseModelFirstRuntime: true, // 默认启用模型优先运行时
+		UseMultiDomainArch:    config.CFG.AI.UseMultiDomainArch,
+		UseTurnBlockStreaming: config.CFG.AI.UseTurnBlockStreaming,
+		UseModelFirstRuntime:  true, // 默认启用模型优先运行时
 	}
 	// 从功能开关中读取配置 (如果设置)
 	if config.CFG.FeatureFlags.AIAssistantV2 != nil {
@@ -54,6 +56,11 @@ func CurrentRolloutConfig() RolloutConfig {
 		cfg.AllowLegacySemanticFallback = *config.CFG.FeatureFlags.AILegacySemanticFallback
 	}
 	return cfg
+}
+
+// TurnBlockStreamingEnabled 检查是否启用了 turn/block 流式能力。
+func (c RolloutConfig) TurnBlockStreamingEnabled() bool {
+	return c.UseTurnBlockStreaming
 }
 
 // AgenticEnabled 检查是否启用了 Agentic (多领域) 架构。

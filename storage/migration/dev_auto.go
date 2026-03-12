@@ -21,6 +21,8 @@ func RunDevAutoMigrate(db *gorm.DB) error {
 		&model.HostVirtualizationTask{},
 		&model.AIChatSession{},
 		&model.AIChatMessage{},
+		&model.AIChatTurn{},
+		&model.AIChatBlock{},
 		&model.AIApprovalTask{},
 		&model.AICommandExecution{},
 		&model.ConfirmationRequest{},
@@ -43,7 +45,7 @@ func RunDevAutoMigrate(db *gorm.DB) error {
 		&model.AIOPSInspection{},
 		&model.AlertEvent{},
 		&model.AlertRule{},
-		&model.MetricPoint{},
+		// &model.MetricPoint{}, // 已迁移到 Prometheus
 		// &model.AlertRuleEvaluation{},
 		&model.AlertNotificationChannel{},
 		&model.AlertNotificationDelivery{},

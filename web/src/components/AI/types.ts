@@ -4,6 +4,8 @@
 
 // 消息角色
 export type MessageRole = 'user' | 'assistant' | 'system';
+export type ChatTurnStatus = 'streaming' | 'waiting_user' | 'completed' | 'error';
+export type ChatTurnPhase = 'rewrite' | 'plan' | 'execute' | 'summary' | 'done' | 'user_message' | 'streaming';
 
 // 工具执行状态
 export type ToolStatus = 'running' | 'success' | 'error';
@@ -84,6 +86,41 @@ export interface EmbeddedRecommendation {
   relevance: number;
 }
 
+export type TurnBlockType =
+  | 'status'
+  | 'text'
+  | 'plan'
+  | 'tool'
+  | 'approval'
+  | 'evidence'
+  | 'thinking'
+  | 'error'
+  | 'recommendations';
+
+export interface TurnBlock {
+  id: string;
+  type: TurnBlockType;
+  status?: string;
+  title?: string;
+  position: number;
+  streaming?: boolean;
+  content?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface ChatTurn {
+  id: string;
+  role: Extract<MessageRole, 'assistant' | 'user'>;
+  status: ChatTurnStatus;
+  phase?: ChatTurnPhase | string;
+  traceId?: string;
+  parentTurnId?: string;
+  blocks: TurnBlock[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
 // 聊天消息
 export interface ChatMessage {
   id: string;
@@ -97,6 +134,7 @@ export interface ChatMessage {
   recommendations?: EmbeddedRecommendation[];
   thoughtChain?: ThoughtStageItem[];
   traceId?: string;
+  turn?: ChatTurn;
   createdAt: string;
   updatedAt?: string;
 }
@@ -148,6 +186,13 @@ export interface DrawerWidthConfig {
 // SSE 事件类型
 export type SSEEventType =
   | 'meta'
+  | 'turn_started'
+  | 'block_open'
+  | 'block_delta'
+  | 'block_replace'
+  | 'block_close'
+  | 'turn_state'
+  | 'turn_done'
   | 'rewrite_result'
   | 'planner_state'
   | 'plan_created'

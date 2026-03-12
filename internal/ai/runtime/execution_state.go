@@ -49,24 +49,24 @@ type ContextSnapshot struct {
 
 // StepState 表示步骤状态。
 type StepState struct {
-	StepID             string         `json:"step_id"`                    // 步骤 ID
-	Title              string         `json:"title,omitempty"`            // 标题
-	Expert             string         `json:"expert,omitempty"`           // 专家名称
-	Intent             string         `json:"intent,omitempty"`           // 意图
-	Task               string         `json:"task,omitempty"`             // 任务
-	Input              map[string]any `json:"input,omitempty"`            // 输入参数
-	DependsOn          []string       `json:"depends_on,omitempty"`       // 依赖步骤
-	Status             StepStatus     `json:"status"`                     // 状态
-	Mode               string         `json:"mode,omitempty"`             // 操作模式
-	Risk               string         `json:"risk,omitempty"`             // 风险等级
-	Attempts           int            `json:"attempts,omitempty"`         // 尝试次数
-	MaxAttempts        int            `json:"max_attempts,omitempty"`     // 最大尝试次数
-	IdempotencyKey     string         `json:"idempotency_key,omitempty"`  // 幂等键
-	ApprovalSatisfied  bool           `json:"approval_satisfied,omitempty"` // 审批是否已满足
+	StepID             string         `json:"step_id"`                        // 步骤 ID
+	Title              string         `json:"title,omitempty"`                // 标题
+	Expert             string         `json:"expert,omitempty"`               // 专家名称
+	Intent             string         `json:"intent,omitempty"`               // 意图
+	Task               string         `json:"task,omitempty"`                 // 任务
+	Input              map[string]any `json:"input,omitempty"`                // 输入参数
+	DependsOn          []string       `json:"depends_on,omitempty"`           // 依赖步骤
+	Status             StepStatus     `json:"status"`                         // 状态
+	Mode               string         `json:"mode,omitempty"`                 // 操作模式
+	Risk               string         `json:"risk,omitempty"`                 // 风险等级
+	Attempts           int            `json:"attempts,omitempty"`             // 尝试次数
+	MaxAttempts        int            `json:"max_attempts,omitempty"`         // 最大尝试次数
+	IdempotencyKey     string         `json:"idempotency_key,omitempty"`      // 幂等键
+	ApprovalSatisfied  bool           `json:"approval_satisfied,omitempty"`   // 审批是否已满足
 	UserVisibleSummary string         `json:"user_visible_summary,omitempty"` // 用户可见摘要
-	ErrorCode          string         `json:"error_code,omitempty"`       // 错误码
-	ErrorMessage       string         `json:"error_message,omitempty"`    // 错误消息
-	UpdatedAt          time.Time      `json:"updated_at"`                 // 更新时间
+	ErrorCode          string         `json:"error_code,omitempty"`           // 错误码
+	ErrorMessage       string         `json:"error_message,omitempty"`        // 错误消息
+	UpdatedAt          time.Time      `json:"updated_at"`                     // 更新时间
 }
 
 // PendingApproval 表示待审批状态。
@@ -90,11 +90,13 @@ type ExecutionState struct {
 	TraceID         string               `json:"trace_id"`
 	SessionID       string               `json:"session_id"`
 	PlanID          string               `json:"plan_id,omitempty"`
+	TurnID          string               `json:"turn_id,omitempty"`
 	Message         string               `json:"message,omitempty"`
 	Status          ExecutionStatus      `json:"status"`
 	Phase           string               `json:"phase,omitempty"`
 	RuntimeContext  ContextSnapshot      `json:"runtime_context,omitempty"`
 	Steps           map[string]StepState `json:"steps,omitempty"`
+	ActiveBlockIDs  []string             `json:"active_block_ids,omitempty"`
 	PendingApproval *PendingApproval     `json:"pending_approval,omitempty"`
 	CreatedAt       time.Time            `json:"created_at"`
 	UpdatedAt       time.Time            `json:"updated_at"`

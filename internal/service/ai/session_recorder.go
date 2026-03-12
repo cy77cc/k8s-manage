@@ -18,14 +18,15 @@ import (
 
 // chatRecorder 聊天记录器，负责记录和渲染对话内容。
 type chatRecorder struct {
-	store       *aistate.ChatStore       // 聊天存储
-	userID      uint64                   // 用户 ID
-	scene       string                   // 场景
-	title       string                   // 会话标题
-	prompt      string                   // 用户提示
-	sessionID   string                   // 会话 ID
-	assistantID string                   // 助手消息 ID
-	assistant   aistate.ChatMessageRecord // 助手消息记录
+	store           *aistate.ChatStore        // 聊天存储
+	userID          uint64                    // 用户 ID
+	scene           string                    // 场景
+	title           string                    // 会话标题
+	prompt          string                    // 用户提示
+	sessionID       string                    // 会话 ID
+	assistantID     string                    // 助手消息 ID
+	assistantTurnID string                    // 助手 turn ID
+	assistant       aistate.ChatMessageRecord // 助手消息记录
 }
 
 // newChatRecorder 创建新的聊天记录器。
@@ -234,6 +235,7 @@ func (r *chatRecorder) SessionPayload(ctx context.Context) map[string]any {
 
 func (r *chatRecorder) handleMeta(ctx context.Context, payload map[string]any) {
 	r.sessionID = firstString(payload["session_id"], payload["sessionId"])
+	r.assistantTurnID = firstString(payload["turn_id"], payload["turnId"])
 	r.assistant.TraceID = firstString(payload["trace_id"], payload["traceId"])
 	if r.sessionID == "" {
 		return
@@ -241,7 +243,7 @@ func (r *chatRecorder) handleMeta(ctx context.Context, payload map[string]any) {
 	_ = r.store.EnsureSession(ctx, r.sessionID, r.userID, r.scene, r.title)
 	_ = r.store.AppendUserMessage(ctx, r.sessionID, r.userID, r.scene, r.title, r.prompt)
 	if r.assistantID == "" {
-		id, err := r.store.CreateAssistantMessage(ctx, r.sessionID, r.userID, r.scene, r.title)
+		id, err := r.store.CreateAssistantMessage(ctx, r.sessionID, r.userID, r.scene, r.title, r.assistantTurnID)
 		if err == nil {
 			r.assistantID = id
 		}
@@ -252,7 +254,7 @@ func (r *chatRecorder) persist(ctx context.Context) error {
 	if r == nil || r.assistantID == "" || r.sessionID == "" {
 		return nil
 	}
-	return r.store.UpdateAssistantMessage(ctx, r.sessionID, r.assistantID, r.assistant)
+	return r.store.UpdateAssistantMessage(ctx, r.sessionID, r.assistantID, r.assistantTurnID, r.assistant)
 }
 
 func (r *chatRecorder) upsertStage(stage map[string]any) {

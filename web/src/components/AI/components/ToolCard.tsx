@@ -29,13 +29,21 @@ export function ToolCard({ tool }: ToolCardProps) {
       }}
     >
       {/* 头部 */}
-      <div
+      <button
+        type="button"
+        aria-expanded={hasDetails ? expanded : undefined}
+        aria-label={hasDetails ? `${formatToolName(tool.name)} 详情` : formatToolName(tool.name)}
         style={{
           display: 'flex',
           alignItems: 'center',
           padding: '8px 12px',
           gap: 8,
           cursor: hasDetails ? 'pointer' : 'default',
+          width: '100%',
+          border: 'none',
+          background: 'transparent',
+          textAlign: 'left',
+          minHeight: 44,
         }}
         onClick={() => hasDetails && setExpanded(!expanded)}
       >
@@ -68,7 +76,7 @@ export function ToolCard({ tool }: ToolCardProps) {
             {(tool.result.latency_ms / 1000).toFixed(1)}s
           </span>
         )}
-      </div>
+      </button>
 
       {/* 展开的详情 */}
       {expanded && hasDetails && (

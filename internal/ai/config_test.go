@@ -4,15 +4,19 @@ import "testing"
 
 func TestRolloutDecisionRespectsThresholdsAndCompatibilityPath(t *testing.T) {
 	cfg := RolloutConfig{
-		UseMultiDomainArch:   true,
-		UseAssistantV2:       true,
-		UseModelFirstRuntime: true,
+		UseMultiDomainArch:    true,
+		UseTurnBlockStreaming: true,
+		UseAssistantV2:        true,
+		UseModelFirstRuntime:  true,
 	}
 	if !cfg.AgenticEnabled() {
 		t.Fatalf("AgenticEnabled() = false, want true")
 	}
 	if !cfg.ModelFirstEnabled() {
 		t.Fatalf("ModelFirstEnabled() = false, want true")
+	}
+	if !cfg.TurnBlockStreamingEnabled() {
+		t.Fatalf("TurnBlockStreamingEnabled() = false, want true")
 	}
 	if !cfg.CompatibilityEnabled() {
 		t.Fatalf("CompatibilityEnabled() = false, want true")

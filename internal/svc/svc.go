@@ -36,6 +36,7 @@ type ServiceContext struct {
 	CacheFacade    *cache.Facade               // L1-first 缓存门面
 	CasbinEnforcer *casbin.Enforcer            // Casbin 权限执行器
 	Prometheus     prominfra.Client            // Prometheus HTTP API 客户端
+	MetricsPusher  *prominfra.MetricsPusher    // Prometheus 指标推送器
 }
 
 // MustNewServiceContext 创建服务上下文，如果失败则 panic。
@@ -97,6 +98,7 @@ func MustNewServiceContext() *ServiceContext {
 
 	l1 := expirable.NewLRU[string, any](5_000, nil, 24*time.Hour)
 	promClient := initPrometheusClient()
+	metricsPusher := initMetricsPusher()
 
 	return &ServiceContext{
 		Clientset:      clientset,
@@ -106,6 +108,7 @@ func MustNewServiceContext() *ServiceContext {
 		CacheFacade:    cache.NewFacade(expirable.NewLRU[string, string](5_000, nil, 24*time.Hour), cache.NewRedisL2(rdb)),
 		CasbinEnforcer: enforcer,
 		Prometheus:     promClient,
+		MetricsPusher:  metricsPusher,
 	}
 }
 
@@ -147,6 +150,25 @@ func initPrometheusClient() prominfra.Client {
 		return nil
 	}
 	return c
+}
+
+// initMetricsPusher 初始化指标推送器。
+func initMetricsPusher() *prominfra.MetricsPusher {
+	if !config.CFG.Prometheus.Enable {
+		return nil
+	}
+	pushgatewayURL := config.CFG.Prometheus.PushgatewayURL
+	if pushgatewayURL == "" {
+		logger.L().Warn("Pushgateway URL is not configured, metrics push disabled")
+		return nil
+	}
+	pusher, err := prominfra.NewMetricsPusher(pushgatewayURL)
+	if err != nil {
+		logger.L().Warn("Failed to initialize MetricsPusher", logger.Error(err))
+		return nil
+	}
+	logger.L().Info("MetricsPusher initialized", logger.String("pushgateway_url", pushgatewayURL))
+	return pusher
 }
 
 // MustNewClientset 创建 K8s 客户端，如果失败则返回 nil。

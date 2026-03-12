@@ -11,12 +11,41 @@ type ChatRequest struct {
 	Context   map[string]any `json:"context"`
 }
 
+// AIReplayBlock represents a persisted renderable block within a turn.
+type AIReplayBlock struct {
+	ID          string         `json:"id"`
+	BlockType   string         `json:"blockType"`
+	Position    int            `json:"position"`
+	Status      string         `json:"status,omitempty"`
+	Title       string         `json:"title,omitempty"`
+	ContentText string         `json:"contentText,omitempty"`
+	ContentJSON map[string]any `json:"contentJson,omitempty"`
+	Streaming   bool           `json:"streaming,omitempty"`
+	CreatedAt   time.Time      `json:"createdAt"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+}
+
+// AIReplayTurn represents a persisted turn with ordered blocks.
+type AIReplayTurn struct {
+	ID           string          `json:"id"`
+	Role         string          `json:"role"`
+	Status       string          `json:"status,omitempty"`
+	Phase        string          `json:"phase,omitempty"`
+	TraceID      string          `json:"traceId,omitempty"`
+	ParentTurnID string          `json:"parentTurnId,omitempty"`
+	Blocks       []AIReplayBlock `json:"blocks"`
+	CreatedAt    time.Time       `json:"createdAt"`
+	UpdatedAt    time.Time       `json:"updatedAt"`
+	CompletedAt  *time.Time      `json:"completedAt,omitempty"`
+}
+
 // AISession represents an AI chat session with its message history.
 type AISession struct {
 	ID        string           `json:"id"`
 	Scene     string           `json:"scene,omitempty"`
 	Title     string           `json:"title"`
 	Messages  []map[string]any `json:"messages"`
+	Turns     []AIReplayTurn   `json:"turns,omitempty"`
 	CreatedAt time.Time        `json:"createdAt"`
 	UpdatedAt time.Time        `json:"updatedAt"`
 }

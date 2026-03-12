@@ -12,6 +12,8 @@ import (
 
 	sshclient "github.com/cy77cc/OpsPilot/internal/client/ssh"
 	"github.com/cy77cc/OpsPilot/internal/config"
+	prominfra "github.com/cy77cc/OpsPilot/internal/infra/prometheus"
+	"github.com/cy77cc/OpsPilot/internal/logger"
 	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/cy77cc/OpsPilot/internal/service/notification"
 	"github.com/cy77cc/OpsPilot/internal/svc"
@@ -374,7 +376,35 @@ func (s *HostService) persistHealthSnapshot(ctx context.Context, snapshot *model
 		"health_state":  snapshot.State,
 		"last_check_at": now,
 	}
-	return s.svcCtx.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", node.ID).Updates(updates).Error
+	if err := s.svcCtx.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", node.ID).Updates(updates).Error; err != nil {
+		return err
+	}
+
+	// 推送指标到 Prometheus
+	if s.svcCtx.MetricsPusher != nil {
+		metricSnapshot := prominfra.HostMetricSnapshot{
+			HostID:             uint64(node.ID),
+			HostName:           node.Name,
+			HostIP:             node.IP,
+			CPULoad:            snapshot.CpuLoad,
+			MemoryUsedMB:       snapshot.MemoryUsedMB,
+			MemoryTotalMB:      snapshot.MemoryTotalMB,
+			DiskUsagePercent:   snapshot.DiskUsedPct,
+			InodeUsagePercent:  snapshot.InodeUsedPct,
+			HealthState:        snapshot.State,
+			ConnectivityStatus: snapshot.ConnectivityStatus,
+		}
+		if err := s.svcCtx.MetricsPusher.PushHostMetrics(ctx, metricSnapshot); err != nil {
+			// 推送失败不影响主流程，记录日志
+			logger.L().Warn("failed to push host metrics to prometheus",
+				logger.Error(err),
+				logger.Int("host_id", int(node.ID)),
+				logger.String("host_name", node.Name),
+			)
+		}
+	}
+
+	return nil
 }
 
 func (s *HostService) loadNodePrivateKey(ctx context.Context, node *model.Node) (string, string, error) {

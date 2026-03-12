@@ -158,6 +158,12 @@ func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, st
 		}
 		state.Status = runtime.ExecutionStatusRunning
 		state.Phase = "approval_granted"
+		emitStepUpdate(Request{
+			TraceID:   state.TraceID,
+			SessionID: state.SessionID,
+			EventMeta: req.EventMeta,
+			EmitEvent: req.EmitEvent,
+		}, state, state.Steps[stepID])
 	} else {
 		if err := transitionStep(state, stepID, runtime.StepCancelled, "审批已拒绝，当前步骤不会执行。"); err != nil {
 			return nil, err
@@ -165,6 +171,12 @@ func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, st
 		state.Status = runtime.ExecutionStatusFailed
 		state.Phase = "rejected"
 		markDependentsBlocked(state, stepID)
+		emitStepUpdate(Request{
+			TraceID:   state.TraceID,
+			SessionID: state.SessionID,
+			EventMeta: req.EventMeta,
+			EmitEvent: req.EmitEvent,
+		}, state, state.Steps[stepID])
 	}
 	return advanceScheduler(ctx, store, state, Request{
 		TraceID:        state.TraceID,
@@ -176,7 +188,9 @@ func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, st
 			SessionID: state.SessionID,
 			TraceID:   state.TraceID,
 			PlanID:    state.PlanID,
+			TurnID:    firstNonEmpty(req.EventMeta.TurnID, state.TurnID),
 		},
+		EmitEvent: req.EmitEvent,
 	}, stepRunner)
 }
 

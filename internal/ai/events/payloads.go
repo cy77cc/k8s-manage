@@ -92,6 +92,61 @@ type SummaryPayload struct {
 	Summary string `json:"summary,omitempty"`
 }
 
+// TurnStartedPayload assistant turn 生命周期开始事件载荷。
+type TurnStartedPayload struct {
+	TurnID string `json:"turn_id"`
+	Role   string `json:"role,omitempty"`
+	Phase  string `json:"phase,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// BlockOpenPayload 可渲染 block 创建事件载荷。
+type BlockOpenPayload struct {
+	TurnID    string         `json:"turn_id"`
+	BlockID   string         `json:"block_id"`
+	BlockType string         `json:"block_type"`
+	Position  int            `json:"position,omitempty"`
+	Status    string         `json:"status,omitempty"`
+	Phase     string         `json:"phase,omitempty"`
+	Title     string         `json:"title,omitempty"`
+	Payload   map[string]any `json:"payload,omitempty"`
+}
+
+// BlockDeltaPayload block 增量更新事件载荷。
+type BlockDeltaPayload struct {
+	TurnID  string         `json:"turn_id"`
+	BlockID string         `json:"block_id"`
+	Patch   map[string]any `json:"patch,omitempty"`
+}
+
+// BlockReplacePayload block 全量替换事件载荷。
+type BlockReplacePayload struct {
+	TurnID  string         `json:"turn_id"`
+	BlockID string         `json:"block_id"`
+	Payload map[string]any `json:"payload,omitempty"`
+}
+
+// BlockClosePayload block 结束事件载荷。
+type BlockClosePayload struct {
+	TurnID  string `json:"turn_id"`
+	BlockID string `json:"block_id"`
+	Status  string `json:"status,omitempty"`
+}
+
+// TurnStatePayload turn 状态更新事件载荷。
+type TurnStatePayload struct {
+	TurnID string `json:"turn_id"`
+	Status string `json:"status,omitempty"`
+	Phase  string `json:"phase,omitempty"`
+}
+
+// TurnDonePayload turn 完成事件载荷。
+type TurnDonePayload struct {
+	TurnID string `json:"turn_id"`
+	Status string `json:"status,omitempty"`
+	Phase  string `json:"phase,omitempty"`
+}
+
 // ErrorPayload 错误事件载荷。
 type ErrorPayload struct {
 	Message     string `json:"message"`

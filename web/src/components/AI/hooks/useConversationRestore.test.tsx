@@ -97,4 +97,85 @@ describe('useConversationRestore', () => {
       }));
     });
   });
+
+  it('prefers structured turns when replay contract is available', async () => {
+    vi.spyOn(aiApi, 'getCurrentSession').mockResolvedValue({
+      code: 0,
+      data: {
+        id: 'sess-turn',
+        title: 'Turn session',
+        createdAt: '2026-03-11T00:00:00Z',
+        updatedAt: '2026-03-11T00:00:01Z',
+        messages: [],
+        turns: [
+          {
+            id: 'turn-user',
+            role: 'user',
+            status: 'completed',
+            blocks: [
+              {
+                id: 'user-text',
+                blockType: 'text',
+                position: 1,
+                contentText: 'scale deployment',
+                createdAt: '2026-03-11T00:00:00Z',
+                updatedAt: '2026-03-11T00:00:00Z',
+              },
+            ],
+            createdAt: '2026-03-11T00:00:00Z',
+            updatedAt: '2026-03-11T00:00:00Z',
+          },
+          {
+            id: 'turn-assistant',
+            role: 'assistant',
+            status: 'completed',
+            phase: 'done',
+            blocks: [
+              {
+                id: 'status-1',
+                blockType: 'status',
+                position: 1,
+                title: '执行中',
+                contentText: '正在扩容',
+                createdAt: '2026-03-11T00:00:01Z',
+                updatedAt: '2026-03-11T00:00:01Z',
+              },
+              {
+                id: 'text-1',
+                blockType: 'text',
+                position: 2,
+                contentText: '扩容完成',
+                streaming: false,
+                createdAt: '2026-03-11T00:00:02Z',
+                updatedAt: '2026-03-11T00:00:02Z',
+              },
+            ],
+            createdAt: '2026-03-11T00:00:01Z',
+            updatedAt: '2026-03-11T00:00:02Z',
+          },
+        ],
+      },
+      msg: 'ok',
+    } as any);
+
+    const onRestore = vi.fn();
+    renderHook(() => useConversationRestore({
+      scene: 'global',
+      onRestore,
+    }));
+
+    await waitFor(() => {
+      expect(onRestore).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'sess-turn',
+        messages: [
+          expect.objectContaining({ role: 'user', content: 'scale deployment' }),
+          expect.objectContaining({
+            role: 'assistant',
+            content: '扩容完成',
+            turn: expect.objectContaining({ id: 'turn-assistant' }),
+          }),
+        ],
+      }));
+    });
+  });
 });

@@ -2,7 +2,6 @@ package monitoring
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -29,13 +28,12 @@ func newMonitoringTestLogic(t *testing.T) *Logic {
 		&model.DeploymentRelease{},
 		&model.AlertRule{},
 		&model.AlertEvent{},
-		&model.MetricPoint{},
 		&model.AlertNotificationChannel{},
 		&model.AlertNotificationDelivery{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
-	return NewLogic(&svc.ServiceContext{DB: db})
+	return NewLogic(&svc.ServiceContext{DB: db, Prometheus: nil})
 }
 
 func TestAlertTriggerAndDeliveryAudit(t *testing.T) {
@@ -266,46 +264,22 @@ func TestGetMetricsUsesPrometheusClient(t *testing.T) {
 	}
 }
 
-func TestGetMetricsFallbackToDBWhenPrometheusFails(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "monitoringfallback.db")
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&model.MetricPoint{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	now := time.Now()
-	if err := db.Create(&model.MetricPoint{
-		Metric:    "cpu_usage",
-		Source:    "host",
-		Value:     22.5,
-		Collected: now,
-	}).Error; err != nil {
-		t.Fatalf("seed metric point: %v", err)
-	}
-
+// TestGetMetricsReturnsErrorWhenPrometheusUnavailable tests that GetMetrics
+// returns an error when Prometheus is unavailable (no fallback to DB).
+func TestGetMetricsReturnsErrorWhenPrometheusUnavailable(t *testing.T) {
 	logic := NewLogic(&svc.ServiceContext{
-		DB: db,
-		Prometheus: &fakePromClient{
-			queryRangeFn: func(ctx context.Context, query string, start, end time.Time, step time.Duration) (*prominfra.QueryResult, error) {
-				return nil, errors.New("prometheus unavailable")
-			},
-		},
+		DB:         nil,
+		Prometheus: nil, // Prometheus is unavailable
 	})
 
-	out, err := logic.GetMetrics(context.Background(), MetricQuery{
+	_, err := logic.GetMetrics(context.Background(), MetricQuery{
 		Metric:         "cpu_usage",
-		Start:          now.Add(-time.Hour),
-		End:            now.Add(time.Hour),
+		Start:          time.Now().Add(-time.Hour),
+		End:            time.Now().Add(time.Hour),
 		GranularitySec: 60,
-		Source:         "host",
 	})
-	if err != nil {
-		t.Fatalf("get metrics fallback: %v", err)
-	}
-	if len(out.Series) != 1 {
-		t.Fatalf("expected 1 fallback point, got %d", len(out.Series))
+	if err == nil {
+		t.Fatalf("expected error when prometheus is unavailable")
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	prominfra "github.com/cy77cc/OpsPilot/internal/infra/prometheus"
 	"github.com/cy77cc/OpsPilot/internal/model"
 	"gorm.io/gorm"
 	"k8s.io/client-go/kubernetes"
@@ -21,7 +22,8 @@ import (
 //
 // 所有工具通过此结构访问数据库、配置和外部客户端。
 type PlatformDeps struct {
-	DB *gorm.DB // 数据库连接
+	DB         *gorm.DB            // 数据库连接
+	Prometheus prominfra.Client    // Prometheus HTTP API 客户端
 }
 
 // ResolveK8sClient 解析 Kubernetes 客户端，根据参数和依赖项选择合适的客户端。

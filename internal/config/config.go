@@ -48,13 +48,13 @@ type App struct {
 
 // Server 包含 HTTP 服务器配置。
 type Server struct {
-	Host           string        `mapstructure:"host"`            // 监听主机
-	Port           int           `mapstructure:"port"`            // 监听端口
-	ReadTimeout    time.Duration `mapstructure:"read_timeout"`    // 读取超时
-	WriteTimeout   time.Duration `mapstructure:"write_timeout"`   // 写入超时
-	IdleTimeout    time.Duration `mapstructure:"idle_timeout"`    // 空闲超时
+	Host           string        `mapstructure:"host"`             // 监听主机
+	Port           int           `mapstructure:"port"`             // 监听端口
+	ReadTimeout    time.Duration `mapstructure:"read_timeout"`     // 读取超时
+	WriteTimeout   time.Duration `mapstructure:"write_timeout"`    // 写入超时
+	IdleTimeout    time.Duration `mapstructure:"idle_timeout"`     // 空闲超时
 	MaxHeaderBytes string        `mapstructure:"max_header_bytes"` // 最大请求头字节数
-	Salt           string        `mapstructure:"salt"`            // 密码加密盐值
+	Salt           string        `mapstructure:"salt"`             // 密码加密盐值
 }
 
 // Log 包含日志配置。
@@ -76,31 +76,31 @@ type LogFile struct {
 
 // MySQL 包含 MySQL 数据库连接配置。
 type MySQL struct {
-	Enable          bool          `mapstructure:"enable"`           // 是否启用
-	Host            string        `mapstructure:"host"`             // 数据库主机
-	Port            string        `mapstructure:"port"`             // 数据库端口
-	User            string        `mapstructure:"user"`             // 用户名
-	Password        string        `mapstructure:"password"`         // 密码
-	Database        string        `mapstructure:"database"`         // 数据库名
-	Charset         string        `mapstructure:"charset"`          // 字符集
-	ParseTime       bool          `mapstructure:"parse_time"`       // 是否解析时间
-	Loc             string        `mapstructure:"loc"`              // 时区
-	MaxOpenConns    int           `mapstructure:"max_open_conns"`   // 最大打开连接数
-	MaxIdleConns    int           `mapstructure:"max_idle_conns"`   // 最大空闲连接数
+	Enable          bool          `mapstructure:"enable"`            // 是否启用
+	Host            string        `mapstructure:"host"`              // 数据库主机
+	Port            string        `mapstructure:"port"`              // 数据库端口
+	User            string        `mapstructure:"user"`              // 用户名
+	Password        string        `mapstructure:"password"`          // 密码
+	Database        string        `mapstructure:"database"`          // 数据库名
+	Charset         string        `mapstructure:"charset"`           // 字符集
+	ParseTime       bool          `mapstructure:"parse_time"`        // 是否解析时间
+	Loc             string        `mapstructure:"loc"`               // 时区
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`    // 最大打开连接数
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`    // 最大空闲连接数
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"` // 连接最大生命周期
 }
 
 // Redis 包含 Redis 缓存连接配置。
 type Redis struct {
-	Enable       bool          `mapstructure:"enable"`        // 是否启用
-	Addr         string        `mapstructure:"addr"`          // Redis 地址 (host:port)
-	Password     string        `mapstructure:"password"`      // 密码
-	DB           int           `mapstructure:"db"`            // 数据库索引
-	PoolSize     int           `mapstructure:"pool_size"`     // 连接池大小
+	Enable       bool          `mapstructure:"enable"`         // 是否启用
+	Addr         string        `mapstructure:"addr"`           // Redis 地址 (host:port)
+	Password     string        `mapstructure:"password"`       // 密码
+	DB           int           `mapstructure:"db"`             // 数据库索引
+	PoolSize     int           `mapstructure:"pool_size"`      // 连接池大小
 	MinIdleConns int           `mapstructure:"min_idle_conns"` // 最小空闲连接数
-	DialTimeout  time.Duration `mapstructure:"dial_timeout"`  // 拨号超时
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`  // 读取超时
-	WriteTimeout time.Duration `mapstructure:"write_timeout"` // 写入超时
+	DialTimeout  time.Duration `mapstructure:"dial_timeout"`   // 拨号超时
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`   // 读取超时
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`  // 写入超时
 }
 
 // JWT 包含 JWT 认证配置。
@@ -113,13 +113,13 @@ type JWT struct {
 
 // Cors 包含 CORS 跨域配置。
 type Cors struct {
-	Enable           bool          `mapstructure:"enable"`             // 是否启用
-	AllowOrigins     []string      `mapstructure:"allow_origins"`      // 允许的源
-	AllowMethods     []string      `mapstructure:"allow_methods"`      // 允许的方法
-	AllowHeaders     []string      `mapstructure:"allow_headers"`      // 允许的请求头
-	ExposeHeaders    []string      `mapstructure:"expose_headers"`     // 暴露的响应头
-	AllowCredentials bool          `mapstructure:"allow_credentials"`  // 是否允许凭证
-	MaxAge           time.Duration `mapstructure:"max_age"`            // 预检请求缓存时间
+	Enable           bool          `mapstructure:"enable"`            // 是否启用
+	AllowOrigins     []string      `mapstructure:"allow_origins"`     // 允许的源
+	AllowMethods     []string      `mapstructure:"allow_methods"`     // 允许的方法
+	AllowHeaders     []string      `mapstructure:"allow_headers"`     // 允许的请求头
+	ExposeHeaders    []string      `mapstructure:"expose_headers"`    // 暴露的响应头
+	AllowCredentials bool          `mapstructure:"allow_credentials"` // 是否允许凭证
+	MaxAge           time.Duration `mapstructure:"max_age"`           // 预检请求缓存时间
 }
 
 // RateLimit 包含限流配置。
@@ -160,57 +160,58 @@ type LLM struct {
 
 // AI 包含 AI 功能开关配置。
 type AI struct {
-	UseMultiDomainArch bool `mapstructure:"use_multi_domain_arch"` // 是否使用多领域架构
+	UseMultiDomainArch    bool `mapstructure:"use_multi_domain_arch"`    // 是否使用多领域架构
+	UseTurnBlockStreaming bool `mapstructure:"use_turn_block_streaming"` // 是否启用 turn/block 流式体验
 }
 
 // FeatureFlags 包含功能开关配置。
 type FeatureFlags struct {
-	HostHealthDiagnostics    *bool `mapstructure:"host_health_diagnostics"`    // 主机健康诊断
-	HostMaintenanceMode      *bool `mapstructure:"host_maintenance_mode"`      // 主机维护模式
-	AIGovernedHostExecution  *bool `mapstructure:"ai_governed_host_execution"` // AI 主导的主机执行
-	AIAssistantV2            *bool `mapstructure:"ai_assistant_v2"`            // AI 助手 V2
-	AIModelFirstRuntime      *bool `mapstructure:"ai_model_first_runtime"`     // AI 模型优先运行时
+	HostHealthDiagnostics    *bool `mapstructure:"host_health_diagnostics"`     // 主机健康诊断
+	HostMaintenanceMode      *bool `mapstructure:"host_maintenance_mode"`       // 主机维护模式
+	AIGovernedHostExecution  *bool `mapstructure:"ai_governed_host_execution"`  // AI 主导的主机执行
+	AIAssistantV2            *bool `mapstructure:"ai_assistant_v2"`             // AI 助手 V2
+	AIModelFirstRuntime      *bool `mapstructure:"ai_model_first_runtime"`      // AI 模型优先运行时
 	AILegacySemanticFallback *bool `mapstructure:"ai_legacy_semantic_fallback"` // AI 旧版语义回退
 }
 
 // Postgres 包含 PostgreSQL 数据库连接配置。
 type Postgres struct {
-	Enable          bool          `mapstructure:"enable"`           // 是否启用
-	Host            string        `mapstructure:"host"`             // 数据库主机
-	Port            string        `mapstructure:"port"`             // 数据库端口
-	User            string        `mapstructure:"user"`             // 用户名
-	Password        string        `mapstructure:"password"`         // 密码
-	Database        string        `mapstructure:"database"`         // 数据库名
-	SSLMode         string        `mapstructure:"ssl_mode"`         // SSL 模式
-	MaxOpenConns    int           `mapstructure:"max_open_conns"`   // 最大打开连接数
-	MaxIdleConns    int           `mapstructure:"max_idle_conns"`   // 最大空闲连接数
+	Enable          bool          `mapstructure:"enable"`            // 是否启用
+	Host            string        `mapstructure:"host"`              // 数据库主机
+	Port            string        `mapstructure:"port"`              // 数据库端口
+	User            string        `mapstructure:"user"`              // 用户名
+	Password        string        `mapstructure:"password"`          // 密码
+	Database        string        `mapstructure:"database"`          // 数据库名
+	SSLMode         string        `mapstructure:"ssl_mode"`          // SSL 模式
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`    // 最大打开连接数
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`    // 最大空闲连接数
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"` // 连接最大生命周期
 }
 
 // SQLite 包含 SQLite 数据库配置。
 type SQLite struct {
-	Enable          bool          `mapstructure:"enable"`           // 是否启用
-	File            string        `mapstructure:"file"`             // 数据库文件路径
-	MaxOpenConns    int           `mapstructure:"max_open_conns"`   // 最大打开连接数
-	MaxIdleConns    int           `mapstructure:"max_idle_conns"`   // 最大空闲连接数
+	Enable          bool          `mapstructure:"enable"`            // 是否启用
+	File            string        `mapstructure:"file"`              // 数据库文件路径
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`    // 最大打开连接数
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`    // 最大空闲连接数
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"` // 连接最大生命周期
 }
 
 // Milvus 包含 Milvus 向量数据库配置。
 type Milvus struct {
-	Enable              bool          `mapstructure:"enable"`               // 是否启用
-	Host                string        `mapstructure:"host"`                 // Milvus 主机
-	Port                string        `mapstructure:"port"`                 // Milvus 端口
-	Username            string        `mapstructure:"username"`             // 用户名
-	Password            string        `mapstructure:"password"`             // 密码
-	ApiKey              string        `mapstructure:"api_key"`              // API 密钥
-	Database            string        `mapstructure:"database"`             // 数据库名
-	Collection          string        `mapstructure:"collection"`           // 集合名
-	UseTLS              bool          `mapstructure:"use_tls"`              // 是否使用 TLS
-	Timeout             time.Duration `mapstructure:"timeout"`              // 超时时间
+	Enable              bool          `mapstructure:"enable"`                // 是否启用
+	Host                string        `mapstructure:"host"`                  // Milvus 主机
+	Port                string        `mapstructure:"port"`                  // Milvus 端口
+	Username            string        `mapstructure:"username"`              // 用户名
+	Password            string        `mapstructure:"password"`              // 密码
+	ApiKey              string        `mapstructure:"api_key"`               // API 密钥
+	Database            string        `mapstructure:"database"`              // 数据库名
+	Collection          string        `mapstructure:"collection"`            // 集合名
+	UseTLS              bool          `mapstructure:"use_tls"`               // 是否使用 TLS
+	Timeout             time.Duration `mapstructure:"timeout"`               // 超时时间
 	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"` // 健康检查间隔
-	Dimension           int           `mapstructure:"dimension"`            // 向量维度
-	IndexType           string        `mapstructure:"index_type"`           // 索引类型
+	Dimension           int           `mapstructure:"dimension"`             // 向量维度
+	IndexType           string        `mapstructure:"index_type"`            // 索引类型
 }
 
 // Embedder 包含向量嵌入模型配置。
@@ -226,13 +227,14 @@ type Embedder struct {
 
 // Prometheus 包含 Prometheus 监控配置。
 type Prometheus struct {
-	Enable        bool          `mapstructure:"enable"`         // 是否启用
-	Address       string        `mapstructure:"address"`        // Prometheus 地址
-	Host          string        `mapstructure:"host"`           // 主机
-	Port          string        `mapstructure:"port"`           // 端口
-	Timeout       time.Duration `mapstructure:"timeout"`        // 超时时间
-	MaxConcurrent int           `mapstructure:"max_concurrent"` // 最大并发数
-	RetryCount    int           `mapstructure:"retry_count"`    // 重试次数
+	Enable         bool          `mapstructure:"enable"`          // 是否启用
+	Address        string        `mapstructure:"address"`         // Prometheus 地址
+	Host           string        `mapstructure:"host"`            // 主机
+	Port           string        `mapstructure:"port"`            // 端口
+	PushgatewayURL string        `mapstructure:"pushgateway_url"` // Pushgateway 地址
+	Timeout        time.Duration `mapstructure:"timeout"`         // 超时时间
+	MaxConcurrent  int           `mapstructure:"max_concurrent"`  // 最大并发数
+	RetryCount     int           `mapstructure:"retry_count"`     // 重试次数
 }
 
 // cfgFile 是配置文件路径，由命令行参数设置。

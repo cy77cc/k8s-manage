@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -287,93 +288,139 @@ func (l *Logic) getRecentEvents(ctx context.Context) ([]dashboardv1.EventItem, e
 }
 
 func (l *Logic) getMetricsSeries(ctx context.Context, since, now time.Time) (dashboardv1.MetricsSeries, error) {
-	// Calculate appropriate limit per host based on time range
-	duration := now.Sub(since)
-	limit := 60
-	switch {
-	case duration <= 2*time.Hour:
-		limit = 60
-	case duration <= 6*time.Hour:
-		limit = 180
-	default:
-		limit = 288
+	// Prometheus 不可用时返回空数据
+	if l.svcCtx.Prometheus == nil {
+		return dashboardv1.MetricsSeries{}, nil
 	}
 
-	cpuSeries, err := l.listMetricPointsGrouped(ctx, "cpu_usage", since, now, limit)
+	// 计算合适的 step
+	duration := now.Sub(since)
+	step := calculateStep(duration)
+
+	// 查询 CPU 负载指标
+	cpuSeries, err := l.queryHostMetricsFromPrometheus(ctx, "host_cpu_load", since, now, step)
 	if err != nil {
 		return dashboardv1.MetricsSeries{}, err
 	}
-	memorySeries, err := l.listMetricPointsGrouped(ctx, "memory_usage", since, now, limit)
+
+	// 查询内存使用率指标
+	memorySeries, err := l.queryHostMetricsFromPrometheus(ctx, "host_memory_usage_percent", since, now, step)
 	if err != nil {
 		return dashboardv1.MetricsSeries{}, err
 	}
+
 	return dashboardv1.MetricsSeries{
 		CPUUsage:    cpuSeries,
 		MemoryUsage: memorySeries,
 	}, nil
 }
 
-func (l *Logic) listMetricPointsGrouped(ctx context.Context, metric string, since, now time.Time, limitPerHost int) ([]dashboardv1.MetricSeries, error) {
-	// Query all metric points for the time range
-	rows := make([]model.MetricPoint, 0, 500)
-	if err := l.svcCtx.DB.WithContext(ctx).
-		Where("metric = ? AND collected_at >= ? AND collected_at <= ?", metric, since, now).
-		Order("collected_at ASC").
-		Find(&rows).Error; err != nil {
+// queryHostMetricsFromPrometheus 从 Prometheus 查询主机指标。
+func (l *Logic) queryHostMetricsFromPrometheus(ctx context.Context, metric string, start, end time.Time, step time.Duration) ([]dashboardv1.MetricSeries, error) {
+	result, err := l.svcCtx.Prometheus.QueryRange(ctx, metric, start, end, step)
+	if err != nil {
 		return nil, err
 	}
 
-	// Group by host
+	// 按 host_id 分组
 	type hostKey struct {
 		id   uint64
 		name string
 	}
 	groups := make(map[hostKey][]dashboardv1.MetricPoint)
 
-	for _, row := range rows {
-		// Parse dimensions_json to extract host_id and host_name
-		var dims struct {
-			HostID   uint64 `json:"host_id"`
-			HostName string `json:"host_name"`
-		}
-		if row.DimensionsJSON != "" {
-			_ = json.Unmarshal([]byte(row.DimensionsJSON), &dims)
-		}
-		if dims.HostID == 0 {
-			continue // Skip global metrics
+	// 处理范围查询结果
+	for _, series := range result.Matrix {
+		hostID := parseHostID(series.Metric["host_id"])
+		hostName := series.Metric["host_name"]
+
+		if hostID == 0 {
+			continue
 		}
 
-		key := hostKey{id: dims.HostID, name: dims.HostName}
-		groups[key] = append(groups[key], dashboardv1.MetricPoint{
-			Timestamp: row.Collected,
-			Value:     row.Value,
-		})
+		key := hostKey{id: hostID, name: hostName}
+		for _, pair := range series.Values {
+			if len(pair) >= 2 {
+				ts := parseTimestamp(pair[0])
+				val := parseFloatValue(pair[1])
+				groups[key] = append(groups[key], dashboardv1.MetricPoint{
+					Timestamp: ts,
+					Value:     val,
+				})
+			}
+		}
 	}
 
-	// Convert to slice and limit per host
-	result := make([]dashboardv1.MetricSeries, 0, len(groups))
+	// 转换为切片
+	out := make([]dashboardv1.MetricSeries, 0, len(groups))
 	for key, points := range groups {
-		// Sort by timestamp (already sorted from query, but ensure)
+		if len(points) == 0 {
+			continue
+		}
+		// 按时间排序
 		sort.Slice(points, func(i, j int) bool {
 			return points[i].Timestamp.Before(points[j].Timestamp)
 		})
-		// Limit points per host
-		if len(points) > limitPerHost {
-			points = points[len(points)-limitPerHost:]
-		}
-		result = append(result, dashboardv1.MetricSeries{
+		out = append(out, dashboardv1.MetricSeries{
 			HostID:   key.id,
 			HostName: key.name,
 			Data:     points,
 		})
 	}
 
-	// Sort by host name for consistent display
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].HostName < result[j].HostName
+	// 按主机名排序
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].HostName < out[j].HostName
 	})
 
-	return result, nil
+	return out, nil
+}
+
+// calculateStep 根据时间范围计算合适的 step。
+func calculateStep(duration time.Duration) time.Duration {
+	switch {
+	case duration <= 2*time.Hour:
+		return 2 * time.Minute
+	case duration <= 6*time.Hour:
+		return 5 * time.Minute
+	default:
+		return 10 * time.Minute
+	}
+}
+
+// parseHostID 解析 host_id 标签值。
+func parseHostID(v string) uint64 {
+	id, _ := strconv.ParseUint(v, 10, 64)
+	return id
+}
+
+// parseTimestamp 解析时间戳。
+func parseTimestamp(v any) time.Time {
+	switch t := v.(type) {
+	case float64:
+		return time.Unix(int64(t), 0)
+	case json.Number:
+		f, _ := t.Float64()
+		return time.Unix(int64(f), 0)
+	default:
+		return time.Time{}
+	}
+}
+
+// parseFloatValue 解析浮点值。
+func parseFloatValue(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case string:
+		f, _ := strconv.ParseFloat(t, 64)
+		return f
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	default:
+		return 0
+	}
 }
 
 func parseTimeRange(now time.Time, timeRange string) (time.Time, error) {

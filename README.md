@@ -168,3 +168,9 @@ Related docs:
 - AI 分块知识（RAG/向量检索）：`docs/ai/help-knowledge-base.jsonl`
 
 后端 AI 聊天在识别“帮助/如何操作”类问题时，会自动注入对应帮助知识片段，提升回答一致性与可执行性。
+
+当前 AI 抽屉已经升级为 `turn -> blocks` 的流式渲染模型：
+
+- 后端在 `/api/v1/ai/chat` 和 `/api/v1/ai/resume/step/stream` 中同时输出兼容 SSE 事件与原生 turn/block 生命周期事件
+- 前端优先用 turn/block 事件驱动状态、工具、审批、证据和最终回答渲染，并保留 legacy message 兼容路径
+- 审批恢复会继续写入原 assistant turn，历史会话回放也会优先读取结构化 `turns` 合同

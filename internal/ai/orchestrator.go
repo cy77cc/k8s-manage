@@ -73,7 +73,7 @@ type Orchestrator struct {
 	executor          *executor.Executor      // 任务执行阶段
 	summarizer        *summarizer.Summarizer  // 结果总结阶段
 	metrics           *AIMetrics              // 指标收集器
-	observability     *observability.Handler // 可观测性处理器
+	observability     *observability.Handler  // 可观测性处理器
 	maxIters          int                     // 最大迭代次数
 	heartbeatInterval time.Duration           // 心跳间隔
 }
@@ -151,12 +151,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		sessionID = uuid.NewString()
 	}
 	traceID := uuid.NewString()
+	turnID := uuid.NewString()
 	meta := events.EventMeta{
 		SessionID: sessionID,
 		TraceID:   traceID,
+		TurnID:    turnID,
 		Iteration: 1,
 		Timestamp: time.Now().UTC(),
 	}
+	rollout := CurrentRolloutConfig()
 	streamEmit := emit
 	if o.metrics != nil {
 		thoughtRun := o.metrics.StartThoughtChainRun()
@@ -171,6 +174,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 			}
 		}
 	}
+	projector := newTurnProjector(streamEmit, meta, rollout)
 
 	if o.sessions != nil {
 		if err := o.sessions.AppendMessage(ctx, sessionID, schema.UserMessage(message)); err != nil {
@@ -191,6 +195,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		if err := o.executions.Save(ctx, runtime.ExecutionState{
 			TraceID:   traceID,
 			SessionID: sessionID,
+			TurnID:    turnID,
 			Message:   message,
 			Status:    runtime.ExecutionStatusRunning,
 			Phase:     "gateway_entry",
@@ -211,8 +216,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		"sessionId":  sessionID,
 		"trace_id":   traceID,
 		"traceId":    traceID,
+		"turn_id":    turnID,
 		"createdAt":  meta.Timestamp.Format(time.RFC3339),
 	})
+	projector.Start("rewrite")
+	projector.SetState("streaming", "rewrite")
 	stopHeartbeat := o.startHeartbeat(ctx, streamEmit, meta)
 	defer stopHeartbeat()
 
@@ -222,17 +230,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		CurrentPage:       req.RuntimeContext.CurrentPage,
 		SelectedResources: toRewriteResources(req.RuntimeContext.SelectedResources),
 	}, func(chunk string) {
-		emitStageDelta(streamEmit, meta, "rewrite", "loading", chunk, "", "")
+		emitStageDelta(streamEmit, projector, meta, "rewrite", "loading", chunk, "", "")
 	})
 	if rewriteErr != nil {
 		reply := rewriteFailureMessage(rewriteErr)
-		emitStageDelta(streamEmit, meta, "rewrite", "error", reply, "", "")
+		projector.SetState("error", "rewrite")
+		emitStageDelta(streamEmit, projector, meta, "rewrite", "error", reply, "", "")
 		emitEvent(streamEmit, events.Error, meta, map[string]any{
 			"message":    reply,
 			"error_code": rewriteFailureCode(rewriteErr),
 			"stage":      "rewrite",
 		})
-		emitDeltaChunks(streamEmit, meta, reply)
+		projector.ExecutionEvent(string(events.Error), meta, map[string]any{
+			"message":    reply,
+			"error_code": rewriteFailureCode(rewriteErr),
+			"stage":      "rewrite",
+		})
+		emitDeltaChunks(streamEmit, projector, meta, reply)
 		if o.sessions != nil {
 			if err := o.sessions.AppendMessage(ctx, sessionID, schema.AssistantMessage(reply, nil)); err != nil {
 				return err
@@ -248,10 +262,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		emitEvent(streamEmit, events.Done, meta, map[string]any{
 			"session": sessionPayload,
 		})
+		projector.Done("error", "rewrite")
 		if o.executions != nil {
 			if st, err := o.executions.Load(ctx, sessionID); err == nil && st != nil {
 				st.Status = runtime.ExecutionStatusFailed
 				st.Phase = "rewrite_unavailable"
+				st.ActiveBlockIDs = projector.ActiveBlockIDs()
 				_ = o.executions.Save(ctx, *st)
 			}
 		}
@@ -264,11 +280,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 		"rewrite":              rewriteOut,
 		"user_visible_summary": rewriteOut.Narrative,
 	})
+	projector.SetState("streaming", "plan")
 
-	reply, genErr := o.planAndReply(ctx, message, rewriteOut, req.RuntimeContext, meta, streamEmit, sessionID)
+	reply, genErr := o.planAndReply(ctx, message, rewriteOut, req.RuntimeContext, meta, streamEmit, projector, sessionID)
 	if genErr != nil {
 		reply = fmt.Sprintf("AI 编排入口已经切换到新的宿主边界，但当前模型暂不可用：%s", genErr.Error())
-		emitDeltaChunks(streamEmit, meta, reply)
+		emitDeltaChunks(streamEmit, projector, meta, reply)
 	}
 
 	if o.sessions != nil {
@@ -287,6 +304,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 	emitEvent(streamEmit, events.Done, meta, map[string]any{
 		"session": sessionPayload,
 	})
+	projector.Done("completed", "done")
 
 	if o.executions != nil {
 		st, err := o.executions.Load(ctx, sessionID)
@@ -294,8 +312,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, emit StreamEmitt
 			if st.Status == runtime.ExecutionStatusRunning {
 				st.Status = runtime.ExecutionStatusCompleted
 				st.Phase = "completed"
-				_ = o.executions.Save(ctx, *st)
 			}
+			st.ActiveBlockIDs = projector.ActiveBlockIDs()
+			_ = o.executions.Save(ctx, *st)
 		}
 	}
 	return nil
@@ -340,6 +359,7 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 					SessionID: sessionID,
 					PlanID:    planID,
 					StepID:    stepID,
+					TurnID:    st.TurnID,
 					Status:    "idempotent",
 					Message:   "duplicate approval request ignored",
 				}
@@ -381,6 +401,7 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 			SessionID: sessionID,
 			PlanID:    req.PlanID,
 			StepID:    firstNonEmpty(req.StepID, req.Target),
+			TurnID:    result.State.TurnID,
 			Status:    "noop",
 			Message:   "no pending approval for this session",
 		}
@@ -408,6 +429,7 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 		SessionID:   sessionID,
 		PlanID:      planID,
 		StepID:      stepID,
+		TurnID:      result.State.TurnID,
 		Status:      status,
 		Message:     resumeStatusMessage(status, req.Approved),
 	}
@@ -417,6 +439,176 @@ func (o *Orchestrator) Resume(ctx context.Context, req ResumeRequest) (*ResumeRe
 	return res, nil
 }
 
+// ResumeStream 以 SSE 方式恢复等待审批的执行流程，并继续在原 turn 上输出事件。
+func (o *Orchestrator) ResumeStream(ctx context.Context, req ResumeRequest, emit StreamEmitter) (*ResumeResult, error) {
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if o.executor == nil {
+		res := &ResumeResult{
+			Resumed:   false,
+			SessionID: sessionID,
+			Status:    "unavailable",
+			Message:   "executor is not configured",
+		}
+		o.emitResumeFallbackStream(emit, sessionID, res)
+		return res, nil
+	}
+	if o.executions == nil {
+		res := &ResumeResult{
+			Resumed:   false,
+			SessionID: sessionID,
+			Status:    "unavailable",
+			Message:   "execution store is not configured",
+		}
+		o.emitResumeFallbackStream(emit, sessionID, res)
+		return res, nil
+	}
+	state, err := o.executions.Load(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if state == nil {
+		res := &ResumeResult{
+			Resumed:   false,
+			SessionID: sessionID,
+			Status:    "missing",
+			Message:   "execution state not found",
+		}
+		o.emitResumeFallbackStream(emit, sessionID, res)
+		return res, nil
+	}
+	if strings.TrimSpace(state.TurnID) == "" {
+		state.TurnID = uuid.NewString()
+		if saveErr := o.executions.Save(ctx, *state); saveErr != nil {
+			return nil, saveErr
+		}
+	}
+	meta := events.EventMeta{
+		SessionID: sessionID,
+		TraceID:   state.TraceID,
+		PlanID:    firstNonEmpty(req.PlanID, state.PlanID),
+		StepID:    firstNonEmpty(req.StepID, req.Target),
+		TurnID:    state.TurnID,
+		Iteration: 1,
+		Timestamp: time.Now().UTC(),
+	}
+	rollout := CurrentRolloutConfig()
+	projector := newTurnProjector(emit, meta, rollout)
+	emitEvent(emit, events.Meta, meta, map[string]any{
+		"session_id": sessionID,
+		"sessionId":  sessionID,
+		"trace_id":   state.TraceID,
+		"traceId":    state.TraceID,
+		"plan_id":    state.PlanID,
+		"turn_id":    state.TurnID,
+		"resumed":    true,
+		"createdAt":  meta.Timestamp.Format(time.RFC3339),
+	})
+	projector.Start("execute")
+	projector.SetState("streaming", "execute")
+	stopHeartbeat := o.startHeartbeat(ctx, emit, meta)
+	defer stopHeartbeat()
+
+	result, err := o.executor.Resume(ctx, executor.ResumeRequest{
+		SessionID: sessionID,
+		PlanID:    req.PlanID,
+		StepID:    firstNonEmpty(req.StepID, req.Target),
+		Approved:  req.Approved,
+		Reason:    req.Reason,
+		EventMeta: meta,
+		EmitEvent: func(name string, eventMeta events.EventMeta, data map[string]any) bool {
+			projector.ExecutionEvent(name, eventMeta, data)
+			emitEvent(emit, events.Name(name), eventMeta, data)
+			emitExecuteStageDelta(emit, projector, eventMeta, name, data)
+			return true
+		},
+	})
+	if err != nil {
+		projector.SetState("error", "execute")
+		projector.ExecutionEvent(string(events.Error), meta, map[string]any{
+			"message": err.Error(),
+			"stage":   "execute",
+		})
+		emitEvent(emit, events.Error, meta, map[string]any{
+			"message": err.Error(),
+			"stage":   "execute",
+		})
+		projector.Done("error", "execute")
+		return nil, err
+	}
+
+	res := buildResumeResult(req, result)
+	if !req.Approved || res.Status == "noop" || res.Status == "missing" || res.Status == "idempotent" || res.Status == "unavailable" {
+		emitDeltaChunks(emit, projector, meta, res.Message)
+	}
+	projector.SetState(turnStateStatus(result.State.Status), firstNonEmpty(resultPhase(result), "execute"))
+	projector.Done(turnStateStatus(result.State.Status), firstNonEmpty(resultPhase(result), "execute"))
+	if latest, loadErr := o.executions.Load(ctx, sessionID); loadErr == nil && latest != nil {
+		latest.ActiveBlockIDs = projector.ActiveBlockIDs()
+		if latest.TurnID == "" {
+			latest.TurnID = meta.TurnID
+		}
+		_ = o.executions.Save(ctx, *latest)
+	}
+	donePayload := map[string]any{
+		"status":  res.Status,
+		"message": res.Message,
+	}
+	if o.sessions != nil {
+		donePayload["session"] = map[string]any{
+			"id":       sessionID,
+			"messages": o.sessionMessages(ctx, sessionID),
+		}
+	}
+	emitEvent(emit, events.Done, meta, donePayload)
+	return res, nil
+}
+
+func (o *Orchestrator) emitResumeFallbackStream(emit StreamEmitter, sessionID string, res *ResumeResult) {
+	if emit == nil || res == nil {
+		return
+	}
+	turnID := strings.TrimSpace(res.TurnID)
+	if turnID == "" {
+		turnID = uuid.NewString()
+	}
+	meta := events.EventMeta{
+		SessionID: strings.TrimSpace(sessionID),
+		TraceID:   uuid.NewString(),
+		TurnID:    turnID,
+		Iteration: 1,
+		Timestamp: time.Now().UTC(),
+	}
+	projector := newTurnProjector(emit, meta, CurrentRolloutConfig())
+	emitEvent(emit, events.Meta, meta, map[string]any{
+		"session_id": sessionID,
+		"sessionId":  sessionID,
+		"trace_id":   meta.TraceID,
+		"traceId":    meta.TraceID,
+		"turn_id":    turnID,
+		"resumed":    true,
+		"createdAt":  meta.Timestamp.Format(time.RFC3339),
+	})
+	projector.Start("execute")
+	projector.SetState(firstNonEmpty(res.Status, "error"), "execute")
+	if strings.TrimSpace(res.Message) != "" {
+		emitDeltaChunks(emit, projector, meta, res.Message)
+	}
+	if res.Status == "missing" || res.Status == "unavailable" {
+		emitEvent(emit, events.Error, meta, map[string]any{
+			"message": res.Message,
+			"stage":   "execute",
+		})
+	}
+	projector.Done(firstNonEmpty(res.Status, "error"), "execute")
+	emitEvent(emit, events.Done, meta, map[string]any{
+		"status":  res.Status,
+		"message": res.Message,
+	})
+}
+
 // MetricsSnapshot 返回当前指标快照。
 // 用于监控和统计 AI 编排器的运行状态。
 func (o *Orchestrator) MetricsSnapshot() AIMetricsSnapshot {
@@ -424,15 +616,6 @@ func (o *Orchestrator) MetricsSnapshot() AIMetricsSnapshot {
 		return AIMetricsSnapshot{}
 	}
 	return o.metrics.Snapshot()
-}
-
-// ObservabilitySnapshot 返回可观测性指标快照。
-// 包含 LLM 调用、工具调用、Agent 运行的详细指标。
-func (o *Orchestrator) ObservabilitySnapshot() observability.MetricsSnapshot {
-	if o == nil || o.observability == nil {
-		return observability.MetricsSnapshot{}
-	}
-	return o.observability.Snapshot()
 }
 
 // planAndReply 执行规划和回复生成。
@@ -452,7 +635,7 @@ func (o *Orchestrator) ObservabilitySnapshot() observability.MetricsSnapshot {
 //   - clarify: 需要用户澄清，返回澄清消息
 //   - direct_reply: 直接回复，无需执行计划
 //   - plan: 生成执行计划，调用 executor 执行
-func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritten rewrite.Output, runtimeCtx RuntimeContext, meta events.EventMeta, emit StreamEmitter, sessionID string) (string, error) {
+func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritten rewrite.Output, runtimeCtx RuntimeContext, meta events.EventMeta, emit StreamEmitter, projector *turnProjector, sessionID string) (string, error) {
 	if o.planner == nil {
 		reply := plannerFailureMessage(&planner.PlanningError{
 			Code:              "planner_runner_unavailable",
@@ -462,16 +645,23 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 			"status":               "error",
 			"user_visible_summary": reply,
 		})
-		emitStageDelta(emit, meta, "plan", "error", reply, "", "")
+		projector.SetState("error", "plan")
+		emitStageDelta(emit, projector, meta, "plan", "error", reply, "", "")
 		emitEvent(emit, events.Error, meta, map[string]any{
 			"message":    reply,
 			"error_code": "planner_runner_unavailable",
 			"stage":      "plan",
 		})
-		emitDeltaChunks(emit, meta, reply)
+		projector.ExecutionEvent(string(events.Error), meta, map[string]any{
+			"message":    reply,
+			"error_code": "planner_runner_unavailable",
+			"stage":      "plan",
+		})
+		emitDeltaChunks(emit, projector, meta, reply)
 		return reply, nil
 	}
 
+	projector.SetState("streaming", "plan")
 	emitEvent(emit, events.PlannerState, meta, map[string]any{
 		"status":               "planning",
 		"user_visible_summary": "正在根据 Rewrite 结果整理执行计划。",
@@ -480,17 +670,23 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 		Message: message,
 		Rewrite: rewritten,
 	}, func(chunk string) {
-		emitStageDelta(emit, meta, "plan", "loading", chunk, "", "")
+		emitStageDelta(emit, projector, meta, "plan", "loading", chunk, "", "")
 	})
 	if err != nil {
 		reply := plannerFailureMessage(err)
-		emitStageDelta(emit, meta, "plan", "error", reply, "", "")
+		projector.SetState("error", "plan")
+		emitStageDelta(emit, projector, meta, "plan", "error", reply, "", "")
 		emitEvent(emit, events.Error, meta, map[string]any{
 			"message":    reply,
 			"error_code": plannerFailureCode(err),
 			"stage":      "plan",
 		})
-		emitDeltaChunks(emit, meta, reply)
+		projector.ExecutionEvent(string(events.Error), meta, map[string]any{
+			"message":    reply,
+			"error_code": plannerFailureCode(err),
+			"stage":      "plan",
+		})
+		emitDeltaChunks(emit, projector, meta, reply)
 		return reply, nil
 	}
 	if o.metrics != nil {
@@ -498,18 +694,21 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 	}
 	switch decision.Type {
 	case planner.DecisionClarify:
+		projector.SetState("waiting_user", "plan")
 		emitEvent(emit, events.ClarifyRequired, meta, map[string]any{
 			"title":      "需要你补充信息",
 			"message":    decision.Message,
 			"candidates": decision.Candidates,
 			"kind":       "clarify",
 		})
-		emitStageDelta(emit, meta, "plan", "error", decision.Message, "", "")
-		emitDeltaChunks(emit, meta, decision.Message)
+		emitStageDelta(emit, projector, meta, "plan", "error", decision.Message, "", "")
+		emitDeltaChunks(emit, projector, meta, decision.Message)
 		return decision.Message, nil
 	case planner.DecisionDirectReply:
-		emitStageDelta(emit, meta, "plan", "success", firstNonEmpty(decision.Message, decision.Narrative), "", "")
-		emitDeltaChunks(emit, meta, decision.Message)
+		projector.SetState("streaming", "summary")
+		emitStageDelta(emit, projector, meta, "plan", "success", firstNonEmpty(decision.Message, decision.Narrative), "", "")
+		emitDeltaChunks(emit, projector, meta, decision.Message)
+		projector.CloseText("text:final", "completed")
 		return decision.Message, nil
 	case planner.DecisionPlan:
 		if decision.Plan != nil {
@@ -518,7 +717,12 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 				"plan":                 decision.Plan,
 				"user_visible_summary": decision.Narrative,
 			})
-			emitStageDelta(emit, meta, "plan", "success", firstNonEmpty(decision.Narrative, decision.Plan.Narrative), "", "")
+			projector.Plan(firstNonEmpty(decision.Narrative, decision.Plan.Narrative), map[string]any{
+				"plan":                 decision.Plan,
+				"user_visible_summary": decision.Narrative,
+			})
+			projector.SetState("streaming", "execute")
+			emitStageDelta(emit, projector, meta, "plan", "success", firstNonEmpty(decision.Narrative, decision.Plan.Narrative), "", "")
 			if o.executor != nil {
 				executed, execErr := o.executor.Run(ctx, executor.Request{
 					TraceID:   meta.TraceID,
@@ -534,24 +738,30 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 					},
 					EventMeta: meta,
 					EmitEvent: func(name string, eventMeta events.EventMeta, data map[string]any) bool {
+						projector.ExecutionEvent(name, eventMeta, data)
 						emitEvent(emit, events.Name(name), eventMeta, data)
-						emitExecuteStageDelta(emit, eventMeta, name, data)
+						emitExecuteStageDelta(emit, projector, eventMeta, name, data)
 						return true
 					},
 				})
 				if execErr == nil && executed != nil {
-					emitStageDelta(emit, meta, "summary", "loading", "正在思考并整理最终回答。", "", "")
+					projector.SetState("streaming", "summary")
+					emitStageDelta(emit, projector, meta, "summary", "loading", "正在思考并整理最终回答。", "", "")
 					summaryText, summaryErr := o.summarizeExecution(ctx, message, decision.Plan, executed, func(chunk string) {
+						projector.TextDelta("thinking:summary", "thinking", "summary", chunk)
 						emitEvent(emit, events.ThinkingDelta, meta, map[string]any{
 							"content_chunk": chunk,
 							"contentChunk":  chunk,
 						})
 					}, func(chunk string) {
+						projector.TextDelta("text:final", "text", "summary", chunk)
 						emitEvent(emit, events.Delta, meta, map[string]any{
 							"content_chunk": chunk,
 							"contentChunk":  chunk,
 						})
 					})
+					projector.CloseText("thinking:summary", summaryStageStatus(summaryErr))
+					projector.CloseText("text:final", summaryStageStatus(summaryErr))
 					emitEvent(emit, events.Summary, meta, map[string]any{
 						"status":  summaryStageStatus(summaryErr),
 						"summary": summaryText,
@@ -604,11 +814,21 @@ func emitEvent(emit StreamEmitter, name events.Name, meta events.EventMeta, data
 	if emit == nil {
 		return
 	}
+	payload := cloneMap(data)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	if meta.TurnID != "" {
+		payload["turn_id"] = meta.TurnID
+	}
+	if meta.BlockID != "" {
+		payload["block_id"] = meta.BlockID
+	}
 	emit(StreamEvent{
 		Type:     name,
 		Audience: events.AudienceUser,
 		Meta:     meta.WithDefaults(),
-		Data:     data,
+		Data:     payload,
 	})
 }
 
@@ -651,7 +871,7 @@ func (o *Orchestrator) startHeartbeat(ctx context.Context, emit StreamEmitter, m
 //   - chunk: 内容片段
 //   - stepID: 步骤 ID (执行阶段使用)
 //   - expert: 专家名称 (执行阶段使用)
-func emitStageDelta(emit StreamEmitter, meta events.EventMeta, stage, status, chunk, stepID, expert string) {
+func emitStageDelta(emit StreamEmitter, projector *turnProjector, meta events.EventMeta, stage, status, chunk, stepID, expert string) {
 	chunk = strings.TrimSpace(chunk)
 	if emit == nil || stage == "" || chunk == "" {
 		return
@@ -668,15 +888,19 @@ func emitStageDelta(emit StreamEmitter, meta events.EventMeta, stage, status, ch
 		payload["expert"] = expert
 	}
 	emitEvent(emit, events.StageDelta, meta, payload)
+	if projector != nil {
+		projector.StageDelta(stage, status, chunk, stepID, expert)
+	}
 }
 
 // emitExecuteStageDelta 将执行阶段的事件转换为阶段增量事件。
 // 处理 StepUpdate、ToolCall、ToolResult 三种事件类型。
-func emitExecuteStageDelta(emit StreamEmitter, meta events.EventMeta, name string, data map[string]any) {
+func emitExecuteStageDelta(emit StreamEmitter, projector *turnProjector, meta events.EventMeta, name string, data map[string]any) {
 	switch name {
 	case string(events.StepUpdate):
 		emitStageDelta(
 			emit,
+			projector,
 			meta,
 			"execute",
 			stageStatusFromValue(data["status"]),
@@ -687,6 +911,7 @@ func emitExecuteStageDelta(emit StreamEmitter, meta events.EventMeta, name strin
 	case string(events.ToolCall):
 		emitStageDelta(
 			emit,
+			projector,
 			meta,
 			"execute",
 			"loading",
@@ -701,6 +926,7 @@ func emitExecuteStageDelta(emit StreamEmitter, meta events.EventMeta, name strin
 		}
 		emitStageDelta(
 			emit,
+			projector,
 			meta,
 			"execute",
 			status,
@@ -728,7 +954,7 @@ func stageStatusFromValue(value any) string {
 
 // emitDeltaChunks 将内容分块发送。
 // 用于流式输出大段文本，每块 24 个字符。
-func emitDeltaChunks(emit StreamEmitter, meta events.EventMeta, content string) {
+func emitDeltaChunks(emit StreamEmitter, projector *turnProjector, meta events.EventMeta, content string) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return
@@ -741,10 +967,16 @@ func emitDeltaChunks(emit StreamEmitter, meta events.EventMeta, content string) 
 			end = len(runes)
 		}
 		chunk := string(runes[start:end])
+		if projector != nil {
+			projector.TextDelta("text:final", "text", "summary", chunk)
+		}
 		emitEvent(emit, events.Delta, meta, map[string]any{
 			"content_chunk": chunk,
 			"contentChunk":  chunk,
 		})
+	}
+	if projector != nil {
+		projector.CloseText("text:final", "completed")
 	}
 }
 
@@ -824,6 +1056,83 @@ func stringValue(value any) string {
 		return strings.TrimSpace(text)
 	}
 	return ""
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func buildResumeResult(req ResumeRequest, result *executor.Result) *ResumeResult {
+	if result == nil {
+		return &ResumeResult{
+			Resumed:   false,
+			SessionID: strings.TrimSpace(req.SessionID),
+			PlanID:    strings.TrimSpace(req.PlanID),
+			StepID:    firstNonEmpty(req.StepID, req.Target),
+			Status:    "missing",
+			Message:   "execution state not found",
+		}
+	}
+	state := result.State
+	if state.SessionID == "" {
+		return &ResumeResult{
+			Resumed:   false,
+			SessionID: strings.TrimSpace(req.SessionID),
+			PlanID:    strings.TrimSpace(req.PlanID),
+			StepID:    firstNonEmpty(req.StepID, req.Target),
+			Status:    "noop",
+			Message:   "no pending approval for this session",
+		}
+	}
+	pendingStepID := ""
+	pendingPlanID := ""
+	if state.PendingApproval != nil {
+		pendingStepID = state.PendingApproval.StepID
+		pendingPlanID = state.PendingApproval.PlanID
+	}
+	stepID := firstNonEmpty(req.StepID, req.Target, pendingStepID)
+	planID := firstNonEmpty(req.PlanID, state.PlanID, pendingPlanID)
+	status := firstNonEmpty(state.Phase)
+	if approval := result.Approval(); approval != nil && approval.Status != "" {
+		status = approval.Status
+	}
+	return &ResumeResult{
+		Resumed:     req.Approved,
+		Interrupted: !req.Approved,
+		SessionID:   state.SessionID,
+		PlanID:      planID,
+		StepID:      stepID,
+		TurnID:      state.TurnID,
+		Status:      status,
+		Message:     resumeStatusMessage(status, req.Approved),
+	}
+}
+
+func resultPhase(result *executor.Result) string {
+	if result == nil {
+		return ""
+	}
+	return strings.TrimSpace(result.State.Phase)
+}
+
+func turnStateStatus(status runtime.ExecutionStatus) string {
+	switch status {
+	case runtime.ExecutionStatusWaitingApproval:
+		return "waiting_user"
+	case runtime.ExecutionStatusCompleted:
+		return "completed"
+	case runtime.ExecutionStatusFailed:
+		return "error"
+	default:
+		return "streaming"
+	}
 }
 
 // resumeStatusMessage 根据恢复状态生成用户可见的消息。

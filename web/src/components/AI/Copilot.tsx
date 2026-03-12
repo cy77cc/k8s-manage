@@ -2,7 +2,7 @@
  * Copilot 组件
  * 使用 @ant-design/x 组件实现的 AI 助手
  */
-import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect, useReducer } from 'react';
 import {
   CloseOutlined,
   CommentOutlined,
@@ -22,17 +22,32 @@ import {
   ThoughtChain,
   Welcome,
 } from '@ant-design/x';
-import type { BubbleListRef, BubbleProps } from '@ant-design/x/es/bubble';
-import { Button, message, Popover, Select, Space, Tooltip, theme, Skeleton } from 'antd';
+import type { BubbleListRef } from '@ant-design/x/es/bubble';
+import { Button, message, Popover, Segmented, Select, Space, Tooltip, theme, Skeleton } from 'antd';
 import dayjs from 'dayjs';
+import { aiApi } from '../../api/modules/ai';
+import type { ApprovalTicket, SSEDoneEvent } from '../../api/modules/ai';
 import { getSceneLabel } from './constants/sceneMapping';
-import type { ChatMessage, EmbeddedRecommendation, SSEEventType, ThoughtStageDetailItem, ThoughtStageItem, ThoughtStageStatus } from './types';
+import type { ChatMessage, ChatTurn, EmbeddedRecommendation, ThoughtStageDetailItem, ThoughtStageItem, ThoughtStageStatus } from './types';
 import type { SceneOption } from './hooks/useAutoScene';
 import { useConversationRestore, type RestoredConversation } from './hooks/useConversationRestore';
 import { useScenePrompts } from './hooks/useScenePrompts';
 import { MessageActions } from './components/MessageActions';
 import { AssistantMessageBlocks } from './components/AssistantMessageBlocks';
-import { normalizeAssistantMessage } from './messageBlocks';
+import { normalizeAssistantMessage, normalizeTurnBlocks } from './messageBlocks';
+import {
+  applyBlockClose,
+  applyBlockDelta,
+  applyBlockOpen,
+  applyBlockReplace,
+  applyTurnDone,
+  applyTurnStarted,
+  applyTurnState,
+  createAssistantTurn,
+  getTurnBlocksForDisplay,
+  type DisplayMode,
+  projectTurnSummary,
+} from './turnLifecycle';
 
 const { useToken } = theme;
 
@@ -121,25 +136,6 @@ function appendStageContent(current: string | undefined, next: string | undefine
 
 function visibleThoughtChain(stages: ThoughtStageItem[] | undefined): ThoughtStageItem[] {
   return (stages || []).filter((item) => item.key !== 'summary');
-}
-
-function updateAssistantMessage(
-  conversations: ConversationItem[],
-  conversationKey: string,
-  assistantId: string,
-  updater: (message: ExtendedChatMessage) => ExtendedChatMessage
-): ConversationItem[] {
-  return conversations.map((conversation) => {
-    if (conversation.key !== conversationKey) {
-      return conversation;
-    }
-    return {
-      ...conversation,
-      messages: conversation.messages.map((message) => (
-        message.id === assistantId ? updater(message) : message
-      )),
-    };
-  });
 }
 
 function upsertThoughtStage(
@@ -249,29 +245,56 @@ function resolveThoughtStageTitle(stage: string | undefined): ThoughtStageItem['
 const AssistantMessage: React.FC<{
   content: string;
   thinking?: string;
+  turn?: ChatTurn;
   recommendations?: EmbeddedRecommendation[];
   thoughtChain?: ThoughtStageItem[];
   rawEvidence?: string[];
   isStreaming?: boolean;
   showActions?: boolean;
+  displayMode: DisplayMode;
+  reducedMotion: boolean;
   onRegenerate?: () => void;
   onRecommendationSelect?: (prompt: string) => void;
+  onApprovalDecision?: (payload: Record<string, unknown>, approved: boolean) => void;
   isLoading?: boolean;
-}> = ({ content, thinking, recommendations, thoughtChain, rawEvidence, isStreaming, showActions = true, onRegenerate, onRecommendationSelect, isLoading }) => {
+}> = ({
+  content,
+  thinking,
+  turn,
+  recommendations,
+  thoughtChain,
+  rawEvidence,
+  isStreaming,
+  showActions = true,
+  displayMode,
+  reducedMotion,
+  onRegenerate,
+  onRecommendationSelect,
+  onApprovalDecision,
+  isLoading,
+}) => {
   const { token } = theme.useToken();
-  const chainItems = useMemo(() => visibleThoughtChain(thoughtChain), [thoughtChain]);
+  const chainItems = useMemo(
+    () => (displayMode === 'debug' && !turn ? visibleThoughtChain(thoughtChain) : []),
+    [displayMode, thoughtChain, turn],
+  );
   const showThinking = useMemo(
     () => Boolean((thinking || '').trim()) || Boolean((thoughtChain || []).some((item) => item.key === 'summary' && item.status === 'loading')),
     [thinking, thoughtChain],
   );
-  const blocks = useMemo(() => normalizeAssistantMessage({
-    content,
-    thinking,
-    showThinking,
-    rawEvidence,
-    recommendations,
-    isStreaming,
-  }), [content, thinking, showThinking, rawEvidence, recommendations, isStreaming]);
+  const blocks = useMemo(() => {
+    if (turn && turn.blocks.length > 0) {
+      return normalizeTurnBlocks(getTurnBlocksForDisplay(turn, displayMode, reducedMotion));
+    }
+    return normalizeAssistantMessage({
+      content,
+      thinking: displayMode === 'debug' ? thinking : undefined,
+      showThinking: displayMode === 'debug' ? showThinking : false,
+      rawEvidence: displayMode === 'debug' ? rawEvidence : undefined,
+      recommendations,
+      isStreaming,
+    });
+  }, [content, displayMode, isStreaming, rawEvidence, recommendations, reducedMotion, showThinking, thinking, turn]);
 
   return (
     <div>
@@ -296,6 +319,7 @@ const AssistantMessage: React.FC<{
         <AssistantMessageBlocks
           blocks={blocks}
           onRecommendationSelect={onRecommendationSelect}
+          onApprovalDecision={onApprovalDecision}
         />
       ) : isStreaming ? (
         <span style={{ color: token.colorTextSecondary }}>正在输入...</span>
@@ -304,8 +328,8 @@ const AssistantMessage: React.FC<{
       {/* 消息操作按钮 */}
       {showActions && !isStreaming && content && (
         <MessageActions
-          content={content}
-          messageId=""
+        content={content}
+        messageId=""
           isLoading={isLoading}
           onRegenerate={onRegenerate}
         />
@@ -330,6 +354,92 @@ interface ConversationItem {
   messages: ExtendedChatMessage[];
 }
 
+interface ConversationState {
+  conversations: ConversationItem[];
+  activeKey: string;
+}
+
+type ConversationAction =
+  | { type: 'reset' }
+  | { type: 'restore'; conversation: ConversationItem }
+  | { type: 'set_active'; key: string }
+  | { type: 'new'; key: string }
+  | { type: 'append_messages'; key: string; label?: string; messages: ExtendedChatMessage[] }
+  | { type: 'update_message'; key: string; messageId: string; updater: (message: ExtendedChatMessage) => ExtendedChatMessage }
+  | { type: 'remove_message'; key: string; messageId: string };
+
+const DEFAULT_CONVERSATION: ConversationItem = { key: 'default', label: '新对话', group: '今天', messages: [] };
+
+function conversationReducer(state: ConversationState, action: ConversationAction): ConversationState {
+  switch (action.type) {
+    case 'reset':
+      return {
+        conversations: [DEFAULT_CONVERSATION],
+        activeKey: DEFAULT_CONVERSATION.key,
+      };
+    case 'restore':
+      return {
+        conversations: [action.conversation],
+        activeKey: action.conversation.key,
+      };
+    case 'set_active':
+      return {
+        ...state,
+        activeKey: action.key,
+      };
+    case 'new':
+      return {
+        conversations: [
+          { key: action.key, label: '新对话', group: '今天', messages: [] },
+          ...state.conversations,
+        ],
+        activeKey: action.key,
+      };
+    case 'append_messages':
+      return {
+        ...state,
+        conversations: state.conversations.map((conversation) => (
+          conversation.key !== action.key
+            ? conversation
+            : {
+                ...conversation,
+                label: action.label || conversation.label,
+                messages: [...conversation.messages, ...action.messages],
+              }
+        )),
+      };
+    case 'update_message':
+      return {
+        ...state,
+        conversations: state.conversations.map((conversation) => {
+          if (conversation.key !== action.key) {
+            return conversation;
+          }
+          return {
+            ...conversation,
+            messages: conversation.messages.map((message) => (
+              message.id === action.messageId ? action.updater(message) : message
+            )),
+          };
+        }),
+      };
+    case 'remove_message':
+      return {
+        ...state,
+        conversations: state.conversations.map((conversation) => (
+          conversation.key !== action.key
+            ? conversation
+            : {
+                ...conversation,
+                messages: conversation.messages.filter((message) => message.id !== action.messageId),
+              }
+        )),
+      };
+    default:
+      return state;
+  }
+}
+
 function getLastAssistantMessage(session: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   const messages = Array.isArray(session?.messages) ? (session?.messages as Record<string, unknown>[]) : [];
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -338,95 +448,6 @@ function getLastAssistantMessage(session: Record<string, unknown> | undefined): 
     }
   }
   return undefined;
-}
-
-function resolveStreamContent(data: Record<string, unknown>): string {
-  const value = data.contentChunk ?? data.content_chunk ?? data.content ?? data.message;
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (value == null) {
-    return '';
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-// 发送 SSE 请求
-async function sendChatMessage(
-  scene: string,
-  sessionId: string | undefined,
-  content: string,
-  onChunk: (chunk: { type: SSEEventType; data: Record<string, unknown> }) => void,
-  signal?: AbortSignal
-): Promise<void> {
-  const token = localStorage.getItem('token');
-  const projectId = localStorage.getItem('projectId');
-
-  const response = await fetch('/api/v1/ai/chat', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(projectId ? { 'X-Project-ID': projectId } : {}),
-    },
-    body: JSON.stringify({
-      sessionId,
-      message: content,
-      context: { scene },
-    }),
-    signal,
-  });
-
-  if (!response.ok || !response.body) {
-    const errorText = await response.text().catch(() => 'Unknown error');
-    throw new Error(`请求失败: ${response.status} ${errorText}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    // 按双换行分割事件
-    const events = buffer.split('\n\n');
-    buffer = events.pop() || '';
-
-    for (const eventBlock of events) {
-      if (!eventBlock.trim()) continue;
-
-      // 解析事件块
-      const lines = eventBlock.split('\n');
-      let eventType: string | null = null;
-      let eventData: string | null = null;
-
-      for (const line of lines) {
-        if (line.startsWith('event:')) {
-          eventType = line.slice(6).trim();
-        } else if (line.startsWith('data:')) {
-          eventData = line.slice(5).trim();
-        }
-      }
-
-      if (eventType && eventData) {
-        let data: Record<string, unknown> = {};
-        try {
-          data = JSON.parse(eventData);
-        } catch {
-          data = { message: eventData };
-        }
-        onChunk({ type: eventType as SSEEventType, data });
-      }
-    }
-  }
 }
 
 interface CopilotProps {
@@ -464,12 +485,20 @@ export const Copilot: React.FC<CopilotProps> = ({
 
   // 输入状态
   const [inputValue, setInputValue] = useState('');
-
-  // 会话状态
-  const [conversations, setConversations] = useState<ConversationItem[]>([
-    { key: 'default', label: '新对话', group: '今天', messages: [] },
-  ]);
-  const [activeKey, setActiveKey] = useState('default');
+  const [conversationState, dispatch] = useReducer(conversationReducer, {
+    conversations: [DEFAULT_CONVERSATION],
+    activeKey: DEFAULT_CONVERSATION.key,
+  });
+  const conversations = conversationState.conversations;
+  const activeKey = conversationState.activeKey;
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
+    const stored = localStorage.getItem('ai.drawer.display_mode');
+    return stored === 'debug' ? 'debug' : 'normal';
+  });
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [liveAnnouncement, setLiveAnnouncement] = useState('');
 
   // 恢复会话的回调
   const handleRestoreConversation = useCallback((restored: RestoredConversation) => {
@@ -483,17 +512,30 @@ export const Copilot: React.FC<CopilotProps> = ({
         createdAt: m.createdAt || new Date().toISOString(),
       })),
     };
-    setConversations([restoredItem]);
-    setActiveKey(restored.id);
+    dispatch({ type: 'restore', conversation: restoredItem });
     setSessionId(restored.id);
   }, []);
 
   useEffect(() => {
-    setConversations([{ key: 'default', label: '新对话', group: '今天', messages: [] }]);
-    setActiveKey('default');
+    dispatch({ type: 'reset' });
     setSessionId(undefined);
     setIsLoading(false);
   }, [scene]);
+
+  useEffect(() => {
+    localStorage.setItem('ai.drawer.display_mode', displayMode);
+  }, [displayMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) {
+      return undefined;
+    }
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReducedMotion(media.matches);
+    update();
+    media.addEventListener?.('change', update);
+    return () => media.removeEventListener?.('change', update);
+  }, []);
 
   // 使用会话恢复 hook
   const { isRestoring } = useConversationRestore({
@@ -522,333 +564,397 @@ export const Copilot: React.FC<CopilotProps> = ({
   // 会话 ID
   const [sessionId, setSessionId] = useState<string | undefined>();
 
-  // 发送消息
-  const handleSubmit = useCallback(async (val: string) => {
-    if (!val.trim() || isLoading) return;
+  const patchAssistantMessage = useCallback((
+    conversationKey: string,
+    assistantId: string,
+    updater: (message: ExtendedChatMessage) => ExtendedChatMessage,
+  ) => {
+    dispatch({ type: 'update_message', key: conversationKey, messageId: assistantId, updater });
+  }, []);
 
-    // 添加用户消息
-    const userMessage: ExtendedChatMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: val,
-      createdAt: new Date().toISOString(),
-    };
-
-    setConversations(prev => prev.map(c => {
-      if (c.key !== activeKey) return c;
-      const newLabel = c.label === '新对话' ? val.slice(0, 20) + (val.length > 20 ? '...' : '') : c.label;
-      return { ...c, label: newLabel, messages: [...c.messages, userMessage] };
-    }));
-
-    setIsLoading(true);
-
-    // 创建助手消息占位
-    const assistantId = `assistant-${Date.now()}`;
+  const createStreamHandlers = useCallback((
+    conversationKey: string,
+    assistantId: string,
+  ) => {
     let assistantContent = '';
     let assistantThinking = '';
     let assistantRecommendations: EmbeddedRecommendation[] | undefined;
     let assistantTraceId: string | undefined;
 
-    // 添加助手消息占位
-    setConversations(prev => prev.map(c => {
-      if (c.key !== activeKey) return c;
-      return {
-        ...c,
-        messages: [...c.messages, {
+    const refreshAnnouncement = (value: string) => {
+      if (!value.trim()) {
+        return;
+      }
+      setLiveAnnouncement(value.trim());
+    };
+
+    return {
+      onMeta: (data: { sessionId?: string; traceId?: string; turn_id?: string }) => {
+        if (data.sessionId) {
+          setSessionId(data.sessionId);
+        }
+        if (data.traceId) {
+          assistantTraceId = String(data.traceId);
+        }
+        if (data.turn_id) {
+          patchAssistantMessage(conversationKey, assistantId, (message) => {
+            const nextTurn = applyTurnStarted(message.turn, { turn_id: data.turn_id!, phase: 'rewrite', status: 'streaming' }, assistantTraceId);
+            const summary = projectTurnSummary(nextTurn);
+            return {
+              ...message,
+              turn: nextTurn,
+              traceId: assistantTraceId || message.traceId,
+              content: summary.content || message.content,
+              thinking: summary.thinking || message.thinking,
+              rawEvidence: summary.rawEvidence || message.rawEvidence,
+              recommendations: summary.recommendations || message.recommendations,
+            };
+          });
+        }
+      },
+      onTurnStarted: (data: { turn_id: string; phase?: string; status?: string; role?: string }) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const nextTurn = applyTurnStarted(message.turn, data, assistantTraceId || message.traceId);
+          const summary = projectTurnSummary(nextTurn);
+          refreshAnnouncement(resolveThoughtStageTitle(nextTurn.phase));
+          return {
+            ...message,
+            turn: nextTurn,
+            traceId: assistantTraceId || message.traceId,
+            content: summary.content,
+            thinking: summary.thinking,
+            rawEvidence: summary.rawEvidence,
+            recommendations: summary.recommendations,
+          };
+        });
+      },
+      onBlockOpen: (data: { turn_id: string; block_id: string; block_type: string; position?: number; status?: string; title?: string; payload?: Record<string, unknown> }) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const nextTurn = applyBlockOpen(message.turn, data);
+          const summary = projectTurnSummary(nextTurn);
+          return {
+            ...message,
+            turn: nextTurn,
+            content: summary.content,
+            thinking: summary.thinking,
+            rawEvidence: summary.rawEvidence,
+            recommendations: summary.recommendations,
+          };
+        });
+      },
+      onBlockDelta: (data: { turn_id: string; block_id: string; block_type?: string; patch?: Record<string, unknown> }) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const nextTurn = applyBlockDelta(message.turn, data);
+          const summary = projectTurnSummary(nextTurn);
+          return {
+            ...message,
+            turn: nextTurn,
+            content: summary.content,
+            thinking: summary.thinking,
+            rawEvidence: summary.rawEvidence,
+            recommendations: summary.recommendations,
+          };
+        });
+      },
+      onBlockReplace: (data: { turn_id: string; block_id: string; block_type?: string; payload?: Record<string, unknown> }) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const nextTurn = applyBlockReplace(message.turn, data);
+          const summary = projectTurnSummary(nextTurn);
+          return {
+            ...message,
+            turn: nextTurn,
+            content: summary.content,
+            thinking: summary.thinking,
+            rawEvidence: summary.rawEvidence,
+            recommendations: summary.recommendations,
+          };
+        });
+      },
+      onBlockClose: (data: { turn_id: string; block_id: string; status?: string }) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const nextTurn = applyBlockClose(message.turn, data);
+          const summary = projectTurnSummary(nextTurn);
+          return {
+            ...message,
+            turn: nextTurn,
+            content: summary.content,
+            thinking: summary.thinking,
+            rawEvidence: summary.rawEvidence,
+            recommendations: summary.recommendations,
+          };
+        });
+      },
+      onTurnState: (data: { turn_id: string; status?: string; phase?: string }) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          turn: applyTurnState(message.turn, data),
+        }));
+        refreshAnnouncement(`${resolveThoughtStageTitle(data.phase)} ${data.status || ''}`);
+      },
+      onTurnDone: (data: { turn_id: string; status?: string; phase?: string }) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const nextTurn = applyTurnDone(message.turn, data);
+          const summary = projectTurnSummary(nextTurn);
+          return {
+            ...message,
+            turn: nextTurn,
+            content: summary.content,
+            thinking: summary.thinking,
+            rawEvidence: summary.rawEvidence,
+            recommendations: summary.recommendations,
+          };
+        });
+      },
+      onRewriteResult: (data: Record<string, unknown>) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
+            key: 'rewrite',
+            title: '理解你的问题',
+            status: 'success',
+            description: buildStageDescription('rewrite', 'success'),
+            content: appendStageContent(
+              (message.thoughtChain || []).find((item) => item.key === 'rewrite')?.content,
+              buildStageMilestone('rewrite', 'event', data),
+            ),
+          }),
+        }));
+      },
+      onPlannerState: (data: Record<string, unknown>) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
+            key: 'plan',
+            title: '整理排查计划',
+            status: normalizeThoughtStatus(data.status as string | undefined, 'loading'),
+            description: buildStageDescription('plan', normalizeThoughtStatus(data.status as string | undefined, 'loading')),
+            content: appendStageContent(
+              (message.thoughtChain || []).find((item) => item.key === 'plan')?.content,
+              buildStageMilestone('plan', 'delta', data),
+            ),
+          }),
+        }));
+      },
+      onPlanCreated: (data: Record<string, unknown>) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
+            key: 'plan',
+            title: '整理排查计划',
+            status: 'success',
+            description: buildStageDescription('plan', 'success'),
+            content: appendStageContent(
+              (message.thoughtChain || []).find((item) => item.key === 'plan')?.content,
+              buildStageMilestone('plan', 'event', data),
+            ),
+          }),
+        }));
+      },
+      onStepUpdate: (data: Record<string, unknown>) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
+            key: 'execute',
+            title: '调用专家执行',
+            status: normalizeThoughtStatus(data.status as string | undefined, 'loading'),
+            description: buildStageDescription('execute', normalizeThoughtStatus(data.status as string | undefined, 'loading'), data),
+            content: appendStageContent(
+              (message.thoughtChain || []).find((item) => item.key === 'execute')?.content,
+              buildStageMilestone('execute', 'event', data),
+            ),
+          }),
+        }));
+      },
+      onToolCall: (data: Record<string, unknown>) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const nextStages = upsertThoughtStage(message.thoughtChain || [], {
+            key: 'execute',
+            title: '调用专家执行',
+            status: 'loading',
+            description: buildStageDescription('execute', 'loading', data),
+            content: appendStageContent(
+              (message.thoughtChain || []).find((item) => item.key === 'execute')?.content,
+              String(data.summary || ''),
+            ),
+          });
+          return {
+            ...message,
+            thoughtChain: upsertThoughtDetail(nextStages, 'execute', {
+              id: String(data.call_id || data.tool_name || Date.now()),
+              label: String(data.tool_name || data.expert || 'tool'),
+              status: 'loading',
+              content: String(data.summary || ''),
+            }),
+          };
+        });
+      },
+      onToolResult: (data: Record<string, unknown>) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const result = data.result as Record<string, unknown> | undefined;
+          const status = data.status === 'error' || result?.ok === false ? 'error' : 'success';
+          return {
+            ...message,
+            thoughtChain: upsertThoughtDetail(message.thoughtChain || [], 'execute', {
+              id: String(data.call_id || data.tool_name || Date.now()),
+              label: String(data.tool_name || data.expert || 'tool'),
+              status,
+              content: String(data.error || data.summary || ''),
+            }),
+          };
+        });
+      },
+      onDelta: (data: { contentChunk: string }) => {
+        assistantContent += data.contentChunk || '';
+      },
+      onThinkingDelta: (data: { contentChunk: string }) => {
+        assistantThinking += data.contentChunk || '';
+      },
+      onApprovalRequired: (data: ApprovalTicket & {
+        turn_id?: string;
+        approval_required?: boolean;
+        previewDiff?: string;
+        title?: string;
+        user_visible_summary?: string;
+      }) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
+            key: 'user_action',
+            title: '等待你确认',
+            status: 'loading',
+            description: String(data.title || '当前步骤需要确认后继续执行'),
+            content: String(data.user_visible_summary || ''),
+          }),
+        }));
+        refreshAnnouncement('等待确认');
+      },
+      onClarifyRequired: (data: Record<string, unknown>) => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
+            key: 'user_action',
+            title: '等待你补充信息',
+            status: 'loading',
+            description: String(data.message || data.title || '当前目标仍有歧义'),
+          }),
+        }));
+        assistantContent ||= String(data.message || '');
+      },
+      onSummary: () => {
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          thoughtChain: (message.thoughtChain || []).filter((item) => item.key !== 'summary'),
+        }));
+      },
+      onDone: (data: SSEDoneEvent) => {
+        if (data.turn_recommendations) {
+          assistantRecommendations = data.turn_recommendations as EmbeddedRecommendation[];
+        }
+        if (data.session) {
+          const sessionData = data.session as unknown as Record<string, unknown>;
+          const finalAssistant = getLastAssistantMessage(sessionData);
+          assistantContent ||= String(finalAssistant?.content || '');
+          if (!assistantThinking) {
+            assistantThinking = String(finalAssistant?.thinking || '');
+          }
+          assistantRecommendations ||= finalAssistant?.recommendations as EmbeddedRecommendation[] | undefined;
+          if (sessionData.id) {
+            setSessionId(String(sessionData.id));
+          }
+        }
+        patchAssistantMessage(conversationKey, assistantId, (message) => ({
+          ...message,
+          content: message.turn ? projectTurnSummary(message.turn).content || assistantContent : assistantContent,
+          thinking: message.turn ? projectTurnSummary(message.turn).thinking || assistantThinking || undefined : assistantThinking || undefined,
+          recommendations: assistantRecommendations || message.recommendations,
+          traceId: assistantTraceId || message.traceId,
+          thoughtChain: (message.thoughtChain || []).map((item) => ({
+            ...item,
+            blink: false,
+            status: item.status === 'loading' ? 'success' : item.status,
+          })),
+        }));
+        setIsLoading(false);
+      },
+      onError: (data: { message?: string; stage?: string }) => {
+        assistantContent ||= String(data.message || '当前 AI 阶段执行失败，请稍后重试。').trim();
+        patchAssistantMessage(conversationKey, assistantId, (message) => {
+          const stageKey = String(data.stage || '').trim() as ThoughtStageItem['key'];
+          const errorText = String(data.message || '当前 AI 阶段执行失败，请稍后重试。').trim();
+          const nextThoughtChain = stageKey
+            ? upsertThoughtStage(message.thoughtChain || [], {
+                key: stageKey,
+                title: resolveThoughtStageTitle(stageKey),
+                status: 'error',
+                description: errorText,
+                content: errorText,
+                blink: false,
+              })
+            : (message.thoughtChain || []).map((item, index, items) => (
+                index === items.length - 1 ? { ...item, status: 'error' as ThoughtStageStatus, blink: false, content: item.content || errorText } : item
+              ));
+          return {
+            ...message,
+            content: message.content || errorText,
+            thoughtChain: nextThoughtChain,
+            turn: message.turn ? applyTurnState(message.turn, { turn_id: message.turn.id, status: 'error', phase: message.turn.phase }) : message.turn,
+          };
+        });
+        setIsLoading(false);
+      },
+    };
+  }, [patchAssistantMessage]);
+
+  // 发送消息
+  const handleSubmit = useCallback(async (val: string) => {
+    if (!val.trim() || isLoading) return;
+    const trimmed = val.trim();
+    const conversationKey = activeKey;
+
+    // 添加用户消息
+    const userMessage: ExtendedChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: trimmed,
+      createdAt: new Date().toISOString(),
+    };
+    const newLabel = activeConversation?.label === '新对话'
+      ? trimmed.slice(0, 20) + (trimmed.length > 20 ? '...' : '')
+      : activeConversation?.label;
+
+    setIsLoading(true);
+
+    // 创建助手消息占位
+    const assistantId = `assistant-${Date.now()}`;
+    dispatch({
+      type: 'append_messages',
+      key: conversationKey,
+      label: newLabel,
+      messages: [
+        userMessage,
+        {
           id: assistantId,
           role: 'assistant',
           content: '',
           thoughtChain: [],
+          turn: createAssistantTurn(`pending-${assistantId}`, { status: 'streaming', phase: 'rewrite' }),
           createdAt: new Date().toISOString(),
-        }],
-      };
-    }));
+        },
+      ],
+    });
 
     // 创建 AbortController
     abortControllerRef.current = new AbortController();
 
     try {
-      await sendChatMessage(
-        scene,
-        sessionId,
-        val,
-        (chunk) => {
-          const { type, data } = chunk;
-
-          switch (type) {
-            case 'meta':
-              if (data.sessionId) {
-                setSessionId(data.sessionId as string);
-              }
-              if (data.traceId) {
-                assistantTraceId = String(data.traceId);
-              }
-              break;
-
-            case 'rewrite_result':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-                  key: 'rewrite',
-                  title: '理解你的问题',
-                  status: 'success',
-                  description: buildStageDescription('rewrite', 'success'),
-                  content: appendStageContent(
-                    (message.thoughtChain || []).find((item) => item.key === 'rewrite')?.content,
-                    buildStageMilestone('rewrite', 'event', data),
-                  ),
-                }),
-              })));
-              break;
-
-            case 'planner_state':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-                  key: 'plan',
-                  title: '整理排查计划',
-                  status: normalizeThoughtStatus(data.status as string | undefined, 'loading'),
-                  description: buildStageDescription('plan', normalizeThoughtStatus(data.status as string | undefined, 'loading')),
-                  content: appendStageContent(
-                    (message.thoughtChain || []).find((item) => item.key === 'plan')?.content,
-                    buildStageMilestone('plan', 'delta', data),
-                  ),
-                }),
-              })));
-              break;
-
-            case 'plan_created':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-                  key: 'plan',
-                  title: '整理排查计划',
-                  status: 'success',
-                  description: buildStageDescription('plan', 'success'),
-                  content: appendStageContent(
-                    (message.thoughtChain || []).find((item) => item.key === 'plan')?.content,
-                    buildStageMilestone('plan', 'event', data),
-                  ),
-                }),
-              })));
-              break;
-
-            case 'stage_delta': {
-              const stageKey = String(data.stage || '') as ThoughtStageItem['key'];
-              if (!stageKey) {
-                break;
-              }
-              const chunkText = resolveStreamContent(data);
-              const replace = Boolean(data.replace);
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => {
-                const currentStage = (message.thoughtChain || []).find((item) => item.key === stageKey);
-                const status = normalizeThoughtStatus(data.status as string | undefined, 'loading');
-                const milestone = buildStageMilestone(stageKey, 'delta', data);
-                const nextContent = appendStageContent(replace ? '' : currentStage?.content, milestone || chunkText);
-                return {
-                  ...message,
-                  thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-                    key: stageKey,
-                    title: resolveThoughtStageTitle(stageKey),
-                    status,
-                    description: buildStageDescription(stageKey, status, data) || currentStage?.description,
-                    content: nextContent,
-                  }),
-                };
-              }));
-              break;
-            }
-
-            case 'step_update':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-                  key: 'execute',
-                  title: '调用专家执行',
-                  status: normalizeThoughtStatus(data.status as string | undefined, 'loading'),
-                  description: buildStageDescription('execute', normalizeThoughtStatus(data.status as string | undefined, 'loading'), data),
-                  content: appendStageContent(
-                    (message.thoughtChain || []).find((item) => item.key === 'execute')?.content,
-                    buildStageMilestone('execute', 'event', data),
-                  ),
-                }),
-              })));
-              break;
-
-            case 'tool_call':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => {
-                const nextStages = upsertThoughtStage(message.thoughtChain || [], {
-                  key: 'execute',
-                  title: '调用专家执行',
-                  status: 'loading',
-                  description: buildStageDescription('execute', 'loading', data),
-                  content: appendStageContent(
-                    (message.thoughtChain || []).find((item) => item.key === 'execute')?.content,
-                    String(data.summary || ''),
-                  ),
-                });
-                return {
-                  ...message,
-                  thoughtChain: upsertThoughtDetail(nextStages, 'execute', {
-                    id: String(data.call_id || data.tool_name || Date.now()),
-                    label: String(data.tool_name || data.expert || 'tool'),
-                    status: 'loading',
-                    content: String(data.summary || ''),
-                  }),
-                };
-              }));
-              break;
-
-            case 'tool_result':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => {
-                const result = data.result as Record<string, unknown> | undefined;
-                const status = data.status === 'error' || result?.ok === false ? 'error' : 'success';
-                return {
-                  ...message,
-                  thoughtChain: upsertThoughtDetail(message.thoughtChain || [], 'execute', {
-                    id: String(data.call_id || data.tool_name || Date.now()),
-                    label: String(data.tool_name || data.expert || 'tool'),
-                    status,
-                    content: String(data.error || data.summary || ''),
-                  }),
-                };
-              }));
-              break;
-
-            case 'delta':
-            case 'message':
-              assistantContent += resolveStreamContent(data);
-              break;
-
-            case 'thinking_delta':
-              assistantThinking += resolveStreamContent(data);
-              break;
-
-            case 'approval_required':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-                  key: 'user_action',
-                  title: '等待你确认',
-                  status: 'loading',
-                  description: String(data.title || '当前步骤需要确认后继续执行'),
-                  content: String(data.user_visible_summary || ''),
-                }),
-              })));
-              break;
-
-            case 'clarify_required':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-                  key: 'user_action',
-                  title: '等待你补充信息',
-                  status: 'loading',
-                  description: String(data.message || data.title || '当前目标仍有歧义'),
-                }),
-              })));
-              assistantContent ||= String(data.message || '');
-              break;
-
-            case 'replan_started':
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: upsertThoughtStage(message.thoughtChain || [], {
-                  key: 'plan',
-                  title: '整理排查计划',
-                  status: 'loading',
-                  description: '正在开始新一轮规划',
-                }),
-              })));
-              break;
-
-            case 'summary': {
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: (message.thoughtChain || []).filter((item) => item.key !== 'summary'),
-              })));
-              break;
-            }
-
-            case 'done':
-              // 提取推荐
-              if (data.turn_recommendations) {
-                assistantRecommendations = data.turn_recommendations as EmbeddedRecommendation[];
-              }
-              if (data.session && typeof data.session === 'object') {
-                const session = data.session as Record<string, unknown>;
-                const finalAssistant = getLastAssistantMessage(session);
-                assistantContent ||= String(finalAssistant?.content || '');
-                if (!assistantThinking) {
-                  assistantThinking = String(finalAssistant?.thinking || '');
-                }
-                assistantRecommendations ||= (finalAssistant?.recommendations as EmbeddedRecommendation[] | undefined);
-                const finalRawEvidence = (finalAssistant?.rawEvidence as string[] | undefined) || undefined;
-                setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                  ...message,
-                  rawEvidence: finalRawEvidence || message.rawEvidence,
-                })));
-                if (session.id) {
-                  setSessionId(session.id as string);
-                }
-              }
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => ({
-                ...message,
-                thoughtChain: (message.thoughtChain || []).map((item) => ({
-                  ...item,
-                  blink: false,
-                  status: item.status === 'loading' ? 'success' : item.status,
-                })),
-              })));
-              setIsLoading(false);
-              break;
-
-            case 'error':
-              assistantContent ||= String(data.message || '当前 AI 阶段执行失败，请稍后重试。').trim();
-              setConversations((prev) => updateAssistantMessage(prev, activeKey, assistantId, (message) => {
-                const stageKey = String(data.stage || '').trim() as ThoughtStageItem['key'];
-                const errorText = String(data.message || '当前 AI 阶段执行失败，请稍后重试。').trim();
-                const nextThoughtChain = stageKey
-                  ? upsertThoughtStage(message.thoughtChain || [], {
-                    key: stageKey,
-                    title: resolveThoughtStageTitle(stageKey),
-                    status: 'error',
-                    description: errorText,
-                    content: errorText,
-                    blink: false,
-                  })
-                  : (message.thoughtChain || []).map((item, index, items) => (
-                    index === items.length - 1 ? { ...item, status: 'error' as ThoughtStageStatus, blink: false, content: item.content || errorText } : item
-                  ));
-                return {
-                  ...message,
-                  content: message.content || errorText,
-                  thoughtChain: nextThoughtChain,
-                };
-              }));
-              setIsLoading(false);
-              break;
-          }
-
-          // 更新助手消息
-          setConversations(prev => prev.map(c => {
-            if (c.key !== activeKey) return c;
-            return {
-              ...c,
-              messages: c.messages.map(m => {
-                if (m.id !== assistantId) return m;
-                return {
-                  ...m,
-                  content: assistantContent,
-                  thinking: assistantThinking || undefined,
-                  recommendations: assistantRecommendations,
-                  traceId: assistantTraceId,
-                };
-              }),
-            };
-          }));
+      await aiApi.chatStream(
+        {
+          sessionId,
+          message: trimmed,
+          context: { scene },
         },
-        abortControllerRef.current.signal
+        createStreamHandlers(conversationKey, assistantId),
+        abortControllerRef.current.signal,
       );
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
@@ -856,12 +962,7 @@ export const Copilot: React.FC<CopilotProps> = ({
       }
       setIsLoading(false);
     }
-
-    // 延迟滚动，等待渲染
-    setTimeout(() => {
-      listRef.current?.scrollTo({ top: 'bottom' });
-    }, 100);
-  }, [scene, sessionId, activeKey, isLoading]);
+  }, [activeConversation?.label, activeKey, createStreamHandlers, isLoading, scene, sessionId]);
 
   // 中止请求
   const handleAbort = useCallback(() => {
@@ -869,16 +970,89 @@ export const Copilot: React.FC<CopilotProps> = ({
     setIsLoading(false);
   }, []);
 
+  const handleApprovalDecision = useCallback(async (
+    assistantId: string,
+    payload: Record<string, unknown>,
+    approved: boolean,
+  ) => {
+    setIsLoading(true);
+    patchAssistantMessage(activeKey, assistantId, (message) => {
+      if (!message.turn) {
+        return message;
+      }
+      return {
+        ...message,
+        turn: applyTurnState(message.turn, {
+          turn_id: message.turn.id,
+          status: approved ? 'streaming' : 'completed',
+          phase: approved ? 'execute' : 'done',
+        }),
+      };
+    });
+
+    try {
+      if (!approved) {
+        await aiApi.respondApproval({
+          session_id: String(payload.session_id || sessionId || ''),
+          plan_id: payload.plan_id ? String(payload.plan_id) : undefined,
+          step_id: payload.step_id ? String(payload.step_id) : undefined,
+          approved: false,
+        });
+        patchAssistantMessage(activeKey, assistantId, (message) => ({
+          ...message,
+          content: message.content || '已取消该操作。',
+          turn: message.turn ? applyTurnDone(message.turn, { turn_id: message.turn.id, status: 'completed', phase: 'done' }) : message.turn,
+        }));
+        setIsLoading(false);
+        return;
+      }
+
+      await aiApi.respondApprovalStream(
+        {
+          session_id: String(payload.session_id || sessionId || ''),
+          plan_id: payload.plan_id ? String(payload.plan_id) : undefined,
+          step_id: payload.step_id ? String(payload.step_id) : undefined,
+          approved: true,
+        },
+        createStreamHandlers(activeKey, assistantId),
+      );
+    } catch {
+      message.error('确认操作失败');
+      setIsLoading(false);
+    }
+  }, [activeKey, createStreamHandlers, patchAssistantMessage, sessionId]);
+
   // 新建会话
   const handleNewConversation = useCallback(() => {
     const timeNow = dayjs().valueOf().toString();
-    setConversations(prev => [
-      { key: timeNow, label: '新对话', group: '今天', messages: [] },
-      ...prev,
-    ]);
-    setActiveKey(timeNow);
+    dispatch({ type: 'new', key: timeNow });
     setSessionId(undefined);
   }, []);
+
+  useEffect(() => {
+    const scrollBox = listRef.current?.scrollBoxNativeElement;
+    if (!scrollBox) {
+      return undefined;
+    }
+    const handleScroll = () => {
+      const nearBottom = scrollBox.scrollHeight - scrollBox.scrollTop - scrollBox.clientHeight < 72;
+      setIsNearBottom(nearBottom);
+      setShowJumpToLatest(!nearBottom && isLoading);
+    };
+    handleScroll();
+    scrollBox.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollBox.removeEventListener('scroll', handleScroll);
+  }, [isLoading, messages.length]);
+
+  useEffect(() => {
+    if (!messages.length || !isLoading || !isNearBottom) {
+      return;
+    }
+    listRef.current?.scrollTo({
+      top: 'bottom',
+      behavior: reducedMotion ? 'auto' : 'smooth',
+    });
+  }, [conversations, isLoading, isNearBottom, messages.length, reducedMotion]);
 
   // 场景选择器
   const sceneSelector = useMemo(() => {
@@ -951,13 +1125,7 @@ export const Copilot: React.FC<CopilotProps> = ({
     }
 
     // 移除当前助手消息
-    setConversations(prev => prev.map(c => {
-      if (c.key !== activeKey) return c;
-      return {
-        ...c,
-        messages: c.messages.filter(m => m.id !== assistantMsgId),
-      };
-    }));
+    dispatch({ type: 'remove_message', key: activeKey, messageId: assistantMsgId });
 
     // 重新发送用户消息
     await handleSubmit(userMessage.content);
@@ -976,7 +1144,7 @@ export const Copilot: React.FC<CopilotProps> = ({
 
     // 助手消息
     const hasThoughtChain = visibleThoughtChain(msg.thoughtChain).length > 0;
-    const hasVisibleAssistantState = Boolean(msg.content || msg.thinking || hasThoughtChain);
+    const hasVisibleAssistantState = Boolean(msg.content || msg.thinking || hasThoughtChain || (msg.turn && msg.turn.blocks.length > 0));
     const isStreaming = isCurrentStreaming && !hasVisibleAssistantState;
 
     // 只有当消息内容正在生成时（内容为空）才显示 loading
@@ -987,16 +1155,20 @@ export const Copilot: React.FC<CopilotProps> = ({
       <AssistantMessage
         content={msg.content}
         thinking={msg.thinking}
+        turn={msg.turn}
         recommendations={msg.recommendations}
         thoughtChain={msg.thoughtChain}
         rawEvidence={msg.rawEvidence}
+        displayMode={displayMode}
+        reducedMotion={reducedMotion}
         isStreaming={isStreaming || (isCurrentStreaming && !!msg.thinking && !msg.content)}
         onRegenerate={() => handleRegenerate(msg.id)}
         onRecommendationSelect={handleRecommendationSelect}
+        onApprovalDecision={(payload, approved) => handleApprovalDecision(msg.id, payload, approved)}
         isLoading={showLoading}
       />
     );
-  }, [handleRegenerate, handleRecommendationSelect, isLoading]);
+  }, [displayMode, handleApprovalDecision, handleRegenerate, handleRecommendationSelect, isLoading, reducedMotion]);
 
   if (!open) return null;
 
@@ -1028,6 +1200,16 @@ export const Copilot: React.FC<CopilotProps> = ({
         }}>
           {sceneSelector}
           <span>AI Copilot</span>
+          <Segmented
+            size="small"
+            aria-label="AI 展示模式"
+            value={displayMode}
+            onChange={(value) => setDisplayMode(value as DisplayMode)}
+            options={[
+              { label: '普通', value: 'normal' },
+              { label: '调试', value: 'debug' },
+            ]}
+          />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <Tooltip title="新建对话">
@@ -1047,7 +1229,7 @@ export const Copilot: React.FC<CopilotProps> = ({
                 )}
                 activeKey={activeKey}
                 groupable
-                onActiveChange={setActiveKey}
+                onActiveChange={(key) => dispatch({ type: 'set_active', key })}
                 styles={{ item: { padding: '0 8px' } }}
                 style={{ width: 280, maxHeight: 400, overflowY: 'auto' }}
               />
@@ -1083,21 +1265,39 @@ export const Copilot: React.FC<CopilotProps> = ({
             <Skeleton active paragraph={{ rows: 4 }} />
           </div>
         ) : messages.length > 0 ? (
-          <Bubble.List
-            ref={listRef}
-            style={{ paddingInline: 16, height: '100%' }}
-            items={messages.map(m => ({
-              key: m.id,
-              content: renderMessageContent(m, isLoading && messages[messages.length - 1]?.id === m.id),
-              role: m.role,
-              loading: m.role === 'assistant'
-                && isLoading
-                && !m.content
-                && !m.thinking
-                && !(m.thoughtChain && m.thoughtChain.length > 0),
-            }))}
-            role={role}
-          />
+          <div style={{ position: 'relative', height: '100%' }}>
+            <Bubble.List
+              ref={listRef}
+              style={{ paddingInline: 16, height: '100%' }}
+              items={messages.map(m => ({
+                key: m.id,
+                content: renderMessageContent(m, isLoading && messages[messages.length - 1]?.id === m.id),
+                role: m.role,
+                loading: m.role === 'assistant'
+                  && isLoading
+                  && !m.content
+                  && !m.thinking
+                  && !(m.thoughtChain && m.thoughtChain.length > 0)
+                  && !(m.turn && m.turn.blocks.length > 0),
+              }))}
+              role={role}
+            />
+            {showJumpToLatest && (
+              <Button
+                type="primary"
+                size="small"
+                aria-label="跳转到最新消息"
+                style={{ position: 'absolute', right: 20, bottom: 16, minHeight: 44 }}
+                onClick={() => {
+                  listRef.current?.scrollTo({ top: 'bottom', behavior: reducedMotion ? 'auto' : 'smooth' });
+                  setShowJumpToLatest(false);
+                  setIsNearBottom(true);
+                }}
+              >
+                跳转到最新
+              </Button>
+            )}
+          </div>
         ) : (
           <>
             <Welcome
@@ -1144,6 +1344,23 @@ export const Copilot: React.FC<CopilotProps> = ({
           placeholder="输入消息或使用 / 触发快捷命令"
           allowSpeech
         />
+      </div>
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: 'hidden',
+          clip: 'rect(0, 0, 0, 0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {liveAnnouncement}
       </div>
     </div>
   );

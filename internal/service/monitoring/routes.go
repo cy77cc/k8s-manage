@@ -17,7 +17,6 @@ import (
 // RegisterMonitoringHandlers 注册监控服务路由到 v1 组。
 func RegisterMonitoringHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	h := NewHandler(svcCtx)
-	h.StartCollector()
 	h.StartRuleSync()
 
 	// Alertmanager webhook endpoint (internal call, no JWT).

@@ -8,7 +8,10 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -198,21 +201,28 @@ func MonitorAlertActive(ctx context.Context, deps common.PlatformDeps) tool.Invo
 	return t
 }
 
+// MetricPoint 表示单个指标数据点。
+type MetricPoint struct {
+	Timestamp time.Time         `json:"timestamp"`
+	Value     float64           `json:"value"`
+	Labels    map[string]string `json:"labels,omitempty"`
+}
+
 type MonitorMetricOutput struct {
-	Query     string              `json:"query"`
-	TimeRange string              `json:"time_range"`
-	Step      int                 `json:"step"`
-	Points    []model.MetricPoint `json:"points"`
-	Count     int                 `json:"count"`
+	Query     string        `json:"query"`
+	TimeRange string        `json:"time_range"`
+	Step      int           `json:"step"`
+	Points    []MetricPoint `json:"points"`
+	Count     int           `json:"count"`
 }
 
 func MonitorMetric(ctx context.Context, deps common.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"monitor_metric",
-		"Query time-series metric data from the monitoring system. query is required and specifies the metric name or PromQL expression. Optional parameters: time_range sets the query duration (default 1h, accepts values like 5m, 1h, 24h), step sets the data point interval in seconds (default 60). Returns metric points with timestamps and values. Example: {\"query\":\"cpu_usage\",\"time_range\":\"1h\",\"step\":60}.",
+		"Query time-series metric data from the monitoring system. query is required and specifies the metric name or PromQL expression. Optional parameters: time_range sets the query duration (default 1h, accepts values like 5m, 1h, 24h), step sets the data point interval in seconds (default 60). Returns metric points with timestamps and values. Example: {\"query\":\"host_cpu_load\",\"time_range\":\"1h\",\"step\":60}.",
 		func(ctx context.Context, input *MonitorMetricInput, opts ...tool.Option) (*MonitorMetricOutput, error) {
-			if deps.DB == nil {
-				return nil, fmt.Errorf("db unavailable")
+			if deps.Prometheus == nil {
+				return nil, fmt.Errorf("prometheus client unavailable")
 			}
 			queryName := strings.TrimSpace(input.Query)
 			if queryName == "" {
@@ -223,14 +233,32 @@ func MonitorMetric(ctx context.Context, deps common.PlatformDeps) tool.Invokable
 			if step <= 0 {
 				step = 60
 			}
-			since := time.Now().Add(-rangeDuration)
-			var points []model.MetricPoint
-			if err := deps.DB.Where("metric = ? AND collected_at >= ?", queryName, since).
-				Order("collected_at asc").
-				Limit(2000).
-				Find(&points).Error; err != nil {
+			start := time.Now().Add(-rangeDuration)
+			end := time.Now()
+
+			result, err := deps.Prometheus.QueryRange(ctx, queryName, start, end, time.Duration(step)*time.Second)
+			if err != nil {
 				return nil, err
 			}
+
+			points := make([]MetricPoint, 0, 2000)
+			for _, series := range result.Matrix {
+				for _, pair := range series.Values {
+					if len(pair) >= 2 {
+						points = append(points, MetricPoint{
+							Timestamp: parsePromTimestamp(pair[0]),
+							Value:     parsePromValue(pair[1]),
+							Labels:    series.Metric,
+						})
+					}
+				}
+			}
+
+			// 按时间排序
+			sort.Slice(points, func(i, j int) bool {
+				return points[i].Timestamp.Before(points[j].Timestamp)
+			})
+
 			return &MonitorMetricOutput{
 				Query:     queryName,
 				TimeRange: rangeDuration.String(),
@@ -247,20 +275,20 @@ func MonitorMetric(ctx context.Context, deps common.PlatformDeps) tool.Invokable
 }
 
 type MonitorMetricQueryOutput struct {
-	Query     string              `json:"query"`
-	TimeRange string              `json:"time_range"`
-	Step      int                 `json:"step"`
-	Points    []model.MetricPoint `json:"points"`
-	Count     int                 `json:"count"`
+	Query     string        `json:"query"`
+	TimeRange string        `json:"time_range"`
+	Step      int           `json:"step"`
+	Points    []MetricPoint `json:"points"`
+	Count     int           `json:"count"`
 }
 
 func MonitorMetricQuery(ctx context.Context, deps common.PlatformDeps) tool.InvokableTool {
 	t, err := einoutils.InferOptionableTool(
 		"monitor_metric_query",
-		"Query metric data points over a time range for analysis and visualization. query is required and specifies the metric name to retrieve. Optional parameters: time_range controls how far back to look (default 1h, supports formats like 5m, 30m, 2h, 24h), step sets the resolution in seconds between data points (default 60). Returns an array of metric points with timestamps. Example: {\"query\":\"memory_usage\",\"time_range\":\"30m\"}.",
+		"Query metric data points over a time range for analysis and visualization. query is required and specifies the metric name to retrieve. Optional parameters: time_range controls how far back to look (default 1h, supports formats like 5m, 30m, 2h, 24h), step sets the resolution in seconds between data points (default 60). Returns an array of metric points with timestamps. Example: {\"query\":\"host_memory_usage_percent\",\"time_range\":\"30m\"}.",
 		func(ctx context.Context, input *MonitorMetricQueryInput, opts ...tool.Option) (*MonitorMetricQueryOutput, error) {
-			if deps.DB == nil {
-				return nil, fmt.Errorf("db unavailable")
+			if deps.Prometheus == nil {
+				return nil, fmt.Errorf("prometheus client unavailable")
 			}
 			queryName := strings.TrimSpace(input.Query)
 			if queryName == "" {
@@ -271,14 +299,32 @@ func MonitorMetricQuery(ctx context.Context, deps common.PlatformDeps) tool.Invo
 			if step <= 0 {
 				step = 60
 			}
-			since := time.Now().Add(-rangeDuration)
-			var points []model.MetricPoint
-			if err := deps.DB.Where("metric = ? AND collected_at >= ?", queryName, since).
-				Order("collected_at asc").
-				Limit(2000).
-				Find(&points).Error; err != nil {
+			start := time.Now().Add(-rangeDuration)
+			end := time.Now()
+
+			result, err := deps.Prometheus.QueryRange(ctx, queryName, start, end, time.Duration(step)*time.Second)
+			if err != nil {
 				return nil, err
 			}
+
+			points := make([]MetricPoint, 0, 2000)
+			for _, series := range result.Matrix {
+				for _, pair := range series.Values {
+					if len(pair) >= 2 {
+						points = append(points, MetricPoint{
+							Timestamp: parsePromTimestamp(pair[0]),
+							Value:     parsePromValue(pair[1]),
+							Labels:    series.Metric,
+						})
+					}
+				}
+			}
+
+			// 按时间排序
+			sort.Slice(points, func(i, j int) bool {
+				return points[i].Timestamp.Before(points[j].Timestamp)
+			})
+
 			return &MonitorMetricQueryOutput{
 				Query:     queryName,
 				TimeRange: rangeDuration.String(),
@@ -292,6 +338,38 @@ func MonitorMetricQuery(ctx context.Context, deps common.PlatformDeps) tool.Invo
 		panic(err)
 	}
 	return t
+}
+
+// parsePromTimestamp 解析 Prometheus 时间戳。
+func parsePromTimestamp(v any) time.Time {
+	switch t := v.(type) {
+	case float64:
+		return time.Unix(int64(t), 0)
+	case json.Number:
+		f, _ := t.Float64()
+		return time.Unix(int64(f), 0)
+	case string:
+		f, _ := strconv.ParseFloat(t, 64)
+		return time.Unix(int64(f), 0)
+	default:
+		return time.Time{}
+	}
+}
+
+// parsePromValue 解析 Prometheus 值。
+func parsePromValue(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case string:
+		f, _ := strconv.ParseFloat(t, 64)
+		return f
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	default:
+		return 0
+	}
 }
 
 func parseTimeRange(raw string, fallback time.Duration) time.Duration {

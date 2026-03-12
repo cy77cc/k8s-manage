@@ -17,22 +17,24 @@ import (
 
 // Request 是执行请求的结构。
 type Request struct {
-	TraceID        string              // 追踪 ID
-	SessionID      string              // 会话 ID
-	Message        string              // 用户原始消息
-	Plan           planner.ExecutionPlan // 执行计划
+	TraceID        string                  // 追踪 ID
+	SessionID      string                  // 会话 ID
+	Message        string                  // 用户原始消息
+	Plan           planner.ExecutionPlan   // 执行计划
 	RuntimeContext runtime.ContextSnapshot // 运行时上下文
-	EventMeta      events.EventMeta    // 事件元数据
-	EmitEvent      EventEmitter        // 事件发射器
+	EventMeta      events.EventMeta        // 事件元数据
+	EmitEvent      EventEmitter            // 事件发射器
 }
 
 // ResumeRequest 是恢复执行的请求结构。
 type ResumeRequest struct {
-	SessionID string `json:"session_id"` // 会话 ID
-	PlanID    string `json:"plan_id"`    // 计划 ID
-	StepID    string `json:"step_id"`    // 步骤 ID
-	Approved  bool   `json:"approved"`   // 是否批准
-	Reason    string `json:"reason,omitempty"` // 拒绝原因
+	SessionID string           `json:"session_id"`       // 会话 ID
+	PlanID    string           `json:"plan_id"`          // 计划 ID
+	StepID    string           `json:"step_id"`          // 步骤 ID
+	Approved  bool             `json:"approved"`         // 是否批准
+	Reason    string           `json:"reason,omitempty"` // 拒绝原因
+	EventMeta events.EventMeta `json:"-"`                // 恢复阶段事件元数据
+	EmitEvent EventEmitter     `json:"-"`                // 恢复阶段事件发射器
 }
 
 // ApprovalDecision 表示审批决策。
@@ -60,17 +62,17 @@ type StepError struct {
 
 // StepResult 表示步骤执行结果。
 type StepResult struct {
-	StepID    string             `json:"step_id"`              // 步骤 ID
-	Status    runtime.StepStatus `json:"status"`               // 步骤状态
-	Summary   string             `json:"summary,omitempty"`    // 结果摘要
-	Evidence  []Evidence         `json:"evidence,omitempty"`   // 执行证据
-	Error     *StepError         `json:"error,omitempty"`      // 错误信息
-	UpdatedAt time.Time          `json:"updated_at"`           // 更新时间
+	StepID    string             `json:"step_id"`            // 步骤 ID
+	Status    runtime.StepStatus `json:"status"`             // 步骤状态
+	Summary   string             `json:"summary,omitempty"`  // 结果摘要
+	Evidence  []Evidence         `json:"evidence,omitempty"` // 执行证据
+	Error     *StepError         `json:"error,omitempty"`    // 错误信息
+	UpdatedAt time.Time          `json:"updated_at"`         // 更新时间
 }
 
 // Result 表示执行结果。
 type Result struct {
-	State runtime.ExecutionState `json:"state"`         // 执行状态
+	State runtime.ExecutionState `json:"state"`           // 执行状态
 	Steps []StepResult           `json:"steps,omitempty"` // 步骤结果列表
 }
 
@@ -198,6 +200,7 @@ func (e *Executor) PrepareState(_ context.Context, req Request) (runtime.Executi
 		TraceID:        req.TraceID,
 		SessionID:      req.SessionID,
 		PlanID:         planID,
+		TurnID:         req.EventMeta.TurnID,
 		Message:        strings.TrimSpace(req.Message),
 		Status:         runtime.ExecutionStatusRunning,
 		Phase:          "executor_prepared",

@@ -26,11 +26,10 @@ func newDashboardTestLogic(t *testing.T) *Logic {
 		&model.ServiceReleaseRecord{},
 		&model.AlertEvent{},
 		&model.NodeEvent{},
-		&model.MetricPoint{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
-	return NewLogic(&svc.ServiceContext{DB: db})
+	return NewLogic(&svc.ServiceContext{DB: db, Prometheus: nil})
 }
 
 func TestGetOverviewAggregatesHealthStats(t *testing.T) {
@@ -117,17 +116,8 @@ func TestGetOverviewMergesEventsAndMetricsLimit(t *testing.T) {
 		t.Fatalf("seed node events: %v", err)
 	}
 
-	metricRows := make([]model.MetricPoint, 0, 140)
-	for i := 0; i < 70; i++ {
-		at := now.Add(-time.Duration(70-i) * time.Minute)
-		metricRows = append(metricRows,
-			model.MetricPoint{Metric: "cpu_usage", Source: "host", DimensionsJSON: `{"host_id":1,"host_name":"host-1"}`, Value: float64(i), Collected: at},
-			model.MetricPoint{Metric: "memory_usage", Source: "host", DimensionsJSON: `{"host_id":1,"host_name":"host-1"}`, Value: float64(i) + 10, Collected: at},
-		)
-	}
-	if err := logic.svcCtx.DB.WithContext(ctx).Create(&metricRows).Error; err != nil {
-		t.Fatalf("seed metric points: %v", err)
-	}
+	// Note: Metrics are now fetched from Prometheus, not the database.
+	// When Prometheus is nil, getMetricsSeries returns empty data.
 
 	resp, err := logic.GetOverview(ctx, "24h")
 	if err != nil {
@@ -140,18 +130,9 @@ func TestGetOverviewMergesEventsAndMetricsLimit(t *testing.T) {
 	if len(resp.Events) != 4 {
 		t.Fatalf("unexpected events len: %d", len(resp.Events))
 	}
-	// Metrics are now grouped by host
-	if len(resp.Metrics.CPUUsage) != 1 || len(resp.Metrics.MemoryUsage) != 1 {
-		t.Fatalf("unexpected metric series count: cpu=%d mem=%d", len(resp.Metrics.CPUUsage), len(resp.Metrics.MemoryUsage))
-	}
-	// 24h range has limitPerHost=288, but we only have 70 points
-	if len(resp.Metrics.CPUUsage[0].Data) != 70 || len(resp.Metrics.MemoryUsage[0].Data) != 70 {
-		t.Fatalf("unexpected metric data size: cpu=%d mem=%d", len(resp.Metrics.CPUUsage[0].Data), len(resp.Metrics.MemoryUsage[0].Data))
-	}
-	if len(resp.Metrics.CPUUsage[0].Data) >= 2 {
-		if !resp.Metrics.CPUUsage[0].Data[0].Timestamp.Before(resp.Metrics.CPUUsage[0].Data[len(resp.Metrics.CPUUsage[0].Data)-1].Timestamp) {
-			t.Fatalf("cpu series should be ascending by timestamp")
-		}
+	// Metrics should be empty when Prometheus is not available
+	if len(resp.Metrics.CPUUsage) != 0 || len(resp.Metrics.MemoryUsage) != 0 {
+		t.Fatalf("unexpected metric series count (expected empty): cpu=%d mem=%d", len(resp.Metrics.CPUUsage), len(resp.Metrics.MemoryUsage))
 	}
 }
 

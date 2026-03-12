@@ -14,7 +14,7 @@ func TestChatStoreFiltersBySceneAndPersistsAssistantMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.AIChatSession{}, &model.AIChatMessage{}); err != nil {
+	if err := db.AutoMigrate(&model.AIChatSession{}, &model.AIChatMessage{}, &model.AIChatTurn{}, &model.AIChatBlock{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -24,11 +24,11 @@ func TestChatStoreFiltersBySceneAndPersistsAssistantMetadata(t *testing.T) {
 	if err := store.AppendUserMessage(ctx, "session-global", 1, "global", "全局对话", "你好"); err != nil {
 		t.Fatalf("AppendUserMessage(global) error = %v", err)
 	}
-	assistantID, err := store.CreateAssistantMessage(ctx, "session-global", 1, "global", "全局对话")
+	assistantID, err := store.CreateAssistantMessage(ctx, "session-global", 1, "global", "全局对话", "turn-global")
 	if err != nil {
 		t.Fatalf("CreateAssistantMessage(global) error = %v", err)
 	}
-	if err := store.UpdateAssistantMessage(ctx, "session-global", assistantID, ChatMessageRecord{
+	if err := store.UpdateAssistantMessage(ctx, "session-global", assistantID, "turn-global", ChatMessageRecord{
 		Content:  "最终回答",
 		Thinking: "分析中",
 		Status:   "completed",
@@ -75,5 +75,14 @@ func TestChatStoreFiltersBySceneAndPersistsAssistantMetadata(t *testing.T) {
 	}
 	if len(msg.RawEvidence) != 1 || msg.RawEvidence[0] != "命令执行成功" {
 		t.Fatalf("RawEvidence = %#v", msg.RawEvidence)
+	}
+	if len(row.Turns) != 2 {
+		t.Fatalf("Turns = %#v, want user+assistant replay", row.Turns)
+	}
+	if got := row.Turns[1].ID; got != "turn-global" {
+		t.Fatalf("assistant turn id = %q, want turn-global", got)
+	}
+	if len(row.Turns[1].Blocks) == 0 {
+		t.Fatalf("assistant turn blocks = %#v, want projected blocks", row.Turns[1].Blocks)
 	}
 }

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { aiApi } from '../../../api/modules/ai';
 import type { AISession } from '../../../api/modules/ai';
-import type { EmbeddedRecommendation, ThoughtStageItem } from '../types';
+import type { ChatTurn, EmbeddedRecommendation, ThoughtStageItem } from '../types';
+import { projectTurnSummary, turnFromReplay } from '../turnLifecycle';
 
 export interface RestoredConversation {
   id: string;
@@ -16,6 +17,7 @@ export interface RestoredConversation {
     recommendations?: EmbeddedRecommendation[];
     rawEvidence?: string[];
     status?: string;
+    turn?: ChatTurn;
     createdAt: string;
   }>;
 }
@@ -93,6 +95,29 @@ export function useConversationRestore(options: UseConversationRestoreOptions): 
 }
 
 function toRestoredConversation(session: AISession): RestoredConversation {
+  if (session.turns && session.turns.length > 0) {
+    return {
+      id: session.id,
+      title: session.title || 'AI Session',
+      messages: session.turns.map((turn) => {
+        const hydratedTurn = turnFromReplay(turn);
+        const summary = projectTurnSummary(hydratedTurn);
+        return {
+          id: turn.id,
+          role: turn.role,
+          content: turn.role === 'user' ? summary.content : summary.content,
+          thinking: turn.role === 'assistant' ? summary.thinking : undefined,
+          traceId: hydratedTurn.traceId,
+          recommendations: turn.role === 'assistant' ? summary.recommendations : undefined,
+          rawEvidence: turn.role === 'assistant' ? summary.rawEvidence : undefined,
+          status: hydratedTurn.status,
+          turn: hydratedTurn,
+          createdAt: turn.createdAt,
+        };
+      }),
+    };
+  }
+
   return {
     id: session.id,
     title: session.title || 'AI Session',

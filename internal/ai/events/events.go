@@ -36,18 +36,25 @@ const (
 	ToolCall         Name = "tool_call"         // 工具调用事件
 	ToolResult       Name = "tool_result"       // 工具结果事件
 	Heartbeat        Name = "heartbeat"         // 心跳事件
+	TurnStarted      Name = "turn_started"      // turn 生命周期开始
+	BlockOpen        Name = "block_open"        // block 创建
+	BlockDelta       Name = "block_delta"       // block 增量
+	BlockReplace     Name = "block_replace"     // block 替换
+	BlockClose       Name = "block_close"       // block 完成
+	TurnState        Name = "turn_state"        // turn 状态变更
+	TurnDone         Name = "turn_done"         // turn 完成
 
 	// 可观测性事件 - 用于追踪 LLM、工具、Agent 的调用详情
-	LLMStart       Name = "llm_start"        // LLM 调用开始
-	LLMEnd         Name = "llm_end"          // LLM 调用结束
-	LLMError       Name = "llm_error"        // LLM 调用错误
-	LLMStreamEnd   Name = "llm_stream_end"   // LLM 流式调用结束
-	ToolStart      Name = "tool_start"       // 工具调用开始
-	ToolEnd        Name = "tool_end"         // 工具调用结束
-	ToolError      Name = "tool_error"       // 工具调用错误
-	ToolStreamEnd  Name = "tool_stream_end"  // 工具流式调用结束
-	AgentStart     Name = "agent_start"      // Agent 运行开始
-	AgentEnd       Name = "agent_end"        // Agent 运行结束
+	LLMStart      Name = "llm_start"       // LLM 调用开始
+	LLMEnd        Name = "llm_end"         // LLM 调用结束
+	LLMError      Name = "llm_error"       // LLM 调用错误
+	LLMStreamEnd  Name = "llm_stream_end"  // LLM 流式调用结束
+	ToolStart     Name = "tool_start"      // 工具调用开始
+	ToolEnd       Name = "tool_end"        // 工具调用结束
+	ToolError     Name = "tool_error"      // 工具调用错误
+	ToolStreamEnd Name = "tool_stream_end" // 工具流式调用结束
+	AgentStart    Name = "agent_start"     // Agent 运行开始
+	AgentEnd      Name = "agent_end"       // Agent 运行结束
 )
 
 // EventMeta 事件元数据，包含会话和追踪信息。
@@ -56,6 +63,8 @@ type EventMeta struct {
 	TraceID   string    `json:"trace_id,omitempty"`   // 追踪 ID
 	PlanID    string    `json:"plan_id,omitempty"`    // 计划 ID
 	StepID    string    `json:"step_id,omitempty"`    // 步骤 ID
+	TurnID    string    `json:"turn_id,omitempty"`    // turn ID
+	BlockID   string    `json:"block_id,omitempty"`   // block ID
 	Iteration int       `json:"iteration,omitempty"`  // 迭代次数
 	Timestamp time.Time `json:"timestamp"`            // 时间戳
 }

@@ -2,6 +2,7 @@
 //
 // 本文件实现基于 Eino Callback 机制的可观测性处理器，
 // 支持 LLM 调用、工具调用、Agent 运行的追踪和指标收集。
+// 同时将指标推送到 Prometheus，追踪数据存储到数据库。
 package observability
 
 import (
@@ -11,12 +12,13 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/callbacks"
-	"github.com/cloudwego/eino/components/model"
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	template "github.com/cloudwego/eino/utils/callbacks"
 
 	"github.com/cy77cc/OpsPilot/internal/ai/events"
+	dbmodel "github.com/cy77cc/OpsPilot/internal/model"
 )
 
 // EventHandler 事件处理器函数类型。
@@ -25,15 +27,15 @@ type EventHandler func(name string, meta events.EventMeta, data map[string]any)
 // Handler 可观测性处理器，实现 Eino 回调接口。
 type Handler struct {
 	tracer       *Tracer
-	metrics      *Metrics
+	traceStore   *TraceStore
 	eventHandler EventHandler
 }
 
 // NewHandler 创建新的可观测性处理器。
-func NewHandler(eventHandler EventHandler) *Handler {
+func NewHandler(traceStore *TraceStore, eventHandler EventHandler) *Handler {
 	return &Handler{
 		tracer:       NewTracer(),
-		metrics:      NewMetrics(),
+		traceStore:   traceStore,
 		eventHandler: eventHandler,
 	}
 }
@@ -52,69 +54,105 @@ func (h *Handler) Tracer() *Tracer {
 	return h.tracer
 }
 
-// Metrics 返回指标收集器实例。
-func (h *Handler) Metrics() *Metrics {
-	return h.metrics
-}
-
-// Snapshot 返回当前指标快照。
-func (h *Handler) Snapshot() MetricsSnapshot {
-	return h.metrics.Snapshot()
-}
-
 // =============================================================================
 // ChatModel 回调处理器
 // =============================================================================
 
+type llmContext struct {
+	spanID    string
+	startTime time.Time
+	sessionID string
+	traceID   string
+}
+
 func (h *Handler) chatModelHandler() *template.ModelCallbackHandler {
 	return &template.ModelCallbackHandler{
-		OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *model.CallbackInput) context.Context {
+		OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *einomodel.CallbackInput) context.Context {
 			span := h.tracer.StartSpan(ctx, "llm", info.Name)
 			ctx = ContextWithSpanID(ctx, span.ID)
+
+			var sessionID, traceID string
+			for _, msg := range input.Messages {
+				if strings.Contains(msg.Content, `"session_id"`) {
+					sessionID = extractFieldFromJSON(msg.Content, "session_id")
+					traceID = extractFieldFromJSON(msg.Content, "trace_id")
+					break
+				}
+			}
+
+			lctx := &llmContext{
+				spanID:    span.ID,
+				startTime: time.Now().UTC(),
+				sessionID: sessionID,
+				traceID:   traceID,
+			}
+			ctx = context.WithValue(ctx, llmCtxKey{}, lctx)
 
 			if h.eventHandler != nil {
 				h.eventHandler("llm_start", events.EventMeta{
 					Timestamp: time.Now().UTC(),
 				}, map[string]any{
-					"model":       info.Name,
-					"component":   string(info.Component),
-					"span_id":     span.ID,
-					"messages":    len(input.Messages),
+					"model":           info.Name,
+					"component":       string(info.Component),
+					"span_id":         span.ID,
+					"messages":        len(input.Messages),
 					"message_preview": truncateMessages(input.Messages, 200),
 				})
 			}
 
 			return ctx
 		},
-		OnEnd: func(ctx context.Context, info *callbacks.RunInfo, output *model.CallbackOutput) context.Context {
+		OnEnd: func(ctx context.Context, info *callbacks.RunInfo, output *einomodel.CallbackOutput) context.Context {
 			spanID := SpanIDFromContext(ctx)
 			span := h.getSpan(spanID)
 			if span != nil {
 				span.End()
 			}
 
-			// 估算 token 数量
+			lctx, _ := ctx.Value(llmCtxKey{}).(*llmContext)
 			content := ""
 			if output.Message != nil {
 				content = output.Message.Content
 			}
 			tokens := estimateTokens(content)
-			latencyMs := int64(0)
-			if span != nil {
-				latencyMs = span.Duration.Milliseconds()
+			var latencySeconds float64
+			var latencyMs int64
+			if lctx != nil {
+				latencySeconds = time.Since(lctx.startTime).Seconds()
+				latencyMs = int64(latencySeconds * 1000)
 			}
 
-			h.metrics.RecordLLMCall(info.Name, 0, tokens, latencyMs, nil)
+			RecordLLMMetric(info.Name, 0, tokens, latencySeconds, nil)
+
+			if h.traceStore != nil && lctx != nil {
+				traceSpan := BuildSpan(
+					spanID,
+					dbmodel.SpanTypeLLM,
+					info.Name,
+					lctx.sessionID,
+					lctx.traceID,
+					"",
+					lctx.startTime,
+					latencyMs,
+					dbmodel.SpanStatusSuccess,
+					"",
+					"",
+					truncateString(content, 4000),
+					int64(tokens),
+					nil,
+				)
+				h.traceStore.SaveSpanAsync(traceSpan)
+			}
 
 			if h.eventHandler != nil {
 				h.eventHandler("llm_end", events.EventMeta{
 					Timestamp: time.Now().UTC(),
 				}, map[string]any{
-					"model":        info.Name,
-					"span_id":      spanID,
-					"tokens":       tokens,
-					"duration_ms":  latencyMs,
-					"content_len":  len(content),
+					"model":            info.Name,
+					"span_id":          spanID,
+					"tokens":           tokens,
+					"duration_ms":      latencyMs,
+					"content_len":      len(content),
 					"response_preview": truncate(content, 500),
 				})
 			}
@@ -128,12 +166,35 @@ func (h *Handler) chatModelHandler() *template.ModelCallbackHandler {
 				span.End()
 			}
 
-			latencyMs := int64(0)
-			if span != nil {
-				latencyMs = span.Duration.Milliseconds()
+			lctx, _ := ctx.Value(llmCtxKey{}).(*llmContext)
+			var latencySeconds float64
+			var latencyMs int64
+			if lctx != nil {
+				latencySeconds = time.Since(lctx.startTime).Seconds()
+				latencyMs = int64(latencySeconds * 1000)
 			}
 
-			h.metrics.RecordLLMCall(info.Name, 0, 0, latencyMs, err)
+			RecordLLMMetric(info.Name, 0, 0, latencySeconds, err)
+
+			if h.traceStore != nil && lctx != nil {
+				traceSpan := BuildSpan(
+					spanID,
+					dbmodel.SpanTypeLLM,
+					info.Name,
+					lctx.sessionID,
+					lctx.traceID,
+					"",
+					lctx.startTime,
+					latencyMs,
+					dbmodel.SpanStatusError,
+					err.Error(),
+					"",
+					"",
+					0,
+					nil,
+				)
+				h.traceStore.SaveSpanAsync(traceSpan)
+			}
 
 			if h.eventHandler != nil {
 				h.eventHandler("llm_error", events.EventMeta{
@@ -148,10 +209,10 @@ func (h *Handler) chatModelHandler() *template.ModelCallbackHandler {
 
 			return ctx
 		},
-		OnEndWithStreamOutput: func(ctx context.Context, info *callbacks.RunInfo, output *schema.StreamReader[*model.CallbackOutput]) context.Context {
+		OnEndWithStreamOutput: func(ctx context.Context, info *callbacks.RunInfo, output *schema.StreamReader[*einomodel.CallbackOutput]) context.Context {
 			spanID := SpanIDFromContext(ctx)
+			lctx, _ := ctx.Value(llmCtxKey{}).(*llmContext)
 
-			// 流式输出时，在后台消费并追踪
 			go func() {
 				var content strings.Builder
 				start := time.Now()
@@ -172,19 +233,40 @@ func (h *Handler) chatModelHandler() *template.ModelCallbackHandler {
 				}
 
 				tokens := estimateTokens(content.String())
-				latencyMs := time.Since(start).Milliseconds()
+				latencySeconds := time.Since(start).Seconds()
+				latencyMs := int64(latencySeconds * 1000)
 
-				h.metrics.RecordLLMCall(info.Name, 0, tokens, latencyMs, nil)
+				RecordLLMMetric(info.Name, 0, tokens, latencySeconds, nil)
+
+				if h.traceStore != nil && lctx != nil {
+					traceSpan := BuildSpan(
+						spanID,
+						dbmodel.SpanTypeLLM,
+						info.Name,
+						lctx.sessionID,
+						lctx.traceID,
+						"",
+						lctx.startTime,
+						latencyMs,
+						dbmodel.SpanStatusSuccess,
+						"",
+						"",
+						truncateString(content.String(), 4000),
+						int64(tokens),
+						map[string]any{"streaming": true},
+					)
+					h.traceStore.SaveSpanAsync(traceSpan)
+				}
 
 				if h.eventHandler != nil {
 					h.eventHandler("llm_stream_end", events.EventMeta{
 						Timestamp: time.Now().UTC(),
 					}, map[string]any{
-						"model":        info.Name,
-						"span_id":      spanID,
-						"tokens":       tokens,
-						"duration_ms":  latencyMs,
-						"content_len":  content.Len(),
+						"model":       info.Name,
+						"span_id":     spanID,
+						"tokens":      tokens,
+						"duration_ms": latencyMs,
+						"content_len": content.Len(),
 					})
 				}
 			}()
@@ -198,19 +280,32 @@ func (h *Handler) chatModelHandler() *template.ModelCallbackHandler {
 // Tool 回调处理器
 // =============================================================================
 
+type toolContext struct {
+	spanID    string
+	startTime time.Time
+	sessionID string
+	traceID   string
+}
+
 func (h *Handler) toolHandler() *template.ToolCallbackHandler {
 	return &template.ToolCallbackHandler{
 		OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *tool.CallbackInput) context.Context {
 			span := h.tracer.StartSpan(ctx, "tool", info.Name)
 			ctx = ContextWithSpanID(ctx, span.ID)
 
+			tctx := &toolContext{
+				spanID:    span.ID,
+				startTime: time.Now().UTC(),
+			}
+			ctx = context.WithValue(ctx, toolCtxKey{}, tctx)
+
 			if h.eventHandler != nil {
 				h.eventHandler("tool_start", events.EventMeta{
 					Timestamp: time.Now().UTC(),
 				}, map[string]any{
-					"tool":        info.Name,
-					"span_id":     span.ID,
-					"arguments":   truncate(input.ArgumentsInJSON, 1000),
+					"tool":      info.Name,
+					"span_id":   span.ID,
+					"arguments": truncate(input.ArgumentsInJSON, 1000),
 				})
 			}
 
@@ -223,22 +318,45 @@ func (h *Handler) toolHandler() *template.ToolCallbackHandler {
 				span.End()
 			}
 
-			latencyMs := int64(0)
-			if span != nil {
-				latencyMs = span.Duration.Milliseconds()
+			tctx, _ := ctx.Value(toolCtxKey{}).(*toolContext)
+			var latencySeconds float64
+			var latencyMs int64
+			if tctx != nil {
+				latencySeconds = time.Since(tctx.startTime).Seconds()
+				latencyMs = int64(latencySeconds * 1000)
 			}
 
-			h.metrics.RecordToolCall(info.Name, latencyMs, nil)
-
 			result := extractToolResult(output)
+
+			RecordToolMetric(info.Name, latencySeconds, nil)
+
+			if h.traceStore != nil && tctx != nil {
+				traceSpan := BuildSpan(
+					spanID,
+					dbmodel.SpanTypeTool,
+					info.Name,
+					tctx.sessionID,
+					tctx.traceID,
+					"",
+					tctx.startTime,
+					latencyMs,
+					dbmodel.SpanStatusSuccess,
+					"",
+					"",
+					truncateString(result, 4000),
+					0,
+					nil,
+				)
+				h.traceStore.SaveSpanAsync(traceSpan)
+			}
 
 			if h.eventHandler != nil {
 				h.eventHandler("tool_end", events.EventMeta{
 					Timestamp: time.Now().UTC(),
 				}, map[string]any{
-					"tool":          info.Name,
-					"span_id":       spanID,
-					"duration_ms":   latencyMs,
+					"tool":           info.Name,
+					"span_id":        spanID,
+					"duration_ms":    latencyMs,
 					"result_preview": truncate(result, 500),
 				})
 			}
@@ -252,12 +370,35 @@ func (h *Handler) toolHandler() *template.ToolCallbackHandler {
 				span.End()
 			}
 
-			latencyMs := int64(0)
-			if span != nil {
-				latencyMs = span.Duration.Milliseconds()
+			tctx, _ := ctx.Value(toolCtxKey{}).(*toolContext)
+			var latencySeconds float64
+			var latencyMs int64
+			if tctx != nil {
+				latencySeconds = time.Since(tctx.startTime).Seconds()
+				latencyMs = int64(latencySeconds * 1000)
 			}
 
-			h.metrics.RecordToolCall(info.Name, latencyMs, err)
+			RecordToolMetric(info.Name, latencySeconds, err)
+
+			if h.traceStore != nil && tctx != nil {
+				traceSpan := BuildSpan(
+					spanID,
+					dbmodel.SpanTypeTool,
+					info.Name,
+					tctx.sessionID,
+					tctx.traceID,
+					"",
+					tctx.startTime,
+					latencyMs,
+					dbmodel.SpanStatusError,
+					err.Error(),
+					"",
+					"",
+					0,
+					nil,
+				)
+				h.traceStore.SaveSpanAsync(traceSpan)
+			}
 
 			if h.eventHandler != nil {
 				h.eventHandler("tool_error", events.EventMeta{
@@ -274,6 +415,7 @@ func (h *Handler) toolHandler() *template.ToolCallbackHandler {
 		},
 		OnEndWithStreamOutput: func(ctx context.Context, info *callbacks.RunInfo, output *schema.StreamReader[*tool.CallbackOutput]) context.Context {
 			spanID := SpanIDFromContext(ctx)
+			tctx, _ := ctx.Value(toolCtxKey{}).(*toolContext)
 
 			go func() {
 				var result strings.Builder
@@ -299,8 +441,30 @@ func (h *Handler) toolHandler() *template.ToolCallbackHandler {
 					span.End()
 				}
 
-				latencyMs := time.Since(start).Milliseconds()
-				h.metrics.RecordToolCall(info.Name, latencyMs, nil)
+				latencySeconds := time.Since(start).Seconds()
+				latencyMs := int64(latencySeconds * 1000)
+
+				RecordToolMetric(info.Name, latencySeconds, nil)
+
+				if h.traceStore != nil && tctx != nil {
+					traceSpan := BuildSpan(
+						spanID,
+						dbmodel.SpanTypeTool,
+						info.Name,
+						tctx.sessionID,
+						tctx.traceID,
+						"",
+						tctx.startTime,
+						latencyMs,
+						dbmodel.SpanStatusSuccess,
+						"",
+						"",
+						truncateString(result.String(), 4000),
+						0,
+						map[string]any{"streaming": true},
+					)
+					h.traceStore.SaveSpanAsync(traceSpan)
+				}
 
 				if h.eventHandler != nil {
 					h.eventHandler("tool_stream_end", events.EventMeta{
@@ -323,6 +487,13 @@ func (h *Handler) toolHandler() *template.ToolCallbackHandler {
 // Agent 回调处理器
 // =============================================================================
 
+type agentContext struct {
+	spanID    string
+	startTime time.Time
+	sessionID string
+	traceID   string
+}
+
 func (h *Handler) agentHandler() *template.AgentCallbackHandler {
 	return &template.AgentCallbackHandler{
 		OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *adk.AgentCallbackInput) context.Context {
@@ -334,13 +505,19 @@ func (h *Handler) agentHandler() *template.AgentCallbackHandler {
 				messageCount = len(input.Input.Messages)
 			}
 
+			actx := &agentContext{
+				spanID:    span.ID,
+				startTime: time.Now().UTC(),
+			}
+			ctx = context.WithValue(ctx, agentCtxKey{}, actx)
+
 			if h.eventHandler != nil {
 				h.eventHandler("agent_start", events.EventMeta{
 					Timestamp: time.Now().UTC(),
 				}, map[string]any{
-					"agent":       info.Name,
-					"span_id":     span.ID,
-					"messages":    messageCount,
+					"agent":    info.Name,
+					"span_id":  span.ID,
+					"messages": messageCount,
 				})
 			}
 
@@ -353,20 +530,42 @@ func (h *Handler) agentHandler() *template.AgentCallbackHandler {
 				span.End()
 			}
 
-			latencyMs := int64(0)
-			if span != nil {
-				latencyMs = span.Duration.Milliseconds()
+			actx, _ := ctx.Value(agentCtxKey{}).(*agentContext)
+			var latencySeconds float64
+			var latencyMs int64
+			iterations := 0
+			if actx != nil {
+				latencySeconds = time.Since(actx.startTime).Seconds()
+				latencyMs = int64(latencySeconds * 1000)
 			}
 
-			// 从跨度元数据获取迭代次数
-			iterations := 0
 			if span != nil {
 				if iter, ok := span.Metadata["iterations"].(int); ok {
 					iterations = iter
 				}
 			}
 
-			h.metrics.RecordAgentRun(info.Name, latencyMs, 0, iterations, nil)
+			RecordAgentMetric(info.Name, latencySeconds, iterations, nil)
+
+			if h.traceStore != nil && actx != nil {
+				traceSpan := BuildSpan(
+					spanID,
+					dbmodel.SpanTypeAgent,
+					info.Name,
+					actx.sessionID,
+					actx.traceID,
+					"",
+					actx.startTime,
+					latencyMs,
+					dbmodel.SpanStatusSuccess,
+					"",
+					"",
+					"",
+					0,
+					map[string]any{"iterations": iterations},
+				)
+				h.traceStore.SaveSpanAsync(traceSpan)
+			}
 
 			if h.eventHandler != nil {
 				h.eventHandler("agent_end", events.EventMeta{
@@ -385,8 +584,12 @@ func (h *Handler) agentHandler() *template.AgentCallbackHandler {
 }
 
 // =============================================================================
-// 辅助方法
+// 辅助类型和方法
 // =============================================================================
+
+type llmCtxKey struct{}
+type toolCtxKey struct{}
+type agentCtxKey struct{}
 
 func (h *Handler) getSpan(spanID string) *Span {
 	if h == nil || h.tracer == nil || spanID == "" {
@@ -397,7 +600,6 @@ func (h *Handler) getSpan(spanID string) *Span {
 	return h.tracer.spans[spanID]
 }
 
-// truncate 截断字符串。
 func truncate(s string, maxLen int) string {
 	s = strings.TrimSpace(s)
 	if maxLen <= 0 || len(s) <= maxLen {
@@ -406,7 +608,6 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// truncateMessages 截断消息列表预览。
 func truncateMessages(messages []*schema.Message, maxLen int) string {
 	if len(messages) == 0 {
 		return ""
@@ -424,19 +625,14 @@ func truncateMessages(messages []*schema.Message, maxLen int) string {
 	return truncate(preview.String(), maxLen)
 }
 
-// estimateTokens 估算 token 数量。
-// 简单实现：中文约 2 字符/token，英文约 4 字符/token
 func estimateTokens(content string) int {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return 0
 	}
-
-	// 简单估算：平均 3 字符一个 token
 	return len(content) / 3
 }
 
-// extractToolResult 从工具回调输出中提取结果文本。
 func extractToolResult(output *tool.CallbackOutput) string {
 	if output == nil {
 		return ""
@@ -450,7 +646,6 @@ func extractToolResult(output *tool.CallbackOutput) string {
 	return ""
 }
 
-// extractToolResultFromParts 从工具输出部分中提取文本。
 func extractToolResultFromParts(parts []schema.ToolOutputPart) string {
 	if len(parts) == 0 {
 		return ""
@@ -462,4 +657,18 @@ func extractToolResultFromParts(parts []schema.ToolOutputPart) string {
 		}
 	}
 	return strings.Join(texts, "\n")
+}
+
+func extractFieldFromJSON(jsonStr, field string) string {
+	needle := `"` + field + `":"`
+	start := strings.Index(jsonStr, needle)
+	if start == -1 {
+		return ""
+	}
+	start += len(needle)
+	end := strings.Index(jsonStr[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+	return jsonStr[start : start+end]
 }

@@ -21,8 +21,35 @@ export interface AISession {
   id: string;
   title: string;
   messages: AIMessage[];
+  turns?: AIReplayTurn[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AIReplayBlock {
+  id: string;
+  blockType: string;
+  position: number;
+  status?: string;
+  title?: string;
+  contentText?: string;
+  contentJson?: Record<string, any>;
+  streaming?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AIReplayTurn {
+  id: string;
+  role: 'user' | 'assistant';
+  status?: string;
+  phase?: string;
+  traceId?: string;
+  parentTurnId?: string;
+  blocks: AIReplayBlock[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
 }
 
 export interface EmbeddedRecommendation {
@@ -113,6 +140,56 @@ interface SSEMetaEvent {
   turn_id?: string;
 }
 
+export interface SSETurnStartedEvent {
+  turn_id: string;
+  role?: string;
+  phase?: string;
+  status?: string;
+}
+
+export interface SSEBlockOpenEvent {
+  turn_id: string;
+  block_id: string;
+  block_type: string;
+  position?: number;
+  status?: string;
+  phase?: string;
+  title?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface SSEBlockDeltaEvent {
+  turn_id: string;
+  block_id: string;
+  block_type?: string;
+  patch?: Record<string, unknown>;
+}
+
+export interface SSEBlockReplaceEvent {
+  turn_id: string;
+  block_id: string;
+  block_type?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface SSEBlockCloseEvent {
+  turn_id: string;
+  block_id: string;
+  status?: string;
+}
+
+export interface SSETurnStateEvent {
+  turn_id: string;
+  status?: string;
+  phase?: string;
+}
+
+export interface SSETurnDoneEvent {
+  turn_id: string;
+  status?: string;
+  phase?: string;
+}
+
 interface SSEDeltaEvent {
   contentChunk: string;
   turn_id?: string;
@@ -177,7 +254,7 @@ function toContentChunk(payload: unknown): string {
   }
 }
 
-interface SSEDoneEvent {
+export interface SSEDoneEvent {
   session: AISession;
   stream_state?: 'ok' | 'partial' | 'failed';
   turn_recommendations?: EmbeddedRecommendation[];
@@ -211,6 +288,13 @@ interface SSEThinkingEvent {
 
 export interface AIChatStreamHandlers {
   onMeta?: (payload: SSEMetaEvent) => void;
+  onTurnStarted?: (payload: SSETurnStartedEvent) => void;
+  onBlockOpen?: (payload: SSEBlockOpenEvent) => void;
+  onBlockDelta?: (payload: SSEBlockDeltaEvent) => void;
+  onBlockReplace?: (payload: SSEBlockReplaceEvent) => void;
+  onBlockClose?: (payload: SSEBlockCloseEvent) => void;
+  onTurnState?: (payload: SSETurnStateEvent) => void;
+  onTurnDone?: (payload: SSETurnDoneEvent) => void;
   onRewriteResult?: (payload: SSERewriteResultEvent) => void;
   onPlannerState?: (payload: SSEPlannerStateEvent) => void;
   onPlanCreated?: (payload: SSEPlanCreatedEvent) => void;
@@ -362,7 +446,7 @@ export interface AISessionBranchParams {
 // AI功能API
 export const aiApi = {
   // AI对话（SSE流式）
-  async chatStream(params: AIChatParams, handlers: AIChatStreamHandlers): Promise<void> {
+  async chatStream(params: AIChatParams, handlers: AIChatStreamHandlers, signal?: AbortSignal): Promise<void> {
     const base = import.meta.env.VITE_API_BASE || '/api/v1';
     const token = localStorage.getItem('token');
     const projectId = localStorage.getItem('projectId');
@@ -415,6 +499,9 @@ export const aiApi = {
       }
     };
 
+    const abortFromCaller = () => controller.abort();
+    signal?.addEventListener('abort', abortFromCaller, { once: true });
+
     const response = await fetch(`${base}/ai/chat`, {
       method: 'POST',
       headers: {
@@ -463,6 +550,20 @@ export const aiApi = {
 
       if (eventType === 'meta') {
         handlers.onMeta?.(payload as SSEMetaEvent);
+      } else if (eventType === 'turn_started') {
+        handlers.onTurnStarted?.(payload as SSETurnStartedEvent);
+      } else if (eventType === 'block_open') {
+        handlers.onBlockOpen?.(payload as SSEBlockOpenEvent);
+      } else if (eventType === 'block_delta') {
+        handlers.onBlockDelta?.(payload as SSEBlockDeltaEvent);
+      } else if (eventType === 'block_replace') {
+        handlers.onBlockReplace?.(payload as SSEBlockReplaceEvent);
+      } else if (eventType === 'block_close') {
+        handlers.onBlockClose?.(payload as SSEBlockCloseEvent);
+      } else if (eventType === 'turn_state') {
+        handlers.onTurnState?.(payload as SSETurnStateEvent);
+      } else if (eventType === 'turn_done') {
+        handlers.onTurnDone?.(payload as SSETurnDoneEvent);
       } else if (eventType === 'rewrite_result') {
         handlers.onRewriteResult?.(payload as SSERewriteResultEvent);
       } else if (eventType === 'planner_state') {
@@ -542,6 +643,7 @@ export const aiApi = {
       }
     } finally {
       clearToolTimer();
+      signal?.removeEventListener('abort', abortFromCaller);
     }
 
     if (buffer.trim()) {
@@ -628,6 +730,113 @@ export const aiApi = {
 
   async respondApproval(params: AIInterruptApprovalResponse): Promise<ApiResponse<AIInterruptApprovalResult>> {
     return apiService.post('/ai/resume/step', params);
+  },
+
+  async respondApprovalStream(params: AIInterruptApprovalResponse, handlers: AIChatStreamHandlers): Promise<void> {
+    const base = import.meta.env.VITE_API_BASE || '/api/v1';
+    const token = localStorage.getItem('token');
+    const projectId = localStorage.getItem('projectId');
+
+    const response = await fetch(`${base}/ai/resume/step/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(projectId ? { 'X-Project-ID': projectId } : {}),
+      },
+      body: JSON.stringify(params),
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`请求失败: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    const dispatchEvent = (chunk: string) => {
+      const lines = chunk.split('\n');
+      let eventType = 'message';
+      const dataLines: string[] = [];
+
+      lines.forEach((line) => {
+        if (line.startsWith('event:')) {
+          eventType = line.slice(6).trim();
+          return;
+        }
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trim());
+        }
+      });
+
+      if (dataLines.length === 0) {
+        return;
+      }
+
+      const rawData = dataLines.join('\n');
+      let payload: unknown = rawData;
+      try {
+        payload = JSON.parse(rawData);
+      } catch {
+        payload = { message: rawData };
+      }
+
+      if (eventType === 'meta') {
+        handlers.onMeta?.(payload as SSEMetaEvent);
+      } else if (eventType === 'turn_started') {
+        handlers.onTurnStarted?.(payload as SSETurnStartedEvent);
+      } else if (eventType === 'block_open') {
+        handlers.onBlockOpen?.(payload as SSEBlockOpenEvent);
+      } else if (eventType === 'block_delta') {
+        handlers.onBlockDelta?.(payload as SSEBlockDeltaEvent);
+      } else if (eventType === 'block_replace') {
+        handlers.onBlockReplace?.(payload as SSEBlockReplaceEvent);
+      } else if (eventType === 'block_close') {
+        handlers.onBlockClose?.(payload as SSEBlockCloseEvent);
+      } else if (eventType === 'turn_state') {
+        handlers.onTurnState?.(payload as SSETurnStateEvent);
+      } else if (eventType === 'turn_done') {
+        handlers.onTurnDone?.(payload as SSETurnDoneEvent);
+      } else if (eventType === 'step_update') {
+        handlers.onStepUpdate?.(payload as SSEStepUpdateEvent);
+      } else if (eventType === 'tool_call') {
+        handlers.onToolCall?.(payload as any);
+      } else if (eventType === 'tool_result') {
+        handlers.onToolResult?.(payload as any);
+      } else if (eventType === 'approval_required') {
+        handlers.onApprovalRequired?.(payload as any);
+      } else if (eventType === 'thinking_delta') {
+        handlers.onThinkingDelta?.(payload as SSEThinkingEvent);
+      } else if (eventType === 'delta' || eventType === 'message') {
+        const contentChunk = toContentChunk(payload);
+        if (contentChunk) {
+          handlers.onDelta?.({
+            ...(typeof payload === 'object' && payload ? payload as Record<string, unknown> : {}),
+            contentChunk,
+          } as SSEDeltaEvent);
+        }
+      } else if (eventType === 'done') {
+        handlers.onDone?.(payload as SSEDoneEvent);
+      } else if (eventType === 'error') {
+        handlers.onError?.(payload as SSEErrorEvent);
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true }).replace(/\r/g, '');
+      const segments = buffer.split('\n\n');
+      buffer = segments.pop() || '';
+      segments.forEach(dispatchEvent);
+    }
+
+    if (buffer.trim()) {
+      dispatchEvent(buffer);
+    }
   },
 
   async confirmConfirmation(id: string, approve: boolean): Promise<ApiResponse<ConfirmationTicket>> {

@@ -195,6 +195,64 @@ func TestExecutorRejectApprovalUsesCancelledAndBlockedSummaries(t *testing.T) {
 	}
 }
 
+func TestExecutorResumeKeepsTurnIdentityAndEmitsEvents(t *testing.T) {
+	store := newExecutionStore(t)
+	runner := &stubStepRunner{result: StepResult{Summary: "service expert completed deployment"}}
+	exec := New(store, WithStepRunner(runner))
+	ctx := context.Background()
+
+	result, err := exec.Run(ctx, Request{
+		TraceID:   "trace-turn",
+		SessionID: "session-turn",
+		Message:   "deploy payment-api",
+		EventMeta: events.EventMeta{TurnID: "turn-1"},
+		Plan: planner.ExecutionPlan{
+			PlanID: "plan-turn",
+			Goal:   "deploy payment-api",
+			Steps: []planner.PlanStep{
+				{
+					StepID: "step-1",
+					Title:  "发布服务",
+					Expert: "service",
+					Mode:   "mutating",
+					Risk:   "high",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := result.State.TurnID; got != "turn-1" {
+		t.Fatalf("prepared turn_id = %q, want turn-1", got)
+	}
+
+	var names []string
+	resumed, err := exec.Resume(ctx, ResumeRequest{
+		SessionID: "session-turn",
+		PlanID:    "plan-turn",
+		StepID:    "step-1",
+		Approved:  true,
+		EventMeta: events.EventMeta{TurnID: "turn-1"},
+		EmitEvent: func(name string, _ events.EventMeta, _ map[string]any) bool {
+			names = append(names, name)
+			return true
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if got := resumed.State.TurnID; got != "turn-1" {
+		t.Fatalf("resumed turn_id = %q, want turn-1", got)
+	}
+	if !containsName(names, string(events.StepUpdate)) {
+		t.Fatalf("resume events = %v, want step_update", names)
+	}
+	if !containsName(names, string(events.ToolResult)) {
+		t.Fatalf("resume events = %v, want tool_result", names)
+	}
+}
+
 func TestExecutorInvokesExpertRunnerForReadonlyStep(t *testing.T) {
 	store := newExecutionStore(t)
 	runner := &stubStepRunner{
@@ -249,6 +307,15 @@ func TestExecutorInvokesExpertRunnerForReadonlyStep(t *testing.T) {
 	if !foundEvidence {
 		t.Fatalf("expected expert evidence in step results")
 	}
+}
+
+func containsName(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestExecutorEmitsRealtimeStepAndToolEvents(t *testing.T) {

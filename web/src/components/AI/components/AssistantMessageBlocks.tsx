@@ -3,7 +3,20 @@ import { theme } from 'antd';
 import { Think, CodeHighlighter } from '@ant-design/x';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import { RecommendationCard } from './RecommendationCard';
-import type { AssistantMessageBlock, RawEvidenceBlock, RecommendationsBlock } from '../messageBlocks';
+import { ToolCard } from './ToolCard';
+import { ConfirmationPanel } from './ConfirmationPanel';
+import type {
+  ApprovalBlock,
+  AssistantMessageBlock,
+  ErrorBlock,
+  EvidenceBlock,
+  PlanBlock,
+  RawEvidenceBlock,
+  RecommendationsBlock,
+  StatusBlock,
+  ToolExecutionBlock,
+} from '../messageBlocks';
+import type { ConfirmationRequest, ToolExecution } from '../types';
 
 class BlockErrorBoundary extends React.Component<{
   fallback: React.ReactNode;
@@ -57,6 +70,30 @@ const MarkdownBlock: React.FC<{ content: string }> = ({ content }) => (
     <RawMarkdownBlock content={content} />
   </BlockErrorBoundary>
 );
+
+const StreamingMarkdownBlock: React.FC<{ content: string; streaming?: boolean }> = ({ content, streaming }) => {
+  const [visible, setVisible] = useState(content);
+
+  useEffect(() => {
+    if (!streaming) {
+      setVisible(content);
+      return;
+    }
+    if (content.startsWith(visible)) {
+      const remainder = content.slice(visible.length);
+      if (!remainder) {
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        setVisible((prev) => prev + remainder);
+      }, 24);
+      return () => window.clearTimeout(timer);
+    }
+    setVisible(content);
+  }, [content, streaming, visible]);
+
+  return <MarkdownBlock content={visible} />;
+};
 
 const ThinkingMessageBlock: React.FC<{ content: string; isStreaming?: boolean }> = ({ content, isStreaming }) => {
   const [expanded, setExpanded] = useState(Boolean(isStreaming));
@@ -122,12 +159,92 @@ const RawEvidenceMessageBlock: React.FC<{ block: RawEvidenceBlock }> = ({ block 
   </BlockErrorBoundary>
 );
 
+const StatusMessageBlock: React.FC<{ block: StatusBlock }> = ({ block }) => (
+  <BlockErrorBoundary fallback={<pre>{block.content}</pre>}>
+    <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 12, background: 'rgba(0,0,0,0.03)' }}>
+      {block.title && <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>{block.title}</div>}
+      <div style={{ fontSize: 13, lineHeight: 1.5 }}>{block.content}</div>
+    </div>
+  </BlockErrorBoundary>
+);
+
+const PlanMessageBlock: React.FC<{ block: PlanBlock }> = ({ block }) => (
+  <BlockErrorBoundary fallback={<pre>{block.content || JSON.stringify(block.payload, null, 2)}</pre>}>
+    <details style={{ marginBottom: 12 }}>
+      <summary>{block.title || '执行计划'}</summary>
+      <div style={{ marginTop: 8 }}>
+        {block.content ? <MarkdownBlock content={block.content} /> : null}
+        {block.payload ? (
+          <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+            {JSON.stringify(block.payload, null, 2)}
+          </pre>
+        ) : null}
+      </div>
+    </details>
+  </BlockErrorBoundary>
+);
+
+const ToolMessageBlock: React.FC<{ block: ToolExecutionBlock }> = ({ block }) => {
+  const payload = block.payload || {};
+  const resultPayload = payload.result;
+  const tool: ToolExecution = {
+    id: block.id,
+    name: String(payload.tool_name || payload.tool || block.title || 'tool'),
+    status: block.status === 'error' ? 'error' : block.status === 'success' ? 'success' : 'running',
+    params: (payload.params as Record<string, unknown>) || undefined,
+    result: typeof resultPayload === 'object' && resultPayload ? {
+      ok: (resultPayload as Record<string, unknown>).ok !== false,
+      data: (resultPayload as Record<string, unknown>).data,
+      error: typeof (resultPayload as Record<string, unknown>).error === 'string' ? String((resultPayload as Record<string, unknown>).error) : undefined,
+      latency_ms: typeof (resultPayload as Record<string, unknown>).latency_ms === 'number' ? Number((resultPayload as Record<string, unknown>).latency_ms) : undefined,
+    } : undefined,
+    error: typeof payload.error === 'string' ? String(payload.error) : undefined,
+  };
+  return <ToolCard tool={tool} />;
+};
+
+const ApprovalMessageBlock: React.FC<{ block: ApprovalBlock; onApprovalDecision?: (payload: Record<string, unknown>, approved: boolean) => void }> = ({ block, onApprovalDecision }) => {
+  const payload = block.payload || {};
+  const confirmation: ConfirmationRequest = {
+    id: block.id,
+    title: String(payload.title || block.title || '等待确认'),
+    description: String(payload.user_visible_summary || payload.summary || '此操作需要你的确认后继续执行'),
+    risk: (payload.risk || 'high') as 'low' | 'medium' | 'high',
+    details: payload,
+    onConfirm: () => onApprovalDecision?.(payload, true),
+    onCancel: () => onApprovalDecision?.(payload, false),
+  };
+  return <ConfirmationPanel confirmation={confirmation} />;
+};
+
+const EvidenceMessageBlock: React.FC<{ block: EvidenceBlock }> = ({ block }) => (
+  <BlockErrorBoundary fallback={<pre>{block.items.join('\n')}</pre>}>
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>{block.title || '执行证据'}</div>
+      <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+        {block.items.map((item) => `- ${item}`).join('\n')}
+      </pre>
+    </div>
+  </BlockErrorBoundary>
+);
+
+const ErrorMessageBlock: React.FC<{ block: ErrorBlock }> = ({ block }) => (
+  <BlockErrorBoundary fallback={<pre>{block.content}</pre>}>
+    <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 12, background: 'rgba(255,77,79,0.08)', color: '#cf1322' }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{block.title || '执行错误'}</div>
+      <div style={{ whiteSpace: 'pre-wrap' }}>{block.content}</div>
+    </div>
+  </BlockErrorBoundary>
+);
+
 export function AssistantMessageBlocks({
   blocks,
   onRecommendationSelect,
+  onApprovalDecision,
 }: {
   blocks: AssistantMessageBlock[];
   onRecommendationSelect?: (prompt: string) => void;
+  onApprovalDecision?: (payload: Record<string, unknown>, approved: boolean) => void;
 }) {
   const { token } = theme.useToken();
 
@@ -144,7 +261,19 @@ export function AssistantMessageBlocks({
               />
             );
           case 'markdown':
-            return <MarkdownBlock key={block.id} content={block.content} />;
+            return <StreamingMarkdownBlock key={block.id} content={block.content} streaming={block.streaming} />;
+          case 'status':
+            return <StatusMessageBlock key={block.id} block={block} />;
+          case 'plan':
+            return <PlanMessageBlock key={block.id} block={block} />;
+          case 'tool':
+            return <ToolMessageBlock key={block.id} block={block} />;
+          case 'approval':
+            return <ApprovalMessageBlock key={block.id} block={block} onApprovalDecision={onApprovalDecision} />;
+          case 'evidence':
+            return <EvidenceMessageBlock key={block.id} block={block} />;
+          case 'error':
+            return <ErrorMessageBlock key={block.id} block={block} />;
           case 'recommendations':
             return (
               <RecommendationMessageBlock

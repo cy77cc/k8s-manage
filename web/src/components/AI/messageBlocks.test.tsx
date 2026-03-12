@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { normalizeAssistantMessage, type AssistantMessageBlock } from './messageBlocks';
+import { normalizeAssistantMessage, normalizeTurnBlocks, type AssistantMessageBlock } from './messageBlocks';
 import { AssistantMessageBlocks } from './components/AssistantMessageBlocks';
 
 describe('normalizeAssistantMessage', () => {
@@ -34,6 +34,28 @@ describe('normalizeAssistantMessage', () => {
 });
 
 describe('AssistantMessageBlocks', () => {
+  it('normalizes structured turn blocks into renderer blocks', () => {
+    const blocks = normalizeTurnBlocks([
+      {
+        id: 'turn-text',
+        type: 'text',
+        position: 2,
+        content: 'final answer',
+        streaming: true,
+      },
+      {
+        id: 'turn-status',
+        type: 'status',
+        position: 1,
+        title: '执行中',
+        content: '正在调用工具',
+      },
+    ]);
+
+    expect(blocks.map((block) => block.type)).toEqual(['status', 'markdown']);
+    expect(blocks[1]).toMatchObject({ type: 'markdown', streaming: true });
+  });
+
   it('falls back safely for unsupported block types', () => {
     const blocks = [
       {
@@ -46,5 +68,36 @@ describe('AssistantMessageBlocks', () => {
     render(<AssistantMessageBlocks blocks={blocks} />);
 
     expect(screen.getByText('raw fallback content')).toBeInTheDocument();
+  });
+
+  it('renders approval and tool interactions as accessible controls', () => {
+    render(
+      <AssistantMessageBlocks
+        blocks={[
+          {
+            id: 'tool-1',
+            type: 'tool',
+            status: 'success',
+            payload: {
+              tool_name: 'kubectl_scale',
+              result: { ok: true, latency_ms: 1000 },
+            },
+          },
+          {
+            id: 'approval-1',
+            type: 'approval',
+            payload: {
+              title: '需要确认',
+              summary: '扩容 deployment',
+              risk: 'high',
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /kubectl scale 详情/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /需要确认，确认执行/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /需要确认，取消/i })).toBeInTheDocument();
   });
 });

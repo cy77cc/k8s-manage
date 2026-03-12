@@ -29,10 +29,6 @@ func NewHandler(svcCtx *svc.ServiceContext) *Handler {
 	}
 }
 
-func (h *Handler) StartCollector() {
-	h.logic.StartCollector()
-}
-
 func (h *Handler) StartRuleSync() {
 	_, _ = h.ruleSync.SyncRules(context.Background())
 	h.ruleSync.StartPeriodic(context.Background(), 5*time.Minute)

@@ -45,18 +45,6 @@ type AlertEvent struct {
 
 func (AlertEvent) TableName() string { return "alerts" }
 
-type MetricPoint struct {
-	ID             uint      `gorm:"primaryKey;column:id" json:"id"`
-	Metric         string    `gorm:"column:metric;type:varchar(64);index:idx_metric_time,priority:1" json:"metric"`
-	Source         string    `gorm:"column:source;type:varchar(128);index" json:"source"`
-	DimensionsJSON string    `gorm:"column:dimensions_json;type:longtext" json:"dimensions_json"`
-	Value          float64   `gorm:"column:value;type:decimal(14,4);default:0" json:"value"`
-	Collected      time.Time `gorm:"column:collected_at;index:idx_metric_time,priority:2" json:"collected_at"`
-	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-}
-
-func (MetricPoint) TableName() string { return "metric_points" }
-
 type AlertNotificationChannel struct {
 	ID         uint      `gorm:"primaryKey;column:id" json:"id"`
 	Name       string    `gorm:"column:name;type:varchar(128);not null" json:"name"`

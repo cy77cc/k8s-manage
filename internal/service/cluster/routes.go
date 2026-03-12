@@ -19,6 +19,10 @@ import (
 func RegisterClusterHandlers(v1 *gin.RouterGroup, svcCtx *svc.ServiceContext) {
 	h := NewHandler(svcCtx)
 
+	// 启动集群指标采集器
+	collector := NewCollector(svcCtx)
+	collector.Start()
+
 	clusterGroup := v1.Group("/clusters", middleware.JWTAuth())
 	{
 		// 集群 CRUD

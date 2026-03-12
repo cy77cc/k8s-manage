@@ -38,11 +38,15 @@ export function ConfirmationPanel({ confirmation }: ConfirmationPanelProps) {
       <div className="confirmation-actions">
         <Button
           type="primary"
+          aria-label={`${confirmation.title}，确认执行`}
+          style={{ minHeight: 44 }}
           onClick={() => confirmation.onConfirm()}
         >
           确认执行
         </Button>
         <Button
+          aria-label={`${confirmation.title}，取消`}
+          style={{ minHeight: 44 }}
           onClick={() => confirmation.onCancel()}
         >
           取消

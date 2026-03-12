@@ -13,8 +13,8 @@ import "github.com/cy77cc/OpsPilot/internal/ai/events"
 //   - Message: 用户消息内容，必填
 //   - RuntimeContext: 运行时上下文，包含场景、路由、资源等信息
 type RunRequest struct {
-	SessionID      string         `json:"session_id,omitempty"` // 会话 ID，为空则新建
-	Message        string         `json:"message"`              // 用户消息，必填
+	SessionID      string         `json:"session_id,omitempty"`      // 会话 ID，为空则新建
+	Message        string         `json:"message"`                   // 用户消息，必填
 	RuntimeContext RuntimeContext `json:"runtime_context,omitempty"` // 运行时上下文
 }
 
@@ -42,19 +42,19 @@ type ResumeRequest struct {
 //
 // 这些信息由前端提供，用于帮助 AI 更好地理解用户意图和上下文。
 type RuntimeContext struct {
-	Scene             string             `json:"scene,omitempty"`             // 场景标识 (如: host, cluster, service)
-	Route             string             `json:"route,omitempty"`             // 当前路由
-	ProjectID         string             `json:"project_id,omitempty"`        // 项目 ID
-	CurrentPage       string             `json:"current_page,omitempty"`      // 当前页面
+	Scene             string             `json:"scene,omitempty"`              // 场景标识 (如: host, cluster, service)
+	Route             string             `json:"route,omitempty"`              // 当前路由
+	ProjectID         string             `json:"project_id,omitempty"`         // 项目 ID
+	CurrentPage       string             `json:"current_page,omitempty"`       // 当前页面
 	SelectedResources []SelectedResource `json:"selected_resources,omitempty"` // 用户选中的资源
-	UserContext       map[string]any     `json:"user_context,omitempty"`      // 用户上下文
-	Metadata          map[string]any     `json:"metadata,omitempty"`          // 扩展元数据
+	UserContext       map[string]any     `json:"user_context,omitempty"`       // 用户上下文
+	Metadata          map[string]any     `json:"metadata,omitempty"`           // 扩展元数据
 }
 
 // SelectedResource 表示用户选中的资源。
 type SelectedResource struct {
-	Type string `json:"type"`          // 资源类型 (如: host, service, deployment)
-	ID   string `json:"id,omitempty"`  // 资源 ID
+	Type string `json:"type"`           // 资源类型 (如: host, service, deployment)
+	ID   string `json:"id,omitempty"`   // 资源 ID
 	Name string `json:"name,omitempty"` // 资源名称
 }
 
@@ -68,10 +68,10 @@ type SelectedResource struct {
 //   - Meta: 事件元数据 (sessionID, traceID 等)
 //   - Data: 事件载荷
 type StreamEvent struct {
-	Type     events.Name      `json:"type"`              // 事件类型
-	Audience events.Audience  `json:"audience"`          // 目标受众
-	Meta     events.EventMeta `json:"meta"`              // 事件元数据
-	Data     map[string]any   `json:"data,omitempty"`    // 事件载荷
+	Type     events.Name      `json:"type"`           // 事件类型
+	Audience events.Audience  `json:"audience"`       // 目标受众
+	Meta     events.EventMeta `json:"meta"`           // 事件元数据
+	Data     map[string]any   `json:"data,omitempty"` // 事件载荷
 }
 
 // ResumeResult 是恢复执行的响应结构。
@@ -87,6 +87,7 @@ type ResumeResult struct {
 	SessionID   string `json:"session_id,omitempty"`  // 会话 ID
 	PlanID      string `json:"plan_id,omitempty"`     // 计划 ID
 	StepID      string `json:"step_id,omitempty"`     // 步骤 ID
+	TurnID      string `json:"turn_id,omitempty"`     // turn ID
 	Status      string `json:"status,omitempty"`      // 状态码
 	Message     string `json:"message,omitempty"`     // 状态消息
 }

@@ -57,10 +57,6 @@ func NewLogic(svcCtx *svc.ServiceContext) *Logic {
 	return &Logic{svcCtx: svcCtx}
 }
 
-func (l *Logic) StartCollector() {
-	// Deprecated collector flow removed after Prometheus migration.
-}
-
 func (l *Logic) ListAlerts(ctx context.Context, severity, status string, page, pageSize int) ([]model.AlertEvent, int64, error) {
 	q := l.svcCtx.DB.WithContext(ctx).Model(&model.AlertEvent{})
 	if severity != "" {
@@ -149,49 +145,10 @@ func (l *Logic) GetMetrics(ctx context.Context, query MetricQuery) (*MetricQuery
 	if query.GranularitySec <= 0 {
 		query.GranularitySec = 60
 	}
-	if l.svcCtx.Prometheus != nil {
-		if out, err := l.queryMetricsFromPrometheus(ctx, query); err == nil {
-			return out, nil
-		}
+	if l.svcCtx.Prometheus == nil {
+		return nil, fmt.Errorf("prometheus client unavailable")
 	}
-	return l.queryMetricsFromDB(ctx, query)
-}
-
-func (l *Logic) queryMetricsFromDB(ctx context.Context, query MetricQuery) (*MetricQueryResult, error) {
-	q := l.svcCtx.DB.WithContext(ctx).
-		Where("metric = ? AND collected_at >= ? AND collected_at <= ?", query.Metric, query.Start, query.End)
-	if strings.TrimSpace(query.Source) != "" {
-		q = q.Where("source = ?", strings.TrimSpace(query.Source))
-	}
-	rows := make([]model.MetricPoint, 0, 2000)
-	if err := q.Order("collected_at ASC").Limit(2000).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := &MetricQueryResult{
-		Dimensions: map[string]any{
-			"metric": query.Metric,
-			"source": strings.TrimSpace(query.Source),
-		},
-		Series: make([]map[string]any, 0, len(rows)),
-	}
-	out.Window.Start = query.Start
-	out.Window.End = query.End
-	out.Window.GranularitySec = query.GranularitySec
-	for _, row := range rows {
-		item := map[string]any{
-			"timestamp": row.Collected,
-			"value":     row.Value,
-			"source":    row.Source,
-		}
-		if strings.TrimSpace(row.DimensionsJSON) != "" {
-			var m map[string]any
-			if err := json.Unmarshal([]byte(row.DimensionsJSON), &m); err == nil {
-				item["dimensions"] = m
-			}
-		}
-		out.Series = append(out.Series, item)
-	}
-	return out, nil
+	return l.queryMetricsFromPrometheus(ctx, query)
 }
 
 func (l *Logic) queryMetricsFromPrometheus(ctx context.Context, query MetricQuery) (*MetricQueryResult, error) {

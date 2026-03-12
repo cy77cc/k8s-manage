@@ -65,13 +65,16 @@ vi.mock('../../api/modules/notification', () => ({
 }));
 
 const aiConfirmApprovalMock = vi.fn().mockResolvedValue({ success: true });
-vi.mock('../../api', () => ({
-  Api: {
-    ai: {
+vi.mock('../../api/modules/ai', async () => {
+  const actual = await vi.importActual<typeof import('../../api/modules/ai')>('../../api/modules/ai');
+  return {
+    ...actual,
+    aiApi: {
+      ...actual.aiApi,
       confirmApproval: (...args: unknown[]) => aiConfirmApprovalMock(...args),
     },
-  },
-}));
+  };
+});
 
 const renderWithProviders = (component: React.ReactNode) => {
   return render(

@@ -30,10 +30,10 @@ import (
 
 // HTTPHandler AI 服务的 HTTP 处理器。
 type HTTPHandler struct {
-	svcCtx       *svc.ServiceContext     // 服务上下文
-	sessions     *aistate.SessionState   // 会话状态管理
-	chatStore    *aistate.ChatStore      // 聊天记录存储
-	orchestrator *coreai.Orchestrator    // AI 编排器
+	svcCtx       *svc.ServiceContext   // 服务上下文
+	sessions     *aistate.SessionState // 会话状态管理
+	chatStore    *aistate.ChatStore    // 聊天记录存储
+	orchestrator *coreai.Orchestrator  // AI 编排器
 }
 
 // approvalResponseRequest 审批响应请求结构。
@@ -59,12 +59,12 @@ type branchSessionRequest struct {
 
 // feedbackRequest 用户反馈请求。
 type feedbackRequest struct {
-	SessionID   string `json:"session_id,omitempty"`   // 会话 ID
-	Namespace   string `json:"namespace,omitempty"`     // 命名空间
-	IsEffective bool   `json:"is_effective"`            // 是否有效反馈
-	Comment     string `json:"comment,omitempty"`       // 反馈评论
-	Question    string `json:"question,omitempty"`      // 问题（用于知识提取）
-	Answer      string `json:"answer,omitempty"`        // 答案（用于知识提取）
+	SessionID   string `json:"session_id,omitempty"` // 会话 ID
+	Namespace   string `json:"namespace,omitempty"`  // 命名空间
+	IsEffective bool   `json:"is_effective"`         // 是否有效反馈
+	Comment     string `json:"comment,omitempty"`    // 反馈评论
+	Question    string `json:"question,omitempty"`   // 问题（用于知识提取）
+	Answer      string `json:"answer,omitempty"`     // 答案（用于知识提取）
 }
 
 // NewHTTPHandler 创建新的 HTTP 处理器实例。
@@ -76,7 +76,8 @@ func NewHTTPHandler(svcCtx *svc.ServiceContext) *HTTPHandler {
 		sessions:  sessionState,
 		chatStore: aistate.NewChatStore(svcCtx.DB),
 		orchestrator: coreai.NewOrchestrator(sessionState, executionStore, common.PlatformDeps{
-			DB: svcCtx.DB,
+			DB:         svcCtx.DB,
+			Prometheus: svcCtx.Prometheus,
 		}),
 	}
 }
@@ -105,6 +106,7 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 	c.Writer.Header().Set("X-AI-Runtime-Mode", rollout.RuntimeMode())
 	c.Writer.Header().Set("X-AI-Compatibility-Enabled", boolHeaderValue(rollout.CompatibilityEnabled()))
 	c.Writer.Header().Set("X-AI-Model-First-Enabled", boolHeaderValue(rollout.ModelFirstEnabled()))
+	c.Writer.Header().Set("X-AI-Turn-Block-Streaming-Enabled", boolHeaderValue(rollout.TurnBlockStreamingEnabled()))
 	c.Status(http.StatusOK)
 
 	scene := normalizedScene(req.Context["scene"])
@@ -144,6 +146,45 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 // ResumeStep 处理步骤恢复请求。
 func (h *HTTPHandler) ResumeStep(c *gin.Context) {
 	h.handleResume(c, false)
+}
+
+// ResumeStepStream 处理流式步骤恢复请求。
+func (h *HTTPHandler) ResumeStepStream(c *gin.Context) {
+	var req approvalResponseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BindErr(c, err)
+		return
+	}
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		httpx.Fail(c, xcode.ServerError, "streaming is not supported")
+		return
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	rollout := coreai.CurrentRolloutConfig()
+	c.Writer.Header().Set("X-AI-Runtime-Mode", rollout.RuntimeMode())
+	c.Writer.Header().Set("X-AI-Compatibility-Enabled", boolHeaderValue(rollout.CompatibilityEnabled()))
+	c.Writer.Header().Set("X-AI-Model-First-Enabled", boolHeaderValue(rollout.ModelFirstEnabled()))
+	c.Writer.Header().Set("X-AI-Turn-Block-Streaming-Enabled", boolHeaderValue(rollout.TurnBlockStreamingEnabled()))
+	c.Status(http.StatusOK)
+
+	emit := func(evt coreai.StreamEvent) bool {
+		payload := cloneMap(evt.Data)
+		if evt.Type == events.Meta {
+			payload = attachRolloutMetadata(payload, rollout)
+		}
+		return writeSSE(c, flusher, string(evt.Type), payload)
+	}
+	if _, err := h.orchestrator.ResumeStream(c.Request.Context(), buildResumeRequest(req), emit); err != nil {
+		writeSSE(c, flusher, "error", map[string]any{
+			"message": err.Error(),
+		})
+	}
 }
 
 // handleResume 统一处理恢复请求。
@@ -189,6 +230,7 @@ func buildResumeResponse(res *coreai.ResumeResult, legacyADK bool) gin.H {
 		"session_id":        res.SessionID,
 		"plan_id":           res.PlanID,
 		"step_id":           res.StepID,
+		"turn_id":           res.TurnID,
 		"message":           res.Message,
 		"status":            res.Status,
 		"interrupt_error":   "",
@@ -366,6 +408,7 @@ func toSelectedResources(items []any) []coreai.SelectedResource {
 
 func toAPISession(snapshot aistate.ChatSessionRecord, includeMessages bool) v1.AISession {
 	msgs := make([]map[string]any, 0, len(snapshot.Messages))
+	turns := make([]v1.AIReplayTurn, 0, len(snapshot.Turns))
 	if includeMessages {
 		for _, msg := range snapshot.Messages {
 			payload := map[string]any{
@@ -401,12 +444,42 @@ func toAPISession(snapshot aistate.ChatSessionRecord, includeMessages bool) v1.A
 				"timestamp":       payload["timestamp"],
 			})
 		}
+		for _, turn := range snapshot.Turns {
+			blocks := make([]v1.AIReplayBlock, 0, len(turn.Blocks))
+			for _, block := range turn.Blocks {
+				blocks = append(blocks, v1.AIReplayBlock{
+					ID:          block.ID,
+					BlockType:   block.BlockType,
+					Position:    block.Position,
+					Status:      block.Status,
+					Title:       block.Title,
+					ContentText: block.ContentText,
+					ContentJSON: block.ContentJSON,
+					Streaming:   block.Streaming,
+					CreatedAt:   block.CreatedAt,
+					UpdatedAt:   block.UpdatedAt,
+				})
+			}
+			turns = append(turns, v1.AIReplayTurn{
+				ID:           turn.ID,
+				Role:         turn.Role,
+				Status:       turn.Status,
+				Phase:        turn.Phase,
+				TraceID:      turn.TraceID,
+				ParentTurnID: turn.ParentTurnID,
+				Blocks:       blocks,
+				CreatedAt:    turn.CreatedAt,
+				UpdatedAt:    turn.UpdatedAt,
+				CompletedAt:  turn.CompletedAt,
+			})
+		}
 	}
 	return v1.AISession{
 		ID:        snapshot.ID,
 		Scene:     snapshot.Scene,
 		Title:     firstNonEmpty(snapshot.Title, "新对话"),
 		Messages:  msgs,
+		Turns:     turns,
 		CreatedAt: snapshot.CreatedAt,
 		UpdatedAt: snapshot.UpdatedAt,
 	}
@@ -458,6 +531,7 @@ func attachRolloutMetadata(payload map[string]any, rollout coreai.RolloutConfig)
 	payload["runtime_mode"] = rollout.RuntimeMode()
 	payload["model_first_enabled"] = rollout.ModelFirstEnabled()
 	payload["compatibility_enabled"] = rollout.CompatibilityEnabled()
+	payload["turn_block_streaming_enabled"] = rollout.TurnBlockStreamingEnabled()
 	return payload
 }
 

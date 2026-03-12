@@ -60,8 +60,8 @@ export function AIAssistantDrawer({
       title={null}
     >
       {ResizeHandle}
-      <AISurfaceBoundary>
-        <Suspense fallback={<div style={{ padding: 16 }}><Skeleton active paragraph={{ rows: 4 }} /></div>}>
+      <Suspense fallback={<div style={{ padding: 16 }}><Skeleton active paragraph={{ rows: 4 }} /></div>}>
+        <AISurfaceBoundary>
           <CopilotSurface
             open={open}
             onClose={onClose}
@@ -71,8 +71,8 @@ export function AIAssistantDrawer({
             availableScenes={availableScenes}
             isAuto={isAuto}
           />
-        </Suspense>
-      </AISurfaceBoundary>
+        </AISurfaceBoundary>
+      </Suspense>
     </Drawer>
   );
 }
