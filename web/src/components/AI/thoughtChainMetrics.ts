@@ -82,9 +82,13 @@ export function computeThoughtChainRenderConsistency(
   thoughtChain: ThoughtStageItem[] | undefined
 ): ThoughtChainRenderConsistency {
   const expectedKeys = expectedThoughtChainStages(events);
-  const renderedKeys = Array.from(new Set((thoughtChain || []).map((item) => item.key).filter((key) => key !== 'summary')));
-  const renderedSet = new Set(renderedKeys);
-  const missingKeys = expectedKeys.filter((key) => !renderedSet.has(key));
+  // 定义排除 summary 的阶段类型
+  type RenderedStageKey = Exclude<ThoughtStageKey, 'summary'>;
+  const renderedKeys = (thoughtChain || [])
+    .map((item) => item.key)
+    .filter((key): key is RenderedStageKey => key !== 'summary');
+  const renderedSet = new Set<RenderedStageKey>(renderedKeys);
+  const missingKeys = expectedKeys.filter((key): key is RenderedStageKey => !renderedSet.has(key as RenderedStageKey));
   return {
     expectedKeys,
     renderedKeys,
