@@ -30,6 +30,8 @@ export interface ToolExecution {
   name: string;
   status: ToolStatus;
   duration?: number;
+  summary?: string;
+  target?: string;
   error?: string;
   // 新增: 工具调用参数
   params?: Record<string, unknown>;

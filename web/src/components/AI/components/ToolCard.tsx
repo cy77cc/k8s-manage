@@ -17,6 +17,7 @@ export function ToolCard({ tool }: ToolCardProps) {
   const hasDetails = tool.params || tool.result;
 
   const statusConfig = getStatusConfig(tool.status, token);
+  const showSubtitle = Boolean((tool.summary || '').trim() || (tool.target || '').trim());
 
   return (
     <div
@@ -77,6 +78,19 @@ export function ToolCard({ tool }: ToolCardProps) {
           </span>
         )}
       </button>
+      {showSubtitle && (
+        <div
+          style={{
+            padding: '0 12px 10px 30px',
+            fontSize: 12,
+            lineHeight: 1.6,
+            color: token.colorTextSecondary,
+          }}
+        >
+          {(tool.summary || '').trim() ? <div>{tool.summary}</div> : null}
+          {(tool.target || '').trim() ? <div>目标: {tool.target}</div> : null}
+        </div>
+      )}
 
       {/* 展开的详情 */}
       {expanded && hasDetails && (

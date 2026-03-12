@@ -97,9 +97,20 @@ const StreamingMarkdownBlock: React.FC<{ content: string; streaming?: boolean }>
 
 const ThinkingMessageBlock: React.FC<{ content: string; isStreaming?: boolean }> = ({ content, isStreaming }) => {
   const [expanded, setExpanded] = useState(false);
+  const [displayStreaming, setDisplayStreaming] = useState(Boolean(isStreaming));
 
-  // 动态标题：思考中时显示渐变色动画效果
-  const title = isStreaming ? (
+  useEffect(() => {
+    if (isStreaming) {
+      setDisplayStreaming(true);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setDisplayStreaming(false);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [isStreaming, content]);
+
+  const title = displayStreaming ? (
     <span className="ai-thinking-title-animated">正在思考</span>
   ) : '已思考';
 
@@ -107,7 +118,7 @@ const ThinkingMessageBlock: React.FC<{ content: string; isStreaming?: boolean }>
     <BlockErrorBoundary fallback={<pre style={{ whiteSpace: 'pre-wrap', margin: '0 0 12px' }}>{content}</pre>}>
       <div style={{ marginBottom: 12 }}>
         <Think
-          loading={isStreaming}
+          loading={displayStreaming}
           title={title}
           expanded={expanded}
           onExpand={setExpanded}
@@ -187,6 +198,12 @@ const ToolMessageBlock: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =>
     id: block.id,
     name: String(payload.tool_name || payload.tool || block.title || 'tool'),
     status: block.status === 'error' ? 'error' : block.status === 'success' ? 'success' : 'running',
+    summary: typeof payload.summary === 'string' ? String(payload.summary) : undefined,
+    target: typeof payload.target === 'string'
+      ? String(payload.target)
+      : typeof payload.host_id === 'string' || typeof payload.host_id === 'number'
+        ? `host_id=${String(payload.host_id)}`
+        : undefined,
     params: (payload.params as Record<string, unknown>) || undefined,
     result: typeof resultPayload === 'object' && resultPayload ? {
       ok: (resultPayload as Record<string, unknown>).ok !== false,

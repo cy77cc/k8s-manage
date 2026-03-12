@@ -181,7 +181,7 @@ func advanceAfterApproval(ctx context.Context, store *runtime.ExecutionStore, st
 		TraceID:        state.TraceID,
 		SessionID:      state.SessionID,
 		Message:        state.Message,
-		Plan:           planner.ExecutionPlan{PlanID: state.PlanID},
+		Plan:           state.Plan,
 		RuntimeContext: state.RuntimeContext,
 		EventMeta: events.EventMeta{
 			SessionID: state.SessionID,

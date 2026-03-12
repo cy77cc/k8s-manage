@@ -132,6 +132,37 @@ export function normalizeAssistantMessage(input: AssistantMessageInput): Assista
   return blocks;
 }
 
+export function mergeAssistantBlocks(
+  primary: AssistantMessageBlock[],
+  fallback: AssistantMessageBlock[],
+): AssistantMessageBlock[] {
+  if (primary.length === 0) {
+    return fallback;
+  }
+  const merged = [...primary];
+  const seenTypes = new Set(primary.map((block) => `${block.type}:${block.id}`));
+  for (const block of fallback) {
+    const typeKey = `${block.type}:${block.id}`;
+    if (seenTypes.has(typeKey)) {
+      continue;
+    }
+    if (block.type === 'markdown' && primary.some((item) => item.type === 'markdown')) {
+      continue;
+    }
+    if (block.type === 'thinking' && primary.some((item) => item.type === 'thinking')) {
+      continue;
+    }
+    if (block.type === 'recommendations' && primary.some((item) => item.type === 'recommendations')) {
+      continue;
+    }
+    if (block.type === 'raw_evidence' && primary.some((item) => item.type === 'raw_evidence' || item.type === 'evidence')) {
+      continue;
+    }
+    merged.push(block);
+  }
+  return merged;
+}
+
 export function normalizeTurnBlocks(turnBlocks: TurnBlock[] | undefined): AssistantMessageBlock[] {
   if (!turnBlocks || turnBlocks.length === 0) {
     return [];
