@@ -5,6 +5,7 @@ package planner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/tools"
 	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
 )
+
+var errPlannerEmptyOutput = errors.New("planner stage produced empty output")
 
 // NewWithADK 使用 ADK 创建规划器实例。
 // 配置 Agent 的系统提示、工具集和决策工具。
@@ -107,7 +110,7 @@ func runADKPlanner(ctx context.Context, runner *adk.Runner, input string, onDelt
 	}
 	final = strings.TrimSpace(final)
 	if final == "" {
-		return "", fmt.Errorf("planner stage produced empty output")
+		return "", errPlannerEmptyOutput
 	}
 	return final, nil
 }

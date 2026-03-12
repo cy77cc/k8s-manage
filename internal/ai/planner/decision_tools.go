@@ -28,6 +28,61 @@ func (t decisionTool) InvokableRun(_ context.Context, argumentsInJSON string, _ 
 
 // decisionTools 返回所有决策工具。
 func decisionTools() []tool.BaseTool {
+	planStepParams := map[string]*schema.ParameterInfo{
+		"step_id": {
+			Type:     schema.String,
+			Required: true,
+			Desc:     "step identifier, must be a string like step-1",
+		},
+		"title": {
+			Type:     schema.String,
+			Required: true,
+			Desc:     "step title",
+		},
+		"expert": {
+			Type:     schema.String,
+			Required: true,
+			Enum:     []string{"hostops", "k8s", "service", "delivery", "observability"},
+			Desc:     "expert owner for this step",
+		},
+		"intent": {
+			Type: schema.String,
+			Desc: "operator intent for this step",
+		},
+		"task": {
+			Type:     schema.String,
+			Required: true,
+			Desc:     "step task description",
+		},
+		"depends_on": {
+			Type: schema.Array,
+			ElemInfo: &schema.ParameterInfo{
+				Type: schema.String,
+			},
+			Desc: "list of step ids this step depends on",
+		},
+		"mode": {
+			Type:     schema.String,
+			Required: true,
+			Enum:     []string{"readonly", "mutating"},
+			Desc:     "execution mode",
+		},
+		"risk": {
+			Type:     schema.String,
+			Required: true,
+			Enum:     []string{"low", "medium", "high"},
+			Desc:     "risk level",
+		},
+		"narrative": {
+			Type: schema.String,
+			Desc: "natural language explanation for the step",
+		},
+		"input": {
+			Type: schema.Object,
+			Desc: "structured step input",
+		},
+	}
+
 	return []tool.BaseTool{
 		newDecisionTool("clarify", "Emit a final clarify decision when resource targets remain unresolved or ambiguous.", map[string]*schema.ParameterInfo{
 			"type": {
@@ -106,6 +161,36 @@ func decisionTools() []tool.BaseTool {
 				Type:     schema.Object,
 				Required: true,
 				Desc:     "structured execution plan object",
+				SubParams: map[string]*schema.ParameterInfo{
+					"plan_id": {
+						Type:     schema.String,
+						Required: true,
+						Desc:     "plan identifier",
+					},
+					"goal": {
+						Type:     schema.String,
+						Required: true,
+						Desc:     "plan goal",
+					},
+					"resolved": {
+						Type: schema.Object,
+						Desc: "resolved resources and identifiers",
+					},
+					"narrative": {
+						Type:     schema.String,
+						Required: true,
+						Desc:     "plan level narrative",
+					},
+					"steps": {
+						Type:     schema.Array,
+						Required: true,
+						ElemInfo: &schema.ParameterInfo{
+							Type:      schema.Object,
+							SubParams: planStepParams,
+						},
+						Desc: "ordered execution steps",
+					},
+				},
 			},
 		}),
 	}

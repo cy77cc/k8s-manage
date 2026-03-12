@@ -46,6 +46,21 @@ func buildPromptInput(in Input) string {
 	return "message: " + strings.TrimSpace(in.Message) + "\nrewrite: " + string(data)
 }
 
+func buildRepairPromptInput(in Input, previousOutput, reason string, attempt, maxAttempts int) string {
+	rewriteData, _ := json.Marshal(in.Rewrite.SemanticContract())
+	previousData, _ := json.Marshal(previousOutput)
+	reasonData, _ := json.Marshal(reason)
+	return fmt.Sprintf(
+		"message: %s\nrewrite: %s\nrepair_attempt: %d/%d\nprevious_planner_output: %s\nvalidation_error: %s\ninstruction: Repair the previous planner decision. Keep the same user intent and resolved facts. Do not invent IDs or execution evidence. Return exactly one final decision via the decision tools, with a schema-valid and execution-valid structure.",
+		strings.TrimSpace(in.Message),
+		string(rewriteData),
+		attempt,
+		maxAttempts,
+		string(previousData),
+		string(reasonData),
+	)
+}
+
 func collectPodName(r rewrite.Output) string {
 	for _, target := range r.NormalizedRequest.Targets {
 		if !strings.EqualFold(strings.TrimSpace(target.Type), "pod") {

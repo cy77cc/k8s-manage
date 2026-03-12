@@ -105,11 +105,13 @@ func NewOrchestrator(sessions *state.SessionState, executions *runtime.Execution
 			out.rewriter = stage
 		}
 	}
-	if plannerModel, err := NewToolCallingChatModel(bootstrapCtx); err == nil {
+	if plannerModel, err := NewPlannerChatModel(bootstrapCtx); err == nil {
 		if stage, stageErr := planner.NewWithADK(bootstrapCtx, plannerModel, deps); stageErr == nil {
 			out.planner = stage
 		}
-		if stepRunner, stepErr := executor.NewAgentStepRunner(bootstrapCtx, plannerModel, experts.DefaultRegistry(deps)); stepErr == nil {
+	}
+	if expertModel, err := NewToolCallingChatModel(bootstrapCtx); err == nil {
+		if stepRunner, stepErr := executor.NewAgentStepRunner(bootstrapCtx, expertModel, experts.DefaultRegistry(deps)); stepErr == nil {
 			out.executor = executor.New(executions, executor.WithStepRunner(stepRunner))
 		}
 	}
@@ -666,13 +668,42 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 		"status":               "planning",
 		"user_visible_summary": "正在根据 Rewrite 结果整理执行计划。",
 	})
+	replanAttempts := 0
 	decision, err := o.planner.PlanStream(ctx, planner.Input{
 		Message: message,
 		Rewrite: rewritten,
+		OnReplan: func(info planner.ReplanAttempt) {
+			replanAttempts++
+			if o.metrics != nil {
+				o.metrics.RecordPlannerReplanAttempt()
+			}
+			emitEvent(emit, events.ReplanStarted, meta, map[string]any{
+				"reason":              info.Reason,
+				"attempt":             info.Attempt,
+				"max_attempts":        info.MaxAttempts,
+				"previous_error_code": info.PreviousErrorCode,
+			})
+			emitEvent(emit, events.PlannerState, meta, map[string]any{
+				"status":               "replanning",
+				"user_visible_summary": "规划结果不符合要求，正在自动修复。",
+			})
+			emitEvent(emit, events.StageDelta, meta, map[string]any{
+				"stage":         "plan",
+				"status":        "loading",
+				"content_chunk": "规划结果不符合要求，正在自动修复。",
+				"replace":       true,
+			})
+			if projector != nil {
+				projector.StageDelta("plan", "loading", "规划结果不符合要求，正在自动修复。", "", "")
+			}
+		},
 	}, func(chunk string) {
 		emitStageDelta(emit, projector, meta, "plan", "loading", chunk, "", "")
 	})
 	if err != nil {
+		if o.metrics != nil && replanAttempts > 0 {
+			o.metrics.RecordPlannerReplanOutcome(false, true)
+		}
 		reply := plannerFailureMessage(err)
 		projector.SetState("error", "plan")
 		emitStageDelta(emit, projector, meta, "plan", "error", reply, "", "")
@@ -688,6 +719,9 @@ func (o *Orchestrator) planAndReply(ctx context.Context, message string, rewritt
 		})
 		emitDeltaChunks(emit, projector, meta, reply)
 		return reply, nil
+	}
+	if o.metrics != nil && replanAttempts > 0 {
+		o.metrics.RecordPlannerReplanOutcome(true, false)
 	}
 	if o.metrics != nil {
 		o.metrics.RecordPlanner(decision)

@@ -19,9 +19,9 @@ import (
 
 // 模型超时配置常量。
 const (
-	defaultChatModelTimeout = 30 * time.Second  // 默认聊天模型超时
-	rewriteChatModelTimeout = 60 * time.Second  // 改写模型超时 (较长，因为需要结构化输出)
-	summaryChatModelTimeout = 45 * time.Second  // 总结模型超时
+	defaultChatModelTimeout = 30 * time.Second // 默认聊天模型超时
+	rewriteChatModelTimeout = 60 * time.Second // 改写模型超时 (较长，因为需要结构化输出)
+	summaryChatModelTimeout = 45 * time.Second // 总结模型超时
 )
 
 // StartupModelHealthResult 表示启动时模型健康检查的结果。
@@ -52,6 +52,16 @@ func NewToolCallingChatModel(ctx context.Context) (einomodel.ToolCallingChatMode
 		timeout:  defaultChatModelTimeout,
 		thinking: true,
 		temp:     float32(config.CFG.LLM.Temperature),
+	})
+}
+
+// NewPlannerChatModel 创建专用于规划阶段的工具调用模型。
+// 规划任务强调结构稳定性，固定使用低温配置。
+func NewPlannerChatModel(ctx context.Context) (einomodel.ToolCallingChatModel, error) {
+	return newChatModel(ctx, chatModelOptions{
+		timeout:  defaultChatModelTimeout,
+		thinking: true,
+		temp:     0,
 	})
 }
 

@@ -23,18 +23,28 @@ const (
 
 // Input 是规划器的输入结构。
 type Input struct {
-	Message string        // 用户原始消息
-	Rewrite rewrite.Output // Rewrite 阶段的输出
+	Message  string         // 用户原始消息
+	Rewrite  rewrite.Output // Rewrite 阶段的输出
+	OnReplan func(ReplanAttempt)
+}
+
+// ReplanAttempt 描述一次由结构校验触发的自动重规划。
+type ReplanAttempt struct {
+	Attempt           int
+	MaxAttempts       int
+	Reason            string
+	PreviousErrorCode string
+	PreviousOutput    string
 }
 
 // Decision 表示规划器的决策输出。
 type Decision struct {
-	Type       DecisionType     `json:"type"`                // 决策类型
-	Message    string           `json:"message,omitempty"`   // 消息内容
-	Reason     string           `json:"reason,omitempty"`    // 原因说明
+	Type       DecisionType     `json:"type"`                 // 决策类型
+	Message    string           `json:"message,omitempty"`    // 消息内容
+	Reason     string           `json:"reason,omitempty"`     // 原因说明
 	Candidates []map[string]any `json:"candidates,omitempty"` // 候选项 (澄清时使用)
-	Plan       *ExecutionPlan   `json:"plan,omitempty"`      // 执行计划
-	Narrative  string           `json:"narrative"`           // 自然语言描述
+	Plan       *ExecutionPlan   `json:"plan,omitempty"`       // 执行计划
+	Narrative  string           `json:"narrative"`            // 自然语言描述
 }
 
 // PlanningError 表示规划错误。
@@ -73,11 +83,11 @@ func (e *PlanningError) UserVisibleMessage() string {
 
 // ExecutionPlan 表示执行计划。
 type ExecutionPlan struct {
-	PlanID    string            `json:"plan_id"`       // 计划唯一标识
-	Goal      string            `json:"goal"`          // 执行目标
-	Resolved  ResolvedResources `json:"resolved"`      // 已解析的资源
-	Narrative string            `json:"narrative"`     // 自然语言描述
-	Steps     []PlanStep        `json:"steps"`         // 执行步骤列表
+	PlanID    string            `json:"plan_id"`   // 计划唯一标识
+	Goal      string            `json:"goal"`      // 执行目标
+	Resolved  ResolvedResources `json:"resolved"`  // 已解析的资源
+	Narrative string            `json:"narrative"` // 自然语言描述
+	Steps     []PlanStep        `json:"steps"`     // 执行步骤列表
 }
 
 // ResourceRef 表示资源引用。
@@ -88,16 +98,16 @@ type ResourceRef struct {
 
 // PodRef 表示 Pod 引用。
 type PodRef struct {
-	Name      string `json:"name,omitempty"`      // Pod 名称
-	Namespace string `json:"namespace,omitempty"` // 命名空间
+	Name      string `json:"name,omitempty"`       // Pod 名称
+	Namespace string `json:"namespace,omitempty"`  // 命名空间
 	ClusterID int    `json:"cluster_id,omitempty"` // 集群 ID
 }
 
 // ResourceScope 表示资源范围。
 type ResourceScope struct {
-	Kind         string         `json:"kind,omitempty"`         // 范围类型 (all/filtered/single)
+	Kind         string         `json:"kind,omitempty"`          // 范围类型 (all/filtered/single)
 	ResourceType string         `json:"resource_type,omitempty"` // 资源类型
-	Selector     map[string]any `json:"selector,omitempty"`     // 选择器
+	Selector     map[string]any `json:"selector,omitempty"`      // 选择器
 }
 
 // ResolvedResources 表示已解析的资源引用。

@@ -16,10 +16,10 @@ import (
 // AIMetrics 是 AI 编排层的指标收集器。
 // 线程安全，使用互斥锁保护内部状态。
 type AIMetrics struct {
-	mu           sync.Mutex                 // 保护并发访问
-	rewrite      RewriteMetricsSnapshot     // 改写阶段指标
-	planner      PlannerMetricsSnapshot     // 规划阶段指标
-	resume       ResumeMetricsSnapshot      // 恢复操作指标
+	mu           sync.Mutex                  // 保护并发访问
+	rewrite      RewriteMetricsSnapshot      // 改写阶段指标
+	planner      PlannerMetricsSnapshot      // 规划阶段指标
+	resume       ResumeMetricsSnapshot       // 恢复操作指标
 	thoughtChain ThoughtChainMetricsSnapshot // 思维链指标
 }
 
@@ -42,40 +42,43 @@ type RewriteMetricsSnapshot struct {
 
 // PlannerMetricsSnapshot 记录规划阶段的指标。
 type PlannerMetricsSnapshot struct {
-	Total              int     `json:"total"`               // 总请求数
-	Clarify            int     `json:"clarify"`             // 需要澄清的次数
-	Plans              int     `json:"plans"`               // 生成计划的次数
-	ExecutablePlans    int     `json:"executable_plans"`    // 可执行计划数
-	DirectReplies      int     `json:"direct_replies"`      // 直接回复次数
-	Rejected           int     `json:"rejected"`            // 拒绝次数
-	ClarifyRate        float64 `json:"clarify_rate"`        // 澄清率
+	Total              int     `json:"total"`                // 总请求数
+	Clarify            int     `json:"clarify"`              // 需要澄清的次数
+	Plans              int     `json:"plans"`                // 生成计划的次数
+	ExecutablePlans    int     `json:"executable_plans"`     // 可执行计划数
+	DirectReplies      int     `json:"direct_replies"`       // 直接回复次数
+	Rejected           int     `json:"rejected"`             // 拒绝次数
+	ReplanAttempts     int     `json:"replan_attempts"`      // 自动重规划次数
+	ReplanSuccess      int     `json:"replan_success"`       // 自动重规划后成功次数
+	ReplanExhausted    int     `json:"replan_exhausted"`     // 自动重规划耗尽次数
+	ClarifyRate        float64 `json:"clarify_rate"`         // 澄清率
 	ExecutablePlanRate float64 `json:"executable_plan_rate"` // 可执行计划率
 }
 
 // ResumeMetricsSnapshot 记录恢复操作的指标。
 type ResumeMetricsSnapshot struct {
-	Total                  int     `json:"total"`                   // 总恢复请求数
-	Successful             int     `json:"successful"`              // 成功次数
-	Failures               int     `json:"failures"`                // 失败次数
-	DuplicateIntercepted   int     `json:"duplicate_intercepted"`   // 重复请求拦截数
-	SuccessRate            float64 `json:"success_rate"`            // 成功率
+	Total                  int     `json:"total"`                    // 总恢复请求数
+	Successful             int     `json:"successful"`               // 成功次数
+	Failures               int     `json:"failures"`                 // 失败次数
+	DuplicateIntercepted   int     `json:"duplicate_intercepted"`    // 重复请求拦截数
+	SuccessRate            float64 `json:"success_rate"`             // 成功率
 	DuplicateInterceptRate float64 `json:"duplicate_intercept_rate"` // 重复拦截率
 }
 
 // ThoughtChainMetricsSnapshot 记录思维链的指标。
 type ThoughtChainMetricsSnapshot struct {
-	Runs                   int     `json:"runs"`                    // 总运行次数
-	ExpectedStageSignals   int     `json:"expected_stage_signals"`  // 预期阶段信号数
-	DeliveredStageSignals  int     `json:"delivered_stage_signals"` // 实际阶段信号数
+	Runs                   int     `json:"runs"`                      // 总运行次数
+	ExpectedStageSignals   int     `json:"expected_stage_signals"`    // 预期阶段信号数
+	DeliveredStageSignals  int     `json:"delivered_stage_signals"`   // 实际阶段信号数
 	RunsWithMissingSignals int     `json:"runs_with_missing_signals"` // 缺失信号的运行数
-	EventCompletenessRate  float64 `json:"event_completeness_rate"`  // 事件完整率
+	EventCompletenessRate  float64 `json:"event_completeness_rate"`   // 事件完整率
 }
 
 // thoughtChainRunMetrics 追踪单次思维链运行的指标。
 type thoughtChainRunMetrics struct {
-	parent          *AIMetrics            // 父指标收集器
-	requiredStages  map[string]struct{}   // 必需的阶段
-	deliveredStages map[string]struct{}   // 已交付的阶段
+	parent          *AIMetrics          // 父指标收集器
+	requiredStages  map[string]struct{} // 必需的阶段
+	deliveredStages map[string]struct{} // 已交付的阶段
 }
 
 // NewAIMetrics 创建新的指标收集器。
@@ -144,6 +147,31 @@ func (m *AIMetrics) RecordPlanner(decision planner.Decision) {
 	}
 	m.planner.ClarifyRate = rate(m.planner.Clarify, m.planner.Total)
 	m.planner.ExecutablePlanRate = rate(m.planner.ExecutablePlans, m.planner.Plans)
+}
+
+// RecordPlannerReplanAttempt 记录一次自动重规划尝试。
+func (m *AIMetrics) RecordPlannerReplanAttempt() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.planner.ReplanAttempts++
+}
+
+// RecordPlannerReplanOutcome 记录自动重规划的最终结果。
+func (m *AIMetrics) RecordPlannerReplanOutcome(success bool, exhausted bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if success {
+		m.planner.ReplanSuccess++
+	}
+	if exhausted {
+		m.planner.ReplanExhausted++
+	}
 }
 
 // RecordResume 记录恢复操作的指标。

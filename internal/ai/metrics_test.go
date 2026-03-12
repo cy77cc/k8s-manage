@@ -74,6 +74,26 @@ func TestAIMetricsRecordPlannerRates(t *testing.T) {
 	}
 }
 
+func TestAIMetricsRecordPlannerReplan(t *testing.T) {
+	metrics := NewAIMetrics()
+
+	metrics.RecordPlannerReplanAttempt()
+	metrics.RecordPlannerReplanAttempt()
+	metrics.RecordPlannerReplanOutcome(true, false)
+	metrics.RecordPlannerReplanOutcome(false, true)
+
+	snapshot := metrics.Snapshot()
+	if snapshot.Planner.ReplanAttempts != 2 {
+		t.Fatalf("replan attempts = %d, want 2", snapshot.Planner.ReplanAttempts)
+	}
+	if snapshot.Planner.ReplanSuccess != 1 {
+		t.Fatalf("replan success = %d, want 1", snapshot.Planner.ReplanSuccess)
+	}
+	if snapshot.Planner.ReplanExhausted != 1 {
+		t.Fatalf("replan exhausted = %d, want 1", snapshot.Planner.ReplanExhausted)
+	}
+}
+
 func TestAIMetricsRecordResumeRates(t *testing.T) {
 	metrics := NewAIMetrics()
 

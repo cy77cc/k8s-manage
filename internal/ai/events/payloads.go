@@ -78,8 +78,11 @@ type ClarifyRequiredPayload struct {
 
 // ReplanStartedPayload 重规划开始事件载荷。
 type ReplanStartedPayload struct {
-	Reason         string `json:"reason,omitempty"`
-	PreviousPlanID string `json:"previous_plan_id,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	PreviousPlanID    string `json:"previous_plan_id,omitempty"`
+	Attempt           int    `json:"attempt,omitempty"`
+	MaxAttempts       int    `json:"max_attempts,omitempty"`
+	PreviousErrorCode string `json:"previous_error_code,omitempty"`
 }
 
 // DeltaPayload 增量内容事件载荷。

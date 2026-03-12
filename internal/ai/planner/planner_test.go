@@ -3,11 +3,125 @@ package planner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/cy77cc/OpsPilot/internal/ai/rewrite"
 )
+
+func TestPlanRetriesInvalidOutputAndReturnsRecoveredDecision(t *testing.T) {
+	callCount := 0
+	var attempts []ReplanAttempt
+	p := &Planner{
+		runRawFn: func(_ context.Context, _ string, _ func(string)) (string, error) {
+			callCount++
+			if callCount == 1 {
+				return `{"type":"plan","narrative":"invalid","plan":{"plan_id":"plan-1","goal":"check pod","steps":[{"step_id":"step-1","title":"查看 Pod","expert":"database","task":"查看 mysql-0","mode":"readonly","risk":"low"}]}}`, nil
+			}
+			return `{"type":"plan","narrative":"valid","plan":{"plan_id":"plan-1","goal":"check pod","resolved":{"clusters":[{"id":1,"name":"local"}],"namespace":"default","pods":[{"name":"mysql-0","namespace":"default","cluster_id":1}]},"steps":[{"step_id":"step-1","title":"查看 Pod","expert":"k8s","task":"查看 mysql-0","mode":"readonly","risk":"low","input":{"cluster_id":1,"namespace":"default","pod":"mysql-0"}}]}}`, nil
+		},
+	}
+
+	decision, err := p.Plan(context.Background(), Input{
+		Message: "查看 mysql-0 pod",
+		Rewrite: rewrite.Output{
+			NormalizedGoal: "查看 mysql-0 pod",
+			OperationMode:  "query",
+			ResourceHints: rewrite.ResourceHints{
+				ClusterID:   1,
+				ClusterName: "local",
+				Namespace:   "default",
+			},
+			NormalizedRequest: rewrite.NormalizedRequest{
+				Targets: []rewrite.RequestTarget{{Type: "pod", Name: "mysql-0"}},
+			},
+		},
+		OnReplan: func(info ReplanAttempt) {
+			attempts = append(attempts, info)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if decision.Type != DecisionPlan || decision.Plan == nil {
+		t.Fatalf("decision = %#v, want plan", decision)
+	}
+	if callCount != 2 {
+		t.Fatalf("call count = %d, want 2", callCount)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("replan attempts = %#v, want 1", attempts)
+	}
+	if attempts[0].Attempt != 1 || attempts[0].MaxAttempts != 2 {
+		t.Fatalf("attempt info = %#v", attempts[0])
+	}
+	if attempts[0].PreviousErrorCode != "planning_invalid" {
+		t.Fatalf("previous error code = %q", attempts[0].PreviousErrorCode)
+	}
+}
+
+func TestPlanStopsAfterMaxReplans(t *testing.T) {
+	callCount := 0
+	p := &Planner{
+		runRawFn: func(_ context.Context, _ string, _ func(string)) (string, error) {
+			callCount++
+			return `{"type":"plan","narrative":"invalid","plan":{"plan_id":"plan-1","goal":"check pod","steps":[{"step_id":"step-1","title":"查看 Pod","expert":"database","task":"查看 mysql-0","mode":"readonly","risk":"low"}]}}`, nil
+		},
+	}
+
+	_, err := p.Plan(context.Background(), Input{
+		Message: "查看 mysql-0 pod",
+		Rewrite: rewrite.Output{
+			NormalizedGoal: "查看 mysql-0 pod",
+			OperationMode:  "query",
+		},
+	})
+	if err == nil {
+		t.Fatalf("Plan() error = nil, want PlanningError")
+	}
+	var planningErr *PlanningError
+	if !errors.As(err, &planningErr) {
+		t.Fatalf("Plan() error = %v, want PlanningError", err)
+	}
+	if planningErr.Code != "planning_invalid" {
+		t.Fatalf("code = %q, want planning_invalid", planningErr.Code)
+	}
+	if callCount != 3 {
+		t.Fatalf("call count = %d, want 3", callCount)
+	}
+}
+
+func TestPlanDoesNotRetryModelUnavailableErrors(t *testing.T) {
+	callCount := 0
+	p := &Planner{
+		runRawFn: func(_ context.Context, _ string, _ func(string)) (string, error) {
+			callCount++
+			return "", fmt.Errorf("provider timeout")
+		},
+	}
+
+	_, err := p.Plan(context.Background(), Input{
+		Message: "查看 mysql-0 pod",
+		Rewrite: rewrite.Output{
+			NormalizedGoal: "查看 mysql-0 pod",
+			OperationMode:  "query",
+		},
+	})
+	if err == nil {
+		t.Fatalf("Plan() error = nil, want PlanningError")
+	}
+	var planningErr *PlanningError
+	if !errors.As(err, &planningErr) {
+		t.Fatalf("Plan() error = %v, want PlanningError", err)
+	}
+	if planningErr.Code != "planner_model_unavailable" {
+		t.Fatalf("code = %q, want planner_model_unavailable", planningErr.Code)
+	}
+	if callCount != 1 {
+		t.Fatalf("call count = %d, want 1", callCount)
+	}
+}
 
 func TestEmitPlannerDeltaSupportsIncrementalChunks(t *testing.T) {
 	var emitted []string
