@@ -26,7 +26,7 @@ func TestOrchestratorRunWithRealModel(t *testing.T) {
 		t.Fatalf("NewOrchestrator() error = %v", err)
 	}
 
-	reply, err := o.Run(ctx, "请仅回复 OK")
+	reply, err := o.Run(ctx, "你好")
 	fmt.Println(reply)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)

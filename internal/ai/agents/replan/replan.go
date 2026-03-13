@@ -1,4 +1,4 @@
-package planner
+package replan
 
 import (
 	"context"
@@ -9,17 +9,16 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/chatmodel"
 )
 
-func NewPlanner(ctx context.Context) (adk.Agent, error) {
+func NewReplanner(ctx context.Context) (adk.Agent, error) {
 	model, err := chatmodel.NewChatModel(ctx, chatmodel.ChatModelConfig{
-		Timeout:  60 * time.Second,
+		Timeout: 60*time.Second,
 		Thinking: false,
-		Temp:     0.1,
+		Temp: 0.5,
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	return planexecute.NewPlanner(ctx, &planexecute.PlannerConfig{
-		ToolCallingChatModel: model,
+	return planexecute.NewReplanner(ctx, &planexecute.ReplannerConfig{
+		ChatModel: model,
 	})
 }

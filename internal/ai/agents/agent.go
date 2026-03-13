@@ -12,7 +12,7 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
 )
 
-func New(ctx context.Context, deps common.PlatformDeps) (adk.ResumableAgent, error) {
+func NewAgent(ctx context.Context, deps common.PlatformDeps) (adk.ResumableAgent, error) {
 	planner, err := planner.NewPlanner(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create planner: %w", err)
@@ -23,7 +23,7 @@ func New(ctx context.Context, deps common.PlatformDeps) (adk.ResumableAgent, err
 		return nil, fmt.Errorf("failed to create executor: %w", err)
 	}
 
-	replanner, err := replan.NewReplanAgent(ctx)
+	replanner, err := replan.NewReplanner(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create replanner: %w", err)
 	}

@@ -142,7 +142,7 @@ func consumeEvents(iter *adk.AsyncIterator[*adk.AgentEvent]) (string, bool, erro
 		if event == nil {
 			continue
 		}
-		
+
 		if event.Err != nil {
 			return "", false, event.Err
 		}
