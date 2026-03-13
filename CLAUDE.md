@@ -17,8 +17,12 @@ make run            # Run the compiled binary
 make test                      # Run all Go tests
 make test-coverage             # Generate coverage report
 make test-coverage-check       # Fail if coverage < 40%
-go test ./internal/service/ai/... -v    # Run specific package tests
+make test-ai                   # Run AI service tests
+make test-cluster              # Run cluster service tests
+make test-deployment           # Run deployment service tests
+go test ./internal/ai/... -v   # Run AI module tests
 make web-test                  # Run frontend tests
+make web-test-coverage         # Run frontend tests with coverage
 
 # Database migrations
 make migrate-up      # Apply migrations
@@ -52,22 +56,33 @@ internal/
 
 ### AI Module Architecture (`internal/ai/`)
 
-The AI module implements multi-stage orchestration:
+The AI module uses CloudWeGo Eino ADK with a Plan-Execute-Replan architecture:
 
 ```
-Rewrite → Plan → Execute → Summarize
+internal/ai/
+├── orchestrator.go       # Runner + CheckPointStore for stateful execution
+├── agents/
+│   ├── agent.go          # NewAgent: assembles Planner → Executor → Replanner
+│   ├── planner/          # Task decomposition
+│   ├── executor/         # Tool execution with human-in-the-loop
+│   └── replan/           # Dynamic plan adjustment
+├── chatmodel/            # LLM client initialization
+└── tools/                # Domain-organized tools
+    ├── common/           # PlatformDeps, ToolMeta, ToolResult
+    ├── kubernetes/       # K8s operations
+    ├── host/             # Host management
+    ├── service/          # Service operations
+    ├── monitor/          # Monitoring tools
+    ├── cicd/             # CI/CD operations
+    ├── deployment/       # Deployment tools
+    ├── infrastructure/   # Infrastructure management
+    └── governance/       # Policy & approval tools
 ```
 
-Key components:
-- **orchestrator.go**: Main pipeline orchestrator
-- **rewrite/**: Query rewriting with RAG context
-- **planner/**: Task decomposition
-- **executor/**: Expert-based execution
-- **experts/**: Domain experts (hostops, k8s, service, observability, delivery)
-- **tools/**: Domain-organized tools (kubernetes/, host/, service/, monitor/)
-- **aiv2/**: Single-agent runtime (ChatModelAgent + Runner)
-
-**AIV2** is the new simplified runtime using Eino ADK's `Interrupt/ResumeWithParams` for human-in-the-loop. Toggle via `feature_flags.ai_assistant_v2` in config.
+**Key concepts:**
+- Uses `adk.Runner` with `Interrupt/ResumeWithParams` for human-in-the-loop
+- `feature_flags.ai_assistant_v2: true` enables this runtime (default)
+- Max 20 iterations per conversation turn
 
 ### Frontend Structure
 
@@ -93,8 +108,18 @@ Use `internal/httpx` functions:
 - `httpx.OK(c, data)` - Success (code 1000)
 - `httpx.Fail(c, xcode.XXX, "message")` - Business error
 - `httpx.BindErr(c, err)` - Parameter binding error
+- `httpx.ServerErr(c, err)` - Server error (code 3000)
+- `httpx.NotFound(c, msg)` - Resource not found (code 2005)
 
 Never use `c.JSON()` with inline `gin.H{}`.
+
+**Business error code ranges** (see `internal/xcode/code.go`):
+| Range | Category | Examples |
+|-------|----------|----------|
+| 1000-1999 | Success | 1000 OK, 1001 Created |
+| 2000-2999 | Client errors | 2000 ParamError, 2003 Unauthorized |
+| 3000-3999 | Server errors | 3000 ServerError, 3001 DatabaseError |
+| 4000-4999 | Business errors | 4005 TokenExpired, 4007 PermissionDenied |
 
 ### Code Organization
 
@@ -127,7 +152,7 @@ Example:
 // Package orchestrator 实现 AI 编排核心逻辑。
 //
 // 架构概览:
-//   Rewrite → Plan → Execute → Summarize
+//   Planner → Executor → Replanner
 package ai
 
 // Run 启动编排流水线。
@@ -150,31 +175,30 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest) error
 
 Config file: `configs/config.yaml` (set via `--config` flag)
 
-Environment variables (`.env` file):
-- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`
-- `REDIS_ADDR`, `REDIS_PASSWORD`
-- `LLM_API_KEY`
-- `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_DATABASE`, `MILVUS_COLLECTION`
-- `PROMETHEUS_ADDRESS`
+**Required environment variables** (`.env` file):
+- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` - Database
+- `REDIS_ADDR`, `REDIS_PASSWORD` - Cache
+- `LLM_API_KEY` - LLM provider (qwen/ark/ollama)
+- `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_DATABASE`, `MILVUS_COLLECTION` - Vector DB
+- `PROMETHEUS_ADDRESS` - Metrics endpoint
+- `SERVER_SALT`, `SERVER_SECRET` - Security
+- `SECURITY_ENCRYPTION_KEY` - Data encryption
 
-Feature flags in config:
-- `feature_flags.ai_assistant_v2: true` - Use AIV2 runtime
-- `feature_flags.ai_governed_host_execution: true` - AI approval gates
+**Key feature flags:**
+- `feature_flags.ai_assistant_v2: true` - Use Plan-Execute runtime (default)
+- `feature_flags.ai_governed_host_execution: true` - Require AI approval for host operations
+- `feature_flags.host_health_diagnostics: true` - Enable host health checks
+- `feature_flags.host_maintenance_mode: true` - Enable maintenance mode
 
 ## API Endpoints
 
 - All API routes prefixed with `/api/v1`
 - Frontend served at `/` (embedded in production)
 - SSE streaming for AI chat: `/api/v1/ai/chat`, `/api/v1/ai/resume/step/stream`
+- Metrics endpoint: `/metrics` (when `metrics.enable: true`)
 
-## Specs and Documentation
+## Documentation
 
-Architecture specs are in `openspec/specs/<feature>/spec.md`. Key specs:
-- `code-organization-convention` - Directory structure rules
-- `code-comment-convention` - Comment format requirements
-- `http-response-convention` - API response format
-- `ai-module-architecture` - AI pipeline details
-
-User docs in `docs/`:
-- `docs/ai/` - AI knowledge base for RAG
+- `docs/ai/` - AI knowledge base for RAG (JSONL format)
 - `docs/user/` - Help center and FAQ
+- `openspec/specs/` - Historical feature specifications (completed tasks)
