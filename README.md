@@ -174,3 +174,22 @@ Related docs:
 - 后端在 `/api/v1/ai/chat` 和 `/api/v1/ai/resume/step/stream` 中同时输出兼容 SSE 事件与原生 turn/block 生命周期事件
 - 前端优先用 turn/block 事件驱动状态、工具、审批、证据和最终回答渲染，并保留 legacy message 兼容路径
 - 审批恢复会继续写入原 assistant turn，历史会话回放也会优先读取结构化 `turns` 合同
+
+### AIV2 单 Agent Runtime
+
+AI 网关默认启用 `internal/aiv2`，也可以通过 `feature_flags.ai_assistant_v2` 显式切换：
+
+- 未配置 / `true`：使用新的单 `ChatModelAgent + Runner` runtime
+- `false`：回退到 legacy 多阶段 runtime（`rewrite -> planner -> executor -> summarizer`）
+
+`aiv2` 的设计目标：
+
+- 直接复用现有 host / k8s / service / delivery / observability tools
+- 去掉 `expert agent as tool` 的额外模型跳转
+- 用 Eino ADK `Interrupt / ResumeWithParams` 做 human-in-the-loop 审批
+- 继续复用现有 `/api/v1/ai/chat`、`/api/v1/ai/resume/step`、`/api/v1/ai/resume/step/stream` 和前端 SSE 契约
+
+回滚方式：
+
+- 将 `feature_flags.ai_assistant_v2` 设回 `false`
+- 网关会自动恢复到 legacy runtime，无需改前端路由

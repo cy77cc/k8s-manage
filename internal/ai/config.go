@@ -43,6 +43,7 @@ func CurrentRolloutConfig() RolloutConfig {
 	cfg := RolloutConfig{
 		UseMultiDomainArch:    config.CFG.AI.UseMultiDomainArch,
 		UseTurnBlockStreaming: config.CFG.AI.UseTurnBlockStreaming,
+		UseAssistantV2:        true, // 默认启用 Assistant V2
 		UseModelFirstRuntime:  true, // 默认启用模型优先运行时
 	}
 	// 从功能开关中读取配置 (如果设置)

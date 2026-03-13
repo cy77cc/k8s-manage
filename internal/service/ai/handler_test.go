@@ -204,6 +204,12 @@ func TestSessionHandlersRespectSceneAndExposeThoughtChain(t *testing.T) {
 func TestResumeStepStreamContinuesExistingTurn(t *testing.T) {
 	suite := testutil.NewIntegrationSuite(t)
 	t.Cleanup(suite.Cleanup)
+	prevV2 := config.CFG.FeatureFlags.AIAssistantV2
+	disabled := false
+	config.CFG.FeatureFlags.AIAssistantV2 = &disabled
+	t.Cleanup(func() {
+		config.CFG.FeatureFlags.AIAssistantV2 = prevV2
+	})
 	prevTurnBlock := config.CFG.AI.UseTurnBlockStreaming
 	config.CFG.AI.UseTurnBlockStreaming = true
 	t.Cleanup(func() {

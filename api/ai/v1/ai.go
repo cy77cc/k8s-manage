@@ -31,6 +31,7 @@ type AIReplayTurn struct {
 	Role         string          `json:"role"`
 	Status       string          `json:"status,omitempty"`
 	Phase        string          `json:"phase,omitempty"`
+	RuntimeMode  string          `json:"runtimeMode,omitempty"`
 	TraceID      string          `json:"traceId,omitempty"`
 	ParentTurnID string          `json:"parentTurnId,omitempty"`
 	Blocks       []AIReplayBlock `json:"blocks"`
@@ -44,6 +45,7 @@ type AISession struct {
 	ID        string           `json:"id"`
 	Scene     string           `json:"scene,omitempty"`
 	Title     string           `json:"title"`
+	RuntimeMode string         `json:"runtimeMode,omitempty"`
 	Messages  []map[string]any `json:"messages"`
 	Turns     []AIReplayTurn   `json:"turns,omitempty"`
 	CreatedAt time.Time        `json:"createdAt"`

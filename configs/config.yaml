@@ -139,6 +139,7 @@ feature_flags:
   host_health_diagnostics: true
   host_maintenance_mode: true
   ai_governed_host_execution: true
+  ai_assistant_v2: true
 
 milvus:
   enable: true

@@ -9,6 +9,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	v1 "github.com/cy77cc/OpsPilot/api/ai/v1"
 	coreai "github.com/cy77cc/OpsPilot/internal/ai"
+	aiv2 "github.com/cy77cc/OpsPilot/internal/aiv2"
 	"github.com/cy77cc/OpsPilot/internal/ai/events"
 	"github.com/cy77cc/OpsPilot/internal/ai/runtime"
 	aistate "github.com/cy77cc/OpsPilot/internal/ai/state"
@@ -33,7 +35,14 @@ type HTTPHandler struct {
 	svcCtx       *svc.ServiceContext   // 服务上下文
 	sessions     *aistate.SessionState // 会话状态管理
 	chatStore    *aistate.ChatStore    // 聊天记录存储
-	orchestrator *coreai.Orchestrator  // AI 编排器
+	orchestrator aiRuntime             // AI 编排器
+	aiv2         aiRuntime             // AIV2 单 agent 运行时
+}
+
+type aiRuntime interface {
+	Run(ctx context.Context, req coreai.RunRequest, emit coreai.StreamEmitter) error
+	Resume(ctx context.Context, req coreai.ResumeRequest) (*coreai.ResumeResult, error)
+	ResumeStream(ctx context.Context, req coreai.ResumeRequest, emit coreai.StreamEmitter) (*coreai.ResumeResult, error)
 }
 
 // approvalResponseRequest 审批响应请求结构。
@@ -79,6 +88,7 @@ func NewHTTPHandler(svcCtx *svc.ServiceContext) *HTTPHandler {
 			DB:         svcCtx.DB,
 			Prometheus: svcCtx.Prometheus,
 		}),
+		aiv2: aiv2.NewRuntime(svcCtx),
 	}
 }
 
@@ -103,7 +113,7 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	rollout := coreai.CurrentRolloutConfig()
-	c.Writer.Header().Set("X-AI-Runtime-Mode", rollout.RuntimeMode())
+	c.Writer.Header().Set("X-AI-Runtime-Mode", h.runtimeModeHeader(rollout))
 	c.Writer.Header().Set("X-AI-Compatibility-Enabled", boolHeaderValue(rollout.CompatibilityEnabled()))
 	c.Writer.Header().Set("X-AI-Model-First-Enabled", boolHeaderValue(rollout.ModelFirstEnabled()))
 	c.Writer.Header().Set("X-AI-Turn-Block-Streaming-Enabled", boolHeaderValue(rollout.TurnBlockStreamingEnabled()))
@@ -115,11 +125,17 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 		payload := evt.Data
 		if evt.Type == events.Meta {
 			payload = attachRolloutMetadata(cloneMap(payload), rollout)
+			if h.useAIV2() {
+				payload["runtime_mode"] = "aiv2"
+			}
 		}
 		if recorder != nil {
 			payload = cloneMap(evt.Data)
 			if evt.Type == events.Meta {
 				payload = attachRolloutMetadata(payload, rollout)
+				if h.useAIV2() {
+					payload["runtime_mode"] = "aiv2"
+				}
 			}
 			recorder.HandleEvent(c.Request.Context(), evt.Type, payload)
 			if evt.Type == events.Done {
@@ -136,7 +152,7 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 		Message:        req.Message,
 		RuntimeContext: h.normalizeRuntimeContext(c, req.Context),
 	}
-	if err := h.orchestrator.Run(c.Request.Context(), runReq, emit); err != nil {
+	if err := h.runRuntime(c.Request.Context(), runReq, emit); err != nil {
 		writeSSE(c, flusher, "error", map[string]any{
 			"message": err.Error(),
 		})
@@ -167,7 +183,7 @@ func (h *HTTPHandler) ResumeStepStream(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	rollout := coreai.CurrentRolloutConfig()
-	c.Writer.Header().Set("X-AI-Runtime-Mode", rollout.RuntimeMode())
+	c.Writer.Header().Set("X-AI-Runtime-Mode", h.runtimeModeHeader(rollout))
 	c.Writer.Header().Set("X-AI-Compatibility-Enabled", boolHeaderValue(rollout.CompatibilityEnabled()))
 	c.Writer.Header().Set("X-AI-Model-First-Enabled", boolHeaderValue(rollout.ModelFirstEnabled()))
 	c.Writer.Header().Set("X-AI-Turn-Block-Streaming-Enabled", boolHeaderValue(rollout.TurnBlockStreamingEnabled()))
@@ -177,10 +193,13 @@ func (h *HTTPHandler) ResumeStepStream(c *gin.Context) {
 		payload := cloneMap(evt.Data)
 		if evt.Type == events.Meta {
 			payload = attachRolloutMetadata(payload, rollout)
+			if h.useAIV2() {
+				payload["runtime_mode"] = "aiv2"
+			}
 		}
 		return writeSSE(c, flusher, string(evt.Type), payload)
 	}
-	if _, err := h.orchestrator.ResumeStream(c.Request.Context(), buildResumeRequest(req), emit); err != nil {
+	if _, err := h.resumeRuntimeStream(c.Request.Context(), buildResumeRequest(req), emit); err != nil {
 		writeSSE(c, flusher, "error", map[string]any{
 			"message": err.Error(),
 		})
@@ -194,7 +213,7 @@ func (h *HTTPHandler) handleResume(c *gin.Context, legacyADK bool) {
 		httpx.BindErr(c, err)
 		return
 	}
-	res, err := h.orchestrator.Resume(c.Request.Context(), buildResumeRequest(req))
+	res, err := h.resumeRuntime(c.Request.Context(), buildResumeRequest(req))
 	if err != nil {
 		httpx.ServerErr(c, err)
 		return
@@ -217,6 +236,39 @@ func buildResumeRequest(req approvalResponseRequest) coreai.ResumeRequest {
 		Approved:  req.Approved,
 		Reason:    req.Reason,
 	}
+}
+
+func (h *HTTPHandler) useAIV2() bool {
+	rollout := coreai.CurrentRolloutConfig()
+	return rollout.UseAssistantV2 && h.aiv2 != nil
+}
+
+func (h *HTTPHandler) runtimeModeHeader(rollout coreai.RolloutConfig) string {
+	if h.useAIV2() {
+		return "aiv2"
+	}
+	return rollout.RuntimeMode()
+}
+
+func (h *HTTPHandler) runRuntime(ctx context.Context, req coreai.RunRequest, emit coreai.StreamEmitter) error {
+	if h.useAIV2() {
+		return h.aiv2.Run(ctx, req, emit)
+	}
+	return h.orchestrator.Run(ctx, req, emit)
+}
+
+func (h *HTTPHandler) resumeRuntime(ctx context.Context, req coreai.ResumeRequest) (*coreai.ResumeResult, error) {
+	if h.useAIV2() {
+		return h.aiv2.Resume(ctx, req)
+	}
+	return h.orchestrator.Resume(ctx, req)
+}
+
+func (h *HTTPHandler) resumeRuntimeStream(ctx context.Context, req coreai.ResumeRequest, emit coreai.StreamEmitter) (*coreai.ResumeResult, error) {
+	if h.useAIV2() {
+		return h.aiv2.ResumeStream(ctx, req, emit)
+	}
+	return h.orchestrator.ResumeStream(ctx, req, emit)
 }
 
 func buildResumeResponse(res *coreai.ResumeResult, legacyADK bool) gin.H {
