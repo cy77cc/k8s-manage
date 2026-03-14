@@ -117,6 +117,18 @@ function buildDetailContent(payload: SSEStepUpdateEvent): string | undefined {
   return String(payload.user_visible_summary || payload.summary || payload.error || '').trim() || undefined;
 }
 
+function buildStageContent(payload: SSEStageDeltaEvent): string | undefined {
+  const steps = Array.isArray(payload.steps)
+    ? payload.steps
+      .map((step, index) => `${index + 1}. ${String(step).trim()}`)
+      .filter((line) => line.trim() !== '')
+    : [];
+  if (steps.length > 0) {
+    return steps.join('\n');
+  }
+  return String(payload.contentChunk || payload.content_chunk || payload.detail || payload.summary || '').trim() || undefined;
+}
+
 /**
  * AI 聊天状态管理 Hook
  * 使用现有的 aiApi.chatStream 处理 SSE
@@ -310,9 +322,9 @@ export function useAIChat(options: UseAIChatOptions) {
                       thoughtChain: upsertThoughtStage(item.thoughtChain, {
                         key: stage,
                         status: normalizeThoughtStatus(payload.status, 'loading'),
-                        title: resolveStageTitle(stage),
-                        description: String(payload.summary || payload.user_visible_summary || payload.message || '').trim() || item.thoughtChain?.find((entry) => entry.key === stage)?.description,
-                        content: String(payload.contentChunk || payload.content_chunk || payload.detail || payload.summary || '').trim() || item.thoughtChain?.find((entry) => entry.key === stage)?.content,
+                        title: String(payload.title || '').trim() || resolveStageTitle(stage),
+                        description: String(payload.description || payload.summary || payload.user_visible_summary || payload.message || '').trim() || item.thoughtChain?.find((entry) => entry.key === stage)?.description,
+                        content: buildStageContent(payload) || item.thoughtChain?.find((entry) => entry.key === stage)?.content,
                       }),
                     }
               )));

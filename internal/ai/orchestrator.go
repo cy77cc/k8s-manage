@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -326,10 +327,10 @@ func (o *Orchestrator) streamExecution(ctx context.Context, iter *adk.AsyncItera
 			return nil, fmt.Errorf("failed to parse agent message: %w", err)
 		}
 		if msg != nil && strings.TrimSpace(msg.Content) != "" {
-			text := strings.TrimSpace(msg.Content)
-			if text != lastText {
-				lastText = text
-				emit(o.converter.OnTextDelta(text))
+			chunk, nextText, shouldEmit := computeTextDelta(lastText, msg.Content)
+			lastText = nextText
+			if shouldEmit {
+				emit(o.converter.OnTextDelta(chunk))
 			}
 		}
 		if event.Action != nil && event.Action.Interrupted != nil {
@@ -383,6 +384,39 @@ func (o *Orchestrator) streamExecution(ctx context.Context, iter *adk.AsyncItera
 		Status:    string(state.Status),
 		Message:   lastNonEmpty(lastText, "执行完成。"),
 	}, nil
+}
+
+func computeTextDelta(lastContent, currentContent string) (chunk, next string, emit bool) {
+	current := strings.TrimSpace(currentContent)
+	last := strings.TrimSpace(lastContent)
+	if current == "" {
+		return "", last, false
+	}
+	if looksLikeInternalJSONPayload(current) {
+		return "", last, false
+	}
+	if last == "" {
+		return current, current, true
+	}
+	if current == last {
+		return "", last, false
+	}
+	if strings.HasPrefix(current, last) {
+		return current[len(last):], current, true
+	}
+	return "", last, false
+}
+
+func looksLikeInternalJSONPayload(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") || !strings.HasSuffix(trimmed, "}") {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return false
+	}
+	return len(payload) > 0
 }
 
 func (o *Orchestrator) loadExecution(ctx context.Context, req airuntime.ResumeRequest) (airuntime.ExecutionState, bool, error) {

@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: AI control plane MUST gate mutating execution before executor start
 

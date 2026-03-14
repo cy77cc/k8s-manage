@@ -6,6 +6,7 @@ package tools
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	airuntime "github.com/cy77cc/OpsPilot/internal/ai/runtime"
@@ -19,6 +20,7 @@ import (
 	"github.com/cy77cc/OpsPilot/internal/ai/tools/kubernetes"
 	"github.com/cy77cc/OpsPilot/internal/ai/tools/monitor"
 	"github.com/cy77cc/OpsPilot/internal/ai/tools/service"
+	"github.com/cy77cc/OpsPilot/internal/logger"
 )
 
 // NewCommonTools 创建通用工具集合。
@@ -49,17 +51,7 @@ func NewCommonTools(ctx context.Context, deps common.PlatformDeps) []tool.BaseTo
 }
 
 func NewAllTools(ctx context.Context, deps common.PlatformDeps) []tool.BaseTool {
-	base := []tool.BaseTool{
-		cicd.CICDPipelineList(ctx, deps),
-		deployment.ClusterListInventory(ctx, deps),
-		governance.AuditLogSearch(ctx, deps),
-		governance.PermissionCheck(ctx, deps),
-		host.HostListInventory(ctx, deps),
-		infrastructure.CredentialList(ctx, deps),
-		kubernetes.K8sListResources(ctx, deps),
-		monitor.MonitorAlertRuleList(ctx, deps),
-		service.ServiceCatalogList(ctx, deps),
-	}
+	base := collectAllTools(ctx, deps)
 	registry := NewRegistry(deps)
 	decisionMaker := airuntime.NewApprovalDecisionMaker(airuntime.ApprovalDecisionMakerOptions{
 		ResolveScene: airuntime.NewSceneConfigResolver(nil).Resolve,
@@ -83,19 +75,34 @@ func NewAllTools(ctx context.Context, deps common.PlatformDeps) []tool.BaseTool 
 	for _, current := range base {
 		invokable, ok := current.(tool.InvokableTool)
 		if !ok {
+			logToolWrap("skip_non_invokable", "", "", "", false, nil)
 			out = append(out, current)
 			continue
 		}
 		info, err := invokable.Info(ctx)
 		if err != nil || info == nil {
+			logToolWrap("skip_info_unavailable", "", "", "", false, err)
 			out = append(out, current)
 			continue
 		}
 		spec, ok := registry.Get(info.Name)
 		if !ok {
-			out = append(out, current)
+			mode, risk := inferToolSpec(info.Name)
+			if mode != string(ModeMutating) {
+				logToolWrap("skip_registry_miss", info.Name, mode, risk, false, nil)
+				out = append(out, current)
+				continue
+			}
+			logToolWrap("wrap_registry_fallback", info.Name, mode, risk, true, nil)
+			out = append(out, approvaltools.NewGate(invokable, airuntime.ApprovalToolSpec{
+				Name:        strings.TrimSpace(info.Name),
+				DisplayName: strings.TrimSpace(info.Name),
+				Mode:        mode,
+				Risk:        risk,
+			}, decisionMaker, renderer))
 			continue
 		}
+		logToolWrap("wrap_registry_match", spec.Name, string(spec.Mode), string(spec.Risk), true, nil)
 		out = append(out, approvaltools.NewGate(invokable, airuntime.ApprovalToolSpec{
 			Name:        spec.Name,
 			DisplayName: spec.DisplayName,
@@ -106,4 +113,58 @@ func NewAllTools(ctx context.Context, deps common.PlatformDeps) []tool.BaseTool 
 		}, decisionMaker, renderer))
 	}
 	return out
+}
+
+func collectAllTools(ctx context.Context, deps common.PlatformDeps) []tool.BaseTool {
+	groups := [][]tool.InvokableTool{
+		cicd.NewCICDTools(ctx, deps),
+		deployment.NewDeploymentTools(ctx, deps),
+		governance.NewGovernanceTools(ctx, deps),
+		host.NewHostTools(ctx, deps),
+		infrastructure.NewInfrastructureTools(ctx, deps),
+		kubernetes.NewKubernetesTools(ctx, deps),
+		monitor.NewMonitorTools(ctx, deps),
+		service.NewServiceTools(ctx, deps),
+	}
+	var out []tool.BaseTool
+	for _, group := range groups {
+		for _, item := range group {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func inferToolSpec(name string) (mode string, risk string) {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	mutatingPatterns := []string{"_apply", "_exec", "_delete", "_update", "_create", "_restart", "_scale", "_trigger", "_run"}
+	for _, pattern := range mutatingPatterns {
+		if strings.Contains(normalized, pattern) {
+			if strings.Contains(normalized, "delete") || strings.Contains(normalized, "exec") || strings.Contains(normalized, "restart") {
+				return string(ModeMutating), string(RiskHigh)
+			}
+			return string(ModeMutating), string(RiskMedium)
+		}
+	}
+	return string(ModeReadonly), string(RiskLow)
+}
+
+func logToolWrap(action, name, mode, risk string, wrapped bool, err error) {
+	l := logger.L()
+	if l == nil {
+		return
+	}
+	fields := []logger.Field{
+		logger.String("action", action),
+		logger.String("tool_name", strings.TrimSpace(name)),
+		logger.String("mode", strings.TrimSpace(mode)),
+		logger.String("risk", strings.TrimSpace(risk)),
+		{Key: "wrapped", Value: wrapped},
+	}
+	if err != nil {
+		fields = append(fields, logger.Error(err))
+		l.Warn("ai tool approval wrap evaluation", fields...)
+		return
+	}
+	l.Debug("ai tool approval wrap evaluation", fields...)
 }

@@ -27,7 +27,7 @@ Required turn/block-native event categories:
 - `turn_state`: assistant turn status or phase transition
 - `turn_done`: assistant turn completion
 
-The system MUST treat `delta` as append-only assistant text chunks rather than cumulative snapshots, `stage_delta` MUST carry semantic fields required for UI and persistence consumers, and the turn/block-native events MUST be the semantic source of truth for new UI consumers.
+The system MUST treat `delta` as append-only assistant text chunks rather than cumulative snapshots, and `stage_delta` MUST carry semantic fields required for UI and persistence consumers.
 
 #### Scenario: assistant text delta remains append-only
 - **WHEN** the runtime receives cumulative provider content snapshots during one assistant turn
@@ -46,56 +46,12 @@ The system MUST treat `delta` as append-only assistant text chunks rather than c
 - **THEN** that payload MUST be routed through structured lifecycle events or filtered from the user-visible text stream
 - **AND** the assistant `delta` stream MUST NOT expose raw internal payloads like `{\"steps\": [...]}` as normal prose
 
-#### Scenario: stream exposes turn-and-block lifecycle
-- **WHEN** an assistant turn is created for a streaming request
-- **THEN** the system MUST emit `turn_started`
-- **AND** user-visible status, text, tool, approval, evidence, and error surfaces MUST be represented through block lifecycle events
-- **AND** block updates MUST identify the owning `turn_id` and `block_id`
-
-#### Scenario: unavailable stage is reported explicitly
-- **WHEN** a model-backed stage becomes unavailable during streaming
-- **THEN** the system MUST emit an explicit user-visible failure or unavailability signal for that stage
-- **AND** the stream MUST NOT substitute code-generated semantic content pretending the stage completed successfully
-
 #### Scenario: approval gate appears before execution
 - **WHEN** AI identifies a planned step that requires approval
 - **THEN** the stream MUST emit `approval_required` before the gated step produces `tool_call` or `tool_result`
-- **AND** the system MUST also surface a block-native approval update bound to the active turn
-- **AND** the stream MUST pause in a resumable gate state with runtime step identity for later resume
+- **AND** the stream MUST include resumable runtime identity for that gate
+- **AND** the user-visible lifecycle MUST show the turn waiting for approval rather than already executing the step
 
 #### Scenario: heartbeat maintains connection
 - **WHEN** streaming session lasts longer than 10 seconds
 - **THEN** system emits `heartbeat` events every 10 seconds with timestamp
-
-## MODIFIED Requirements
-
-### Requirement: Checkpoint-based Resume
-
-The system SHALL support resuming interrupted sessions by stable runtime identity rather than model-specific checkpoint semantics, and resumed execution MUST continue the original assistant turn lifecycle through execution and summary.
-
-Resume inputs MUST be based on:
-
-- `session_id`
-- `plan_id`
-- `step_id`
-- approval decision
-
-Compatibility aliases MAY exist for legacy clients, but runtime semantics MUST be plan-step based.
-
-#### Scenario: resume after approval
-- **WHEN** user submits approval for an interrupted session
-- **THEN** system resumes execution for the specific `session_id + plan_id + step_id`
-- **AND** continues emitting SSE events from that runtime point
-- **AND** resumed events MUST continue on the previously active assistant `turn_id`
-- **AND** if execution completes successfully the resumed stream MUST continue into summary before terminal completion
-
-#### Scenario: resume after rejection
-- **WHEN** user rejects approval for an interrupted session
-- **THEN** system returns a rejection message
-- **AND** does not execute the interrupted step
-- **AND** the interrupted assistant turn MUST move into a terminal cancelled or rejected state
-
-#### Scenario: legacy resume compatibility does not redefine runtime identity
-- **WHEN** a legacy client sends a checkpoint-style resume request
-- **THEN** the system MAY translate that request into current runtime identifiers
-- **AND** the canonical runtime identity MUST remain `session_id + plan_id + step_id`

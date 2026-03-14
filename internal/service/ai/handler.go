@@ -26,6 +26,7 @@ import (
 	approvaltools "github.com/cy77cc/OpsPilot/internal/ai/tools/approval"
 	"github.com/cy77cc/OpsPilot/internal/ai/tools/common"
 	"github.com/cy77cc/OpsPilot/internal/httpx"
+	"github.com/cy77cc/OpsPilot/internal/logger"
 	"github.com/cy77cc/OpsPilot/internal/model"
 	"github.com/cy77cc/OpsPilot/internal/svc"
 	"github.com/cy77cc/OpsPilot/internal/xcode"
@@ -152,6 +153,11 @@ func (h *HTTPHandler) Chat(c *gin.Context) {
 
 	scene := normalizedScene(req.Context["scene"])
 	recorder := newChatRecorder(h.chatStore, httpx.UIDFromCtx(c), scene, req.Message)
+	if recorder == nil {
+		if l := logger.L(); l != nil {
+			l.Warn("ai chat recorder unavailable", logger.String("scene", scene))
+		}
+	}
 	emit := func(evt coreai.StreamEvent) bool {
 		payload := evt.Data
 		if evt.Type == events.Meta {

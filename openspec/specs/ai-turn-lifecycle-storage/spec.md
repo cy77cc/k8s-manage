@@ -18,6 +18,11 @@ The persistence model MUST preserve enough identity and lifecycle state for inte
 - **THEN** the system MUST persist the relationship between session, turn, plan step, and pending approval state
 - **AND** a later resume action MUST continue updating that same turn instead of creating an unrelated assistant response
 
+#### Scenario: persistence failure remains diagnosable
+- **WHEN** session, user-message, or assistant-message persistence fails during streaming
+- **THEN** the system MUST emit operational diagnostics sufficient to identify the failed persistence stage
+- **AND** the runtime MUST avoid silently dropping persisted user-visible history without traceable evidence
+
 ### Requirement: session replay MUST reconstruct the same user-visible turn structure
 
 The system MUST be able to reconstruct session history from persisted turn data so historical playback matches the user-visible structure of the original live interaction.
@@ -30,6 +35,14 @@ The system MUST be able to reconstruct session history from persisted turn data 
 ### Requirement: compatibility message projection MUST remain available during rollout
 
 The system MUST support a rollout period where structured turn persistence coexists with legacy message-oriented history consumers.
+
+Compatibility projection MUST preserve both user prompts and assistant output even when runtime metadata arrives asynchronously or partially. Persisting the user prompt MUST NOT depend solely on a later streaming meta event containing a preexisting session identifier.
+
+#### Scenario: user prompt persists before complete stream metadata arrives
+- **WHEN** a chat request is accepted and the user prompt is known before all streaming metadata is available
+- **THEN** the system MUST ensure a stable session identity exists or is created for persistence
+- **AND** the user prompt MUST be persisted without waiting for a later meta event to make persistence possible
+- **AND** later runtime metadata MUST enrich the same persisted session and assistant turn instead of creating a disconnected record
 
 #### Scenario: legacy message consumer remains supported
 - **WHEN** a compatibility client still expects message-oriented session history

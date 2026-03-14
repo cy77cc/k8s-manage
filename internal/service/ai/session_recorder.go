@@ -14,6 +14,8 @@ import (
 
 	"github.com/cy77cc/OpsPilot/internal/ai/events"
 	aistate "github.com/cy77cc/OpsPilot/internal/ai/state"
+	"github.com/cy77cc/OpsPilot/internal/logger"
+	"github.com/google/uuid"
 )
 
 // chatRecorder 聊天记录器，负责记录和渲染对话内容。
@@ -238,15 +240,24 @@ func (r *chatRecorder) handleMeta(ctx context.Context, payload map[string]any) {
 	r.assistantTurnID = firstString(payload["turn_id"], payload["turnId"])
 	r.assistant.TraceID = firstString(payload["trace_id"], payload["traceId"])
 	if r.sessionID == "" {
+		r.sessionID = uuid.NewString()
+		logRecorder("generated_session_id", r, nil)
+	}
+	if err := r.store.EnsureSession(ctx, r.sessionID, r.userID, r.scene, r.title); err != nil {
+		logRecorder("ensure_session_failed", r, err)
 		return
 	}
-	_ = r.store.EnsureSession(ctx, r.sessionID, r.userID, r.scene, r.title)
-	_ = r.store.AppendUserMessage(ctx, r.sessionID, r.userID, r.scene, r.title, r.prompt)
+	if err := r.store.AppendUserMessage(ctx, r.sessionID, r.userID, r.scene, r.title, r.prompt); err != nil {
+		logRecorder("append_user_message_failed", r, err)
+		return
+	}
 	if r.assistantID == "" {
 		id, err := r.store.CreateAssistantMessage(ctx, r.sessionID, r.userID, r.scene, r.title, r.assistantTurnID)
 		if err == nil {
 			r.assistantID = id
+			return
 		}
+		logRecorder("create_assistant_message_failed", r, err)
 	}
 }
 
@@ -254,7 +265,31 @@ func (r *chatRecorder) persist(ctx context.Context) error {
 	if r == nil || r.assistantID == "" || r.sessionID == "" {
 		return nil
 	}
-	return r.store.UpdateAssistantMessage(ctx, r.sessionID, r.assistantID, r.assistantTurnID, r.assistant)
+	err := r.store.UpdateAssistantMessage(ctx, r.sessionID, r.assistantID, r.assistantTurnID, r.assistant)
+	if err != nil {
+		logRecorder("update_assistant_message_failed", r, err)
+	}
+	return err
+}
+
+func logRecorder(action string, r *chatRecorder, err error) {
+	l := logger.L()
+	if l == nil || r == nil {
+		return
+	}
+	fields := []logger.Field{
+		logger.String("action", action),
+		logger.String("session_id", r.sessionID),
+		logger.String("turn_id", r.assistantTurnID),
+		logger.String("scene", r.scene),
+		{Key: "user_id", Value: r.userID},
+	}
+	if err != nil {
+		fields = append(fields, logger.Error(err))
+		l.Warn("ai session recorder event", fields...)
+		return
+	}
+	l.Debug("ai session recorder event", fields...)
 }
 
 func (r *chatRecorder) upsertStage(stage map[string]any) {

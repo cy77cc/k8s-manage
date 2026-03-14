@@ -29,7 +29,13 @@ describe('useAIChat', () => {
   it('maps ThoughtChain stage and step events into assistant message state', async () => {
     vi.mocked(aiApi.chatStream).mockImplementation(async (_params, handlers) => {
       handlers.onMeta?.({ sessionId: 'sess-1' } as any);
-      handlers.onStageDelta?.({ stage: 'plan', status: 'loading', summary: '正在整理执行步骤' } as any);
+      handlers.onStageDelta?.({
+        stage: 'plan',
+        status: 'loading',
+        title: '整理执行步骤',
+        description: '正在整理执行步骤',
+        steps: ['检查当前告警', '确认副本数'],
+      } as any);
       handlers.onStepUpdate?.({
         plan_id: 'plan-1',
         step_id: 'step-1',
@@ -59,7 +65,7 @@ describe('useAIChat', () => {
         title: '整理执行步骤',
         status: 'success',
         description: '正在整理执行步骤',
-        content: '正在整理执行步骤',
+        content: '1. 检查当前告警\n2. 确认副本数',
       }),
       expect.objectContaining({
         key: 'execute',

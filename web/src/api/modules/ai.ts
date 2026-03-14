@@ -228,6 +228,8 @@ export interface SSEStageDeltaEvent {
   user_visible_summary?: string;
   message?: string;
   title?: string;
+  description?: string;
+  steps?: string[];
   replace?: boolean;
 }
 

@@ -81,3 +81,43 @@ func TestChatRecorderPreservesStreamingMarkdownFormatting(t *testing.T) {
 		t.Fatalf("missing text/thinking blocks: %#v", session.Turns[1].Blocks)
 	}
 }
+
+func TestChatRecorderCreatesSessionWhenMetaSessionIDMissing(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:session-recorder-missing-session?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.AIChatSession{}, &model.AIChatMessage{}, &model.AIChatTurn{}, &model.AIChatBlock{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	store := aistate.NewChatStore(db)
+	recorder := newChatRecorder(store, 1, "global", "检查会话丢失")
+	ctx := context.Background()
+
+	recorder.HandleEvent(ctx, events.Meta, map[string]any{
+		"turn_id": "turn-2",
+	})
+	recorder.HandleEvent(ctx, events.Delta, map[string]any{
+		"content_chunk": "已记录",
+	})
+	recorder.HandleEvent(ctx, events.Done, map[string]any{})
+
+	if recorder.sessionID == "" {
+		t.Fatalf("sessionID = empty, want generated id")
+	}
+
+	session, err := store.GetSession(ctx, 1, "global", recorder.sessionID, true)
+	if err != nil {
+		t.Fatalf("GetSession error: %v", err)
+	}
+	if session == nil {
+		t.Fatalf("session = nil, want persisted session")
+	}
+	if len(session.Messages) < 2 {
+		t.Fatalf("messages len = %d, want at least 2", len(session.Messages))
+	}
+	if session.Messages[0].Content != "检查会话丢失" {
+		t.Fatalf("user message = %q, want original prompt", session.Messages[0].Content)
+	}
+}

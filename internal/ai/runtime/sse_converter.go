@@ -14,16 +14,37 @@ func NewSSEConverter() *SSEConverter {
 func (c *SSEConverter) OnPlannerStart(sessionID, planID, turnID string) []StreamEvent {
 	return []StreamEvent{
 		{Type: EventTurnStarted, Data: map[string]any{"turn_id": turnID, "session_id": sessionID}},
-		{Type: EventStageDelta, Data: map[string]any{"stage": "plan", "status": "loading", "plan_id": planID}},
+		{Type: EventStageDelta, Data: map[string]any{
+			"stage":       "plan",
+			"status":      "loading",
+			"plan_id":     planID,
+			"title":       "整理执行步骤",
+			"description": "正在根据你的需求整理执行步骤",
+		}},
 	}
 }
 
-func (c *SSEConverter) OnPlanCreated(planID, content string) StreamEvent {
+func (c *SSEConverter) OnPlanCreated(planID, content string, steps []string) StreamEvent {
 	return StreamEvent{Type: EventStageDelta, Data: map[string]any{
-		"stage":   "plan",
-		"status":  "success",
-		"plan_id": planID,
-		"content": strings.TrimSpace(content),
+		"stage":       "plan",
+		"status":      "success",
+		"plan_id":     planID,
+		"content":     strings.TrimSpace(content),
+		"title":       "执行步骤已整理",
+		"description": "已生成可执行步骤",
+		"steps":       steps,
+	}}
+}
+
+func (c *SSEConverter) OnExecuteStart(stepID, title, toolName string, params map[string]any) StreamEvent {
+	return StreamEvent{Type: EventStageDelta, Data: map[string]any{
+		"stage":       "execute",
+		"status":      "loading",
+		"step_id":     stepID,
+		"title":       strings.TrimSpace(title),
+		"tool_name":   strings.TrimSpace(toolName),
+		"params":      params,
+		"description": firstNonEmptyString(strings.TrimSpace(title), strings.TrimSpace(toolName), "正在执行工具调用"),
 	}}
 }
 
@@ -101,4 +122,13 @@ func (c *SSEConverter) OnError(stage string, err error) StreamEvent {
 		message = err.Error()
 	}
 	return StreamEvent{Type: EventError, Data: map[string]any{"stage": stage, "message": message}}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
