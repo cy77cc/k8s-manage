@@ -40,9 +40,9 @@ import {
 } from './hooks/useConversationRestore';
 import { useScenePrompts } from './hooks/useScenePrompts';
 import { MessageActions } from './components/MessageActions';
-import { ApprovalConfirmationPanel } from './components/ApprovalConfirmationPanel';
+import { ConfirmationPanel } from './components/ConfirmationPanel';
 import { RecommendedActions } from './components/RecommendedActions';
-import { ThoughtChainStageCard } from './components/ThoughtChainStageCard';
+import { ToolCard } from './components/ToolCard';
 import type { DisplayMode } from './turnLifecycle';
 
 const { useToken } = theme;
@@ -363,7 +363,45 @@ const AssistantMessage: React.FC<{
                   key: item.key,
                   title: item.title,
                   description: item.description,
-                  content: <ThoughtChainStageCard stage={item} />,
+                  content: (
+                    <div>
+                      {item.content ? (
+                        <div style={{ marginBottom: item.details?.length ? 8 : 0, whiteSpace: 'pre-wrap' }}>
+                          {item.content}
+                        </div>
+                      ) : null}
+                      {(item.details || []).map((detail) => {
+                        if (detail.kind === 'tool' || detail.tool || detail.params || detail.result) {
+                          return (
+                            <ToolCard
+                              key={detail.id}
+                              tool={{
+                                id: detail.id,
+                                name: detail.tool || detail.label,
+                                status: detail.status === 'error' ? 'error' : detail.status === 'success' ? 'success' : 'running',
+                                summary: detail.content,
+                                params: detail.params,
+                                result: detail.result
+                                  ? {
+                                      ok: detail.result.ok !== false,
+                                      data: detail.result.data,
+                                      error: detail.result.error,
+                                      latency_ms: detail.result.latency_ms,
+                                    }
+                                  : undefined,
+                              }}
+                            />
+                          );
+                        }
+                        return (
+                          <div key={detail.id} style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>
+                            <div style={{ fontWeight: 500 }}>{detail.label}</div>
+                            {detail.content ? <div>{detail.content}</div> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ),
                   footer: item.footer,
                   status: item.status,
                   collapsible: item.collapsible,
@@ -386,7 +424,7 @@ const AssistantMessage: React.FC<{
             <span style={{ color: token.colorTextSecondary }}>正在输入...</span>
           ) : null}
           {effectiveConfirmation ? (
-            <ApprovalConfirmationPanel confirmation={effectiveConfirmation} />
+            <ConfirmationPanel confirmation={effectiveConfirmation} />
           ) : null}
           {recommendations && recommendations.length > 0 && onRecommendationSelect ? (
             <RecommendedActions recommendations={recommendations} onSelect={onRecommendationSelect} />

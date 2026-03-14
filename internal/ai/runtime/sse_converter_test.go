@@ -38,10 +38,13 @@ func TestSSEConverterPlannerStartIncludesSemanticFields(t *testing.T) {
 
 func TestSSEConverterPlanCreatedIncludesSteps(t *testing.T) {
 	converter := NewSSEConverter()
-	evt := converter.OnPlanCreated("plan-1", "plan content", []string{"step a", "step b"})
-	steps, ok := evt.Data["steps"].([]string)
+	evt := converter.OnPlanCreated("plan-1", []PlanStep{
+		{ID: "step-1", Content: "step a", ToolHint: "tool_a"},
+		{ID: "step-2", Content: "step b"},
+	})
+	steps, ok := evt.Data["steps"].([]PlanStep)
 	if !ok {
-		t.Fatalf("steps type = %T, want []string", evt.Data["steps"])
+		t.Fatalf("steps type = %T, want []PlanStep", evt.Data["steps"])
 	}
 	if len(steps) != 2 {
 		t.Fatalf("steps len = %d, want 2", len(steps))
@@ -51,6 +54,9 @@ func TestSSEConverterPlanCreatedIncludesSteps(t *testing.T) {
 	}
 	if evt.Data["description"] == "" {
 		t.Fatalf("description = %#v, want non-empty", evt.Data["description"])
+	}
+	if evt.Data["total"] != 2 {
+		t.Fatalf("total = %#v, want 2", evt.Data["total"])
 	}
 }
 

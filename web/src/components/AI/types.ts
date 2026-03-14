@@ -55,18 +55,7 @@ export interface ToolTrace {
   retry?: boolean;
 }
 
-// 审批请求
-export interface AskRequest {
-  id: string;
-  kind?: 'approval' | 'confirmation' | 'review' | 'interrupt';
-  title: string;
-  description?: string;
-  risk?: string;
-  status?: 'pending' | 'approved' | 'rejected' | 'confirmed' | 'cancelled' | 'expired';
-  details?: Record<string, unknown>;
-}
-
-// 确认请求
+// 确认请求（审批面板使用）
 export interface ConfirmationRequest {
   id: string;
   title: string;
@@ -270,4 +259,26 @@ export interface ErrorInfo {
   code?: string;
   recoverable?: boolean;
   retry?: () => void;
+}
+
+// === Plan-Execute-Replan 可视化类型 ===
+
+// 规划步骤（从后端 plan_generated 事件接收）
+export interface PlanStep {
+  id: string;
+  content: string;
+  tool_hint?: string;
+  status?: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  result?: {
+    ok: boolean;
+    summary?: string;
+    error?: string;
+  };
+}
+
+// 扩展 ThoughtStageItem 以支持步骤列表
+export interface ExtendedThoughtStageItem extends ThoughtStageItem {
+  steps?: PlanStep[];
+  currentStepIndex?: number;
+  replanReason?: string;
 }

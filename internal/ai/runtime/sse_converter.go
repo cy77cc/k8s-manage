@@ -24,15 +24,21 @@ func (c *SSEConverter) OnPlannerStart(sessionID, planID, turnID string) []Stream
 	}
 }
 
-func (c *SSEConverter) OnPlanCreated(planID, content string, steps []string) StreamEvent {
+func (c *SSEConverter) OnPlanCreated(planID string, steps []PlanStep) StreamEvent {
+	// 转换为前端期望的格式
+	stepStrings := make([]string, 0, len(steps))
+	for _, s := range steps {
+		stepStrings = append(stepStrings, s.Content)
+	}
 	return StreamEvent{Type: EventStageDelta, Data: map[string]any{
 		"stage":       "plan",
 		"status":      "success",
 		"plan_id":     planID,
-		"content":     strings.TrimSpace(content),
 		"title":       "执行步骤已整理",
 		"description": "已生成可执行步骤",
-		"steps":       steps,
+		"steps":       steps,        // 结构化步骤列表
+		"step_list":   stepStrings,  // 兼容旧格式
+		"total":       len(steps),
 	}}
 }
 

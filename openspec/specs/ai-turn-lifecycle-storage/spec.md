@@ -44,7 +44,7 @@ Compatibility projection MUST preserve both user prompts and assistant output ev
 - **AND** the user prompt MUST be persisted without waiting for a later meta event to make persistence possible
 - **AND** later runtime metadata MUST enrich the same persisted session and assistant turn instead of creating a disconnected record
 
-#### Scenario: legacy message consumer remains supported
-- **WHEN** a compatibility client still expects message-oriented session history
-- **THEN** the system MUST project persisted turn data or dual-written state into the legacy response shape
-- **AND** the canonical persisted state for new behavior MUST remain turn-and-block based
+#### Scenario: compatibility client continues reading messages
+- **WHEN** a legacy client requests session history
+- **THEN** the system MUST still include message-compatible fields used by the current frontend
+- **AND** the addition of structured turn replay fields MUST NOT remove required existing compatibility fields during rollout

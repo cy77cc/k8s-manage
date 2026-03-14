@@ -27,7 +27,7 @@ Required turn/block-native event categories:
 - `turn_state`: assistant turn status or phase transition
 - `turn_done`: assistant turn completion
 
-The system MUST treat `delta` as append-only assistant text chunks rather than cumulative snapshots, `stage_delta` MUST carry semantic fields required for UI and persistence consumers, and the turn/block-native events MUST be the semantic source of truth for new UI consumers.
+The system MUST treat `delta` as append-only assistant text chunks rather than cumulative snapshots, and `stage_delta` MUST carry semantic fields required for UI and persistence consumers.
 
 #### Scenario: assistant text delta remains append-only
 - **WHEN** the runtime receives cumulative provider content snapshots during one assistant turn
@@ -60,8 +60,8 @@ The system MUST treat `delta` as append-only assistant text chunks rather than c
 #### Scenario: approval gate appears before execution
 - **WHEN** AI identifies a planned step that requires approval
 - **THEN** the stream MUST emit `approval_required` before the gated step produces `tool_call` or `tool_result`
-- **AND** the system MUST also surface a block-native approval update bound to the active turn
-- **AND** the stream MUST pause in a resumable gate state with runtime step identity for later resume
+- **AND** the stream MUST include resumable runtime identity for that gate
+- **AND** the user-visible lifecycle MUST show the turn waiting for approval rather than already executing the step
 
 #### Scenario: heartbeat maintains connection
 - **WHEN** streaming session lasts longer than 10 seconds

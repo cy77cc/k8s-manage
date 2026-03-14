@@ -49,6 +49,13 @@ type StreamEvent struct {
 // StreamEmitter 是事件推送回调。返回 false 表示调用方已断开连接，应停止推送。
 type StreamEmitter func(StreamEvent) bool
 
+// PlanStep 表示执行计划中的单个步骤，用于前端渲染步骤列表。
+type PlanStep struct {
+	ID       string `json:"id"`                 // 步骤唯一标识
+	Content  string `json:"content"`            // 步骤描述文本
+	ToolHint string `json:"tool_hint,omitempty"` // 可能使用的工具名（可选）
+}
+
 // Runtime 是 AI 运行时的顶层接口，由 Orchestrator 实现。
 type Runtime interface {
 	// Run 发起一次新的 AI 对话，通过 emit 流式推送执行事件。
